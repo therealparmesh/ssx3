@@ -22,6 +22,7 @@
 
 #ifdef __EMSCRIPTEN__
 EM_JS_DEPS(ps2_webgpu_futures, "$WebGPU");
+EM_JS_DEPS(ps2_webgpu_frame_clock, "$ps2webFrameClock");
 EM_JS(void, ps2_webgpu_manage_futures, (), {
     const state = WebGPU.Internals;
     if (state.ps2ManagedFutures) return;
@@ -66,11 +67,13 @@ EM_JS(void, ps2_webgpu_queue_frame,
             return { uniform, group, params: new Uint32Array(8) };
         });
         Module.surfacePrimed = false;
-        const present = () => {
+        const clock = ps2webFrameClock();
+        const present = (now) => {
             if (!Module.paused && !Module.failed && !Module.stoppedForReload) {
                 if (Module.surfaceFrames.length >= 2) Module.surfacePrimed = true;
-                const frame = Module.surfacePrimed && Module.surfaceFrames.shift();
+                const frame = Module.surfacePrimed && clock.due(now) && Module.surfaceFrames.shift();
                 if (frame) {
+                    clock.presented(now);
                     try {
                         const across = frame.wide ? 16 : 4, down = frame.wide ? 9 : 3;
                         const scale = Math.min(canvas.width / across, canvas.height / down);
@@ -101,7 +104,7 @@ EM_JS(void, ps2_webgpu_queue_frame,
                         Module.surfaceFree.push(frame);
                     }
                 }
-            }
+            } else clock.reset();
             requestAnimationFrame(present);
         };
         requestAnimationFrame(present);

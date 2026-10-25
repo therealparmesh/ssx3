@@ -20,6 +20,7 @@ void register_generated_code();
 void register_generated_vu();
 
 EM_JS_DEPS(ps2web, "$stringToNewUTF8,$UTF8ToString");
+EM_JS_DEPS(ps2web_frame_clock, "$ps2webFrameClock");
 
 #ifdef PS2_WEB_SYNC_GAME_WORKERS
 EM_JS_DEPS(ps2web_sync_workers, "$Asyncify");
@@ -139,11 +140,13 @@ EM_JS(void, ps2web_blit, (const std::uint32_t *rgba, int width, int height, int 
         Module.blitFrames = [];
         Module.blitFree = [{}, {}, {}];
         Module.blitPrimed = false;
-        const present = () => {
+        const clock = ps2webFrameClock();
+        const present = (now) => {
             if (!Module.paused && !Module.failed) {
                 if (Module.blitFrames.length >= 2) Module.blitPrimed = true;
-                const frame = Module.blitPrimed && Module.blitFrames.shift();
+                const frame = Module.blitPrimed && clock.due(now) && Module.blitFrames.shift();
                 if (frame) {
+                    clock.presented(now);
                     const ctx = Module.blitContext;
                     const across = frame.wide ? 16 : 4, down = frame.wide ? 9 : 3;
                     const scale = Math.min(canvas.width / across, canvas.height / down);
@@ -167,7 +170,7 @@ EM_JS(void, ps2web_blit, (const std::uint32_t *rgba, int width, int height, int 
                     Module.blitFree.push(frame);
                     if (Module.onPresent) Module.onPresent();
                 }
-            }
+            } else clock.reset();
             requestAnimationFrame(present);
         };
         requestAnimationFrame(present);

@@ -89,6 +89,26 @@ Firefox logged rejected `__cf_bm` cookies with an invalid-domain warning. Read-o
 
 This adds hosted Firefox streaming, one completed career qualifier, cross-browser card import and Firefox save/export/reload coverage. It does not establish advancement through later rounds, winning/medal progression, whole-game completion, physical scanout, real-phone performance or physical-controller qualification. Device access remained disabled.
 
+## High-refresh display pacing
+
+A visible Chromium 156.0.8078.47 check on the same desktop at a calibrated 120.0048 Hz exposed uneven delivery hidden by the average FPS counter. The version-32 copy presenter consumed every animation callback, so paired producer frames arrived on adjacent refreshes. A 60.123-second Snow Jam briefing check averaged 59.994 fresh submissions/second but recorded 1,443 gaps of approximately 25 ms, alternating with 8.33 ms gaps. This was an animated briefing, not a race measurement.
+
+Both presentation paths now share a clock that paces the 60 Hz game on faster displays, follows near-integer display multiples without accumulating clock drift, preserves fractional deadlines at rates such as 90/144 Hz, and resets after pause or a stall. The existing three-record queue remains bounded. The asset-free JavaScript regression exercises both actual EM_JS bodies, FIFO image/field ordering, paired production, 50–240 Hz refreshes, nominal clock offsets, overflow, pause/stall recovery, resizing and failure. The published version-32 source fails the new paired-production regression.
+
+The final builds were tested locally in visible Chromium 156.0.8078.47 and Firefox 158.0.1 at 1280×800, device pixel ratio 1, on the desktop above. Each test used the same locally captured Snow Jam briefing fixture with no memory card. The matched Chromium 120 Hz check stayed at the animated briefing; the other checks used the real Space key to enter the race before measurement. These are short gameplay windows, not complete events or fresh career/cold-cache tests. Firefox WebGPU was enabled in its test profile. Calibration used the mean of 180 actual refresh intervals: Firefox's median timestamp delta differed from its actual callback rate because of timestamp noise.
+
+| Window | Seconds | Fresh images/s | Maximum gap, ms | Gaps above 20 ms | Pool underflows / producer replacements |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Chromium primary, 120 Hz briefing | 60.114 | 60.002 | 16.670 | 0 | 0 / 0 |
+| Firefox compatibility, 120 Hz racing | 120.666 | 59.992 | 41.360 | 1 | 3 / 3 |
+| Chromium primary, 60 Hz racing | 60.081 | 60.002 | 16.670 | 0 | 0 / 0 |
+| Firefox compatibility, 60 Hz racing | 60.167 | 60.000 | 17.140 | 0 | 0 / 1 |
+
+Chromium's 120 Hz window delivered all 3,607 measured fresh-image intervals exactly two display refreshes apart. Firefox's 120 Hz window included one isolated 41.36 ms gap and three producer-image replacements; it is not a stall-free result. Both 60 Hz windows delivered a fresh image on every measured refresh. All four windows had zero overwritten submissions, zero audio underruns/full-scale samples, a bounded three-record pool and no application errors or warnings. Minimum queued audio was 72.67 ms (Chromium 120 Hz), 60 ms (Firefox 120 Hz), 54.67 ms (Chromium 60 Hz) and 34 ms (Firefox 60 Hz). No build, upload or profiler ran during measurement; screenshots were outside the windows.
+
+Outside each timed window, real Escape key presses paused the player, acknowledgement froze both native frames and submitted images, and another Escape resumed them. Screenshots verified the animated briefing and actual racing, without an error overlay. The display was returned to its original 60 Hz mode. These measurements count browser submissions, not physical scanout. The remaining Firefox gap, real iPhone/Android performance, physical controllers and wider game progression remain unqualified.
+
+
 ## Repeatable checks
 
 Follow the README for asset-free native checks. Browser scripts use these common environment variables:

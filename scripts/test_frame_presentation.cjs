@@ -1,56 +1,177 @@
-// Exercise the actual EM_JS presenter with deterministic refreshes. The producer
-// alternates late and catch-up frames; delivered pixel values must remain FIFO.
+// Exercise both real EM_JS presenters and their shared clock. Simulated display
+// refreshes must deliver ordered images, even when audio catch-up produces pairs.
 const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, '../host/web.cpp'), 'utf8');
-const marker = 'EM_JS(void, ps2web_blit, (const std::uint32_t *rgba, int width, int height, int wide), {';
-const start = source.indexOf(marker) + marker.length;
-assert(start >= marker.length);
-const body = source.slice(start, source.indexOf('\n});', start));
-const presented = [], callbacks = [], canvases = [];
-class ImageData {
-  constructor(width, height) { this.width = width; this.height = height; this.data = new Uint8ClampedArray(width * height * 4); }
-}
-class OffscreenCanvas {
-  constructor(width, height) {
-    this.width = width; this.height = height; this.pixel = 0;
-    this.context = { putImageData: image => { this.pixel = image.data[0]; }, drawImage: source => { this.pixel = source.pixel; } };
-    canvases.push(this);
+const root = path.join(__dirname, '..');
+
+function makePresenter(kind) {
+  const gpu = kind === 'surface';
+  const source = fs.readFileSync(path.join(root, gpu ? 'runtime/src/gs/gpu/gpu.cpp' : 'host/web.cpp'), 'utf8');
+  const marker = gpu ? 'EM_JS(void, ps2_webgpu_queue_frame,' : 'EM_JS(void, ps2web_blit,';
+  const declaration = source.indexOf(marker);
+  assert(declaration >= 0);
+  const start = source.indexOf(', {', declaration) + 3;
+  assert(start > declaration);
+  const body = source.slice(start, source.indexOf('\n});', start));
+  const presented = [], callbacks = [], canvases = [];
+  let now = -1, notified = 0, uniforms = 0, params;
+  const record = (value, width, height) => presented.push({ value, width, height, time: now });
+  class ImageData {
+    constructor(width, height) { this.width = width; this.height = height; this.data = new Uint8ClampedArray(width * height * 4); }
   }
-  getContext() { return this.context; }
+  class OffscreenCanvas {
+    constructor(width, height) {
+      this.width = width; this.height = height; this.pixel = 0;
+      this.context = { putImageData: image => { this.pixel = image.data[0]; }, drawImage: source => { this.pixel = source.pixel; } };
+      canvases.push(this);
+    }
+    getContext() { return this.context; }
+  }
+  const copy = { fillRect() {}, drawImage(source) { record(source.pixel, source.width, source.height); } };
+  const surface = { getCurrentTexture: () => ({ createView: () => ({}) }) };
+  const pass = { setPipeline() {}, setBindGroup() {}, setViewport() {}, draw() {}, end() {} };
+  const device = {
+    createBuffer: () => (++uniforms, {}), createBindGroup: () => ({}),
+    createCommandEncoder: () => ({ beginRenderPass: () => pass, finish: () => ({}) }),
+  };
+  const queue = { writeBuffer: (buffer, offset, data) => { params = [...data]; }, submit: () => record(params[2], params[0], params[1]) };
+  const objects = [device, queue, { getBindGroupLayout: () => ({}) }, {}];
+  const Module = { canvas: { width: 8, height: 6, getContext: name => name === 'webgpu' ? surface : copy },
+    paused: false, failed: false, onPresent: () => ++notified };
+  const heap = new Uint8Array(64), library = {};
+  const context = vm.createContext({ Module, HEAPU8: heap, ImageData, OffscreenCanvas,
+    WebGPU: { getJsObject: pointer => objects[pointer] }, GPUBufferUsage: { UNIFORM: 1, COPY_DST: 2 },
+    addToLibrary: entries => Object.assign(library, entries), requestAnimationFrame: callback => callbacks.push(callback) });
+  vm.runInContext(fs.readFileSync(path.join(root, 'web/frame-presentation.js'), 'utf8'), context);
+  context.ps2webFrameClock = library.$ps2webFrameClock;
+  const args = gpu ? 'device_ptr,queue_ptr,pipeline_ptr,pixels_ptr,width,height,current,previous,blend,wide' : 'rgba,width,height,wide';
+  const send = vm.runInContext('(function(' + args + '){' + body + '})', context);
+  const ready = () => gpu ? Module.surfaceFrames : Module.blitFrames;
+  const free = () => gpu ? Module.surfaceFree : Module.blitFree;
+  return {
+    Module, presented,
+    produce(value, width = 4, height = 3, wide = 0) {
+      if (gpu) send(0, 1, 2, 3, width, height, value, value - 1, 0, wide);
+      else { heap.fill(value); send(0, width, height, wide); heap.fill(255); }
+    },
+    refresh(time) {
+      assert(time > now, 'Refresh timestamps must increase'); now = time;
+      for (const callback of callbacks.splice(0)) callback(now);
+      assert.equal(callbacks.length, 1, 'Exactly one presentation callback is scheduled');
+      assert.equal(notified, presented.length, 'Only real image submissions notify onPresent');
+      assert.equal(ready().length + free().length, 3, 'The presentation pool never grows');
+      if (gpu) assert.equal(uniforms, 3, 'GPU uniform buffers are allocated only once');
+    },
+    sourceCanvases: () => canvases.length,
+  };
 }
-const ctx = { fillRect() {}, drawImage(source) { presented.push(source.pixel); } };
-const Module = { canvas: { width: 8, height: 6, getContext: () => ctx }, paused: false, failed: false, onPresent: () => ++notified };
-let notified = 0;
-const heap = new Uint8Array(64);
-const context = vm.createContext({ Module, HEAPU8: heap, ImageData, OffscreenCanvas, requestAnimationFrame: f => callbacks.push(f) });
-const blit = vm.runInContext('(function(rgba,width,height,wide){' + body + '})', context);
-const produce = (value, width = 4, height = 3, wide = 0) => { heap.fill(value); blit(0, width, height, wide); heap.fill(255); };
-const refresh = () => { const ready = callbacks.splice(0); for (const f of ready) f(); assert.equal(callbacks.length, 1); };
-produce(1); refresh(); assert.deepEqual(presented, [], 'Prime before consuming the only completed frame');
-produce(2); refresh();
-let next = 3;
-for (let i = 0; i < 100; ++i) {
-  if (i % 2) { produce(next++); produce(next++); }
-  refresh();
+
+for (const kind of ['copy', 'surface']) {
+  const p = makePresenter(kind), step = 1000 / 60;
+  let tick = 0;
+  const refresh = () => p.refresh(tick++ * step);
+  p.produce(1); refresh(); assert.equal(p.presented.length, 0, 'Prime before consuming the only completed frame');
+  p.produce(2); refresh();
+  let next = 3;
+  for (let i = 0; i < 100; ++i) {
+    if (i % 2) { p.produce(next++); p.produce(next++); }
+    refresh();
+  }
+  assert.deepEqual(p.presented.map(f => f.value), Array.from({ length: 101 }, (_, i) => i + 1), kind + ': FIFO with zero/two-frame production at 60 Hz');
+  assert(p.sourceCanvases() <= 4, 'At most three source canvases and one scaling canvas are needed');
+  p.Module.paused = true;
+  for (const value of [150, 151, 152, 153]) p.produce(value);
+  const count = p.presented.length;
+  refresh(); refresh(); assert.equal(p.presented.length, count, 'Pause freezes the displayed image');
+  p.Module.paused = false;
+  refresh(); refresh(); refresh();
+  assert.deepEqual(p.presented.slice(-3).map(f => f.value), [151, 152, 153], 'Overflow keeps the newest three images');
+  refresh(); assert.equal(p.presented.length, count + 3, 'An empty queue must not report a duplicate');
+  p.produce(160, 2, 2, 1); refresh(); assert.equal(p.presented.at(-1).value, 160, 'Size and aspect changes retain the new frame');
+  p.Module.failed = true; p.produce(170); refresh(); assert.equal(p.presented.at(-1).value, 160, 'Failure stops presentation');
+
+  // The old presenter drains a pair on adjacent 120 Hz refreshes, resulting in
+  // alternating 8.3/25 ms image gaps despite its apparently correct 60 fps average.
+  const paired = makePresenter(kind);
+  let value = 1;
+  for (let i = 0; i < 1200; ++i) {
+    if (i % 4 === 0) { paired.produce(value++ % 251); paired.produce(value++ % 251); }
+    paired.refresh(i * 1000 / 120);
+  }
+  assert.equal(paired.presented.length, 600, kind + ': paired producer sustains 60 fps on a 120 Hz display');
+  assert.deepEqual(paired.presented.map(f => f.value), Array.from({ length: 600 }, (_, i) => (i + 1) % 251));
+  for (let i = 1; i < paired.presented.length; ++i)
+    assert(Math.abs(paired.presented[i].time - paired.presented[i - 1].time - step) < 1e-6, kind + ': no 8.3/25 ms catch-up judder');
+
+  for (const hz of [64, 72, 75, 90, 120, 144, 165, 240]) {
+    const paced = makePresenter(kind), expected = [];
+    let produced = 0;
+    const produce = () => { const value = ++produced % 251; expected.push(value); paced.produce(value); };
+    produce(); produce();
+    for (let i = 0; i <= hz * 5; ++i) {
+      while (produced < 2 + Math.floor(i * 60 / hz + 1e-8)) produce();
+      paced.refresh(i * 1000 / hz);
+    }
+    assert.equal(paced.presented.length, 301, kind + ': retain 60 fps rather than rounding deadlines at ' + hz + ' Hz');
+    assert.deepEqual(paced.presented.map(f => f.value), expected.slice(0, 301));
+    for (let i = 1; i < paced.presented.length; ++i) {
+      const ticks = (paced.presented[i].time - paced.presented[i - 1].time) * hz / 1000;
+      assert(ticks >= Math.floor(hz / 60) - 1e-6 && ticks <= Math.ceil(hz / 60) + 1e-6, 'Use adjacent available display intervals');
+    }
+  }
+
+  // Real display clocks are rarely exact nominal multiples. Avoid periodic
+  // third-refresh gaps at 120.005 Hz and follow 119.88 Hz without phase skips.
+  for (const hz of [119.88, 120.0048, 239.76, 240.0096]) {
+    const paced = makePresenter(kind), multiple = Math.round(hz / 60);
+    let produced = 0;
+    for (let i = 0; i < hz * 180; ++i) {
+      while (produced < 2 + Math.floor(i * 60 / hz + 1e-8)) paced.produce(++produced % 251);
+      paced.refresh(i * 1000 / hz);
+      assert.equal(paced.presented.length, Math.floor(i / multiple) + 1, kind + ': follow nominal display multiple without clock-drift skips at ' + hz + ' Hz');
+    }
+  }
+
+  // Uneven timestamp precision must not turn a steady display into a
+  // different refresh rate. Warm up the estimate, then check actual delivery.
+  for (const hz of [60, 120]) {
+    const noisy = makePresenter(kind), multiple = hz / 60;
+    let produced = 0;
+    for (let i = 0; i < hz * 10; ++i) {
+      while (produced < 2 + Math.floor(i / multiple)) noisy.produce(++produced % 251);
+      const timestamp = i * 1000 / hz + [0, -0.25, -0.5][i % 3];
+      noisy.refresh(timestamp);
+      if (i > 100) {
+        const previous = noisy.presented.at(-2), last = noisy.presented.at(-1);
+        const gap = last.time - previous.time;
+        assert(gap >= 1000 / 60 - 0.51 && gap <= 1000 / 60 + 0.51, kind + ': timestamp noise must not skip a display interval');
+      }
+    }
+  }
+
+  for (const hz of [50, 59.94, 60, 60.0024]) {
+    const paced = makePresenter(kind);
+    let produced = 0;
+    for (let i = 0; i < hz * 180; ++i) {
+      while (produced < 2 + Math.floor(i * 60 / hz + 1e-8)) paced.produce(++produced % 251);
+      paced.refresh(i * 1000 / hz);
+      assert.equal(paced.presented.length, i + 1, kind + ': follow near-60/slow refresh directly without phase-drift skips at ' + hz + ' Hz');
+    }
+  }
+
+  // Recover from a long pause/stall at high refresh without draining stale
+  // deadlines as a rapid burst. The queue must remain bounded throughout.
+  for (const pause of [false, true]) {
+    const resumed = makePresenter(kind);
+    resumed.produce(1); resumed.produce(2); resumed.refresh(0);
+    if (pause) { resumed.Module.paused = true; resumed.refresh(1000 / 120); }
+    for (const value of [3, 4, 5, 6]) resumed.produce(value);
+    resumed.Module.paused = false;
+    for (let i = 0; i < 6; ++i) resumed.refresh(1000 + i * 1000 / 120);
+    assert.deepEqual(resumed.presented.map(f => f.value), [1, 4, 5, 6]);
+    assert.deepEqual(resumed.presented.slice(1).map(f => Math.round(f.time * 1000)), [1000000, 1016667, 1033333]);
+  }
 }
-assert.deepEqual(presented, Array.from({ length: 101 }, (_, i) => i + 1), 'Deliver one distinct image per refresh despite alternating zero/two-frame production');
-assert.equal(notified, presented.length, 'Only actual canvas copies count as presented');
-assert(canvases.length <= 4, 'At most three source canvases and one sharp-scaling canvas are needed');
-assert.equal(Module.blitFree.length + Module.blitFrames.length, 3);
-Module.paused = true;
-produce(150); produce(151); produce(152); produce(153);
-const count = presented.length;
-refresh(); refresh(); assert.equal(presented.length, count, 'Pause must freeze the displayed image');
-assert.equal(Module.blitFree.length + Module.blitFrames.length, 3, 'Catch-up never allocates extra frame slots');
-assert.equal(canvases.length, 4, 'Filling the pool uses exactly three source canvases and one sharp-scaling canvas');
-Module.paused = false;
-refresh(); refresh(); refresh();
-assert.deepEqual(presented.slice(-3), [151, 152, 153], 'Overflow bounds latency by keeping the newest three images');
-refresh(); assert.equal(presented.length, count + 3, 'An empty queue must not report a duplicate as a fresh image');
-produce(160, 2, 2, 1); refresh(); assert.equal(presented.at(-1), 160, 'Size and aspect changes retain the new frame');
-Module.failed = true; produce(170); refresh(); assert.equal(presented.at(-1), 160, 'Failure must stop presentation');
-assert.equal(Module.blitFree.length + Module.blitFrames.length, 3);
-console.log('Presentation: ordered pixels, alternating frame delivery, bounded overflow, pause/resume, resize and failure passed');
+console.log('Both presenters: FIFO pixels/fields, 50–240 Hz pacing, paired production, bounded pool, pause/stall recovery, resize and failure passed');
