@@ -51,7 +51,7 @@ Saves use the browser's storage for the current origin. Export the `.ps2` card b
 
 ## Status and testing
 
-Desktop Firefox and Chromium gameplay, keyboard input, simulated controllers, save/recovery flows, startup modes and seven touch layouts have been exercised. Desktop Snow Jam and later-peak checks sustained approximately 60 fresh submissions per second without observed missed refreshes. Hosted HTTPS Gravitude and Firefox Snow Jam qualifier runs also passed frame/audio checks while streaming disc data. Hosted career checks verified card formatting, saving, loading, overwriting, cross-browser import and exact card persistence across reloads. Both presentation paths pace the game on high-refresh displays; source regressions cover nominal clock offsets and uneven browser timestamps. See [validation scope](docs/validation.md) for the hardware, measurements and limits.
+Desktop Firefox and Chromium gameplay, keyboard input, simulated controllers, save/recovery flows, startup modes and seven touch layouts have been exercised. Desktop Snow Jam and later-peak checks sustained approximately 60 fresh submissions per second without observed missed refreshes. Hosted HTTPS Gravitude and Firefox Snow Jam qualifier runs also passed frame/audio checks while streaming disc data. Hosted career checks verified card formatting, saving, loading, overwriting, cross-browser import and exact card persistence across reloads. Both presentation paths pace the game on high-refresh displays; source regressions cover nominal clock offsets and uneven browser timestamps. Render waits also check shared work readiness at refreshes to recover from delayed asynchronous wakes. See [validation scope](docs/validation.md) for the hardware, measurements and limits.
 
 Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
 
@@ -65,6 +65,7 @@ cmake -S . -B build/checks -G Ninja \
 cmake --build build/checks --parallel 2
 ctest --test-dir build/checks --output-on-failure
 node scripts/test_frame_presentation.cjs
+node scripts/test_queue_wait.cjs
 node scripts/test_disc_fetch.cjs
 ```
 

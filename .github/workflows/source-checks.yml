@@ -27,10 +27,11 @@ jobs:
         run: cmake --build build/checks --parallel 2
       - name: Run native regression checks
         run: ctest --test-dir build/checks --output-on-failure
-      - name: Check JavaScript disc fetching and presentation
+      - name: Check browser JavaScript regressions
         run: |
           node scripts/test_disc_fetch.cjs
           node scripts/test_frame_presentation.cjs
+          node scripts/test_queue_wait.cjs
 
   wasm-vu-jit:
     runs-on: ubuntu-24.04

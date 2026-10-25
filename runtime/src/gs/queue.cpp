@@ -41,7 +41,25 @@ void futex_wake(std::atomic<std::uint32_t> &word) { syscall(SYS_futex, reinterpr
 #ifdef __EMSCRIPTEN__
 EM_ASYNC_JS(void, ps2_wait_async, (std::atomic<std::uint32_t> *word, std::uint32_t seen, int timeout_ms), {
     const result = Atomics.waitAsync(HEAP32, word >> 2, seen, timeout_ms);
-    if (result.async) await result.value;
+    if (result.async) await new Promise((resolve) => {
+        let finished = false, refresh = 0;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            cancelAnimationFrame(refresh);
+            resolve();
+        };
+        const check = () => {
+            if (finished) return;
+            // A worker can post work while the browser delays the wait's
+            // promise until its timeout. Observe the shared predicate at the
+            // refresh too, before that delay drains the presentation queue.
+            if ((Atomics.load(HEAP32, word >> 2) >>> 0) !== (seen >>> 0)) finish();
+            else refresh = requestAnimationFrame(check);
+        };
+        refresh = requestAnimationFrame(check);
+        result.value.then(finish);
+    });
 });
 #endif
 
