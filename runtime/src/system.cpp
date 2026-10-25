@@ -602,12 +602,6 @@ double gpu_busy_ms() { return gs::gpu_busy_ms(); }
 
 #ifdef __EMSCRIPTEN__
 EM_ASYNC_JS(void, ps2_browser_yield, (), {
-    if (!Module.yieldPort) {
-        const channel = new MessageChannel();
-        Module.yieldWaiters = [];
-        channel.port1.onmessage = () => Module.yieldWaiters.shift()();
-        Module.yieldPort = channel.port2;
-    }
     await new Promise((resolve) => {
         let finished = false;
         const finish = () => {
@@ -621,8 +615,23 @@ EM_ASYNC_JS(void, ps2_browser_yield, (), {
         // its guarded callback queued so the later message cannot consume
         // a different yield's waiter or resume this one twice.
         const refresh = requestAnimationFrame(finish);
-        Module.yieldWaiters.push(finish);
-        Module.yieldPort.postMessage(0);
+        const post = () => {
+            if (finished) return;
+            if (!Module.yieldPort) {
+                const channel = new MessageChannel();
+                Module.yieldWaiters = [];
+                channel.port1.onmessage = () => Module.yieldWaiters.shift()();
+                Module.yieldPort = channel.port2;
+            }
+            Module.yieldWaiters.push(finish);
+            Module.yieldPort.postMessage(0);
+        };
+        // Let the browser prioritize rendering/input between native slices.
+        // A refresh still wins if task delivery is deferred during input.
+        if (typeof globalThis.scheduler?.yield === 'function') {
+            try { globalThis.scheduler.yield().then(finish, post); }
+            catch (_) { post(); }
+        } else post();
     });
 });
 void browser_yield() { ps2_browser_yield(); }

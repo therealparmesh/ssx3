@@ -68,6 +68,7 @@ cmake --build build/checks --parallel 2
 ctest --test-dir build/checks --output-on-failure
 node scripts/test_frame_presentation.cjs
 node scripts/test_queue_wait.cjs
+node scripts/test_yield_tasks.cjs
 node scripts/test_disc_fetch.cjs
 ```
 

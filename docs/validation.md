@@ -172,6 +172,27 @@ The Firefox run still contained three longer intervals, with a 25.22 ms maximum 
 
 Separate 30-second debug checks on both builds requested the timestamp feature, created its query set and performed positive timing resolves/readbacks, preserving the detailed GPU statistics. Real pause/resume passed in both modes. Both existing browser configuration checks preserved the sentinel file and ignored file-writing/thread-control URL parameters. The first headless primary configuration attempt timed out at its historical frame-number threshold; a diagnostic retry and subsequent unchanged checks on both builds passed. Its initial cause remains unidentified, and the timeout is retained in the evidence. Native compilation, all nine native checks and the three JavaScript regression suites also passed.
 
+## Browser scheduling between native slices
+
+Gap-triggered Firefox profiles with GPU timings disabled showed late refresh callbacks around bursts of short renderer tasks. Direct native-resume instrumentation found no slice above 4 ms within 50 ms of one 24.22 ms image interval. A separate overwrite-buffer benchmark showed no Firefox gain and was rejected. These observations did not justify changing rendering quality or lowering the renderer's work budget.
+
+Native browser yields now prefer the browser's [scheduler yield API](https://developer.mozilla.org/en-US/docs/Web/API/Scheduler/yield) when available. Every yield still races an animation callback, and missing, rejected or throwing scheduling falls back to the existing posted-message path. Late completions retain ownership of their original yield and cannot resume a later one. The asset-free test runs the actual import body and covers these races, fallback FIFO ownership and 512 repeated mixed outcomes. The existing browser regression is retained and explicitly forces the fallback before holding its messages.
+
+A preliminary Firefox probe using scheduler continuations observed 50,315 calls over the document lifetime and recorded no image gaps above 20 ms during a 90.275-second race window. It did not qualify the source build. The final source builds were then checked without a profiler in fresh visible Firefox 158.0.1 and Chromium 156.0.8078.47 windows, on the same desktop at a calibrated 120 Hz, 1280×800 CSS pixels and device pixel ratio 1. Each loaded the no-card Snow Jam briefing snapshot and used real Space input to start the race. Both reached the record screen showing 3:35; the windows include results tails.
+
+| Source-build window | Seconds | Fresh images/s | Maximum gap, ms | Gaps above 20 ms | Producer replacements |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Firefox compatibility / GPU surface | 360.117 | 59.997 | 25.260 | 2 | 3 |
+| Chromium primary / frame copy | 360.819 | 60.002 | 16.670 | 0 | 0 |
+
+Both recorded zero pool underflows, overwritten submissions, audio underruns, full-scale audio samples or application errors/warnings. The bounded pool held three records, the Wasm heap remained 256 MiB and VU interpreter counters stayed zero. Firefox produced 17,286,656 actual 48 kHz stereo frames with at least 57.33 ms queued; Chromium produced 17,319,936 with at least 68.67 ms queued. Both used the native scheduler and executed zero GPU timestamp queries/readbacks. Escape pause froze acknowledged native frames and submitted images, then resumed them outside measurement. Screenshots outside the windows verified gameplay and record screens.
+
+Firefox still recorded two longer intervals. These independent runs do not prove a causal reduction from the previous 33.3 ms maximum, and ordinary browser callback delays remain. No builds, uploads or profilers ran during either qualification window. The display returned to its original 60 Hz mode. Counts measure submissions before paint, not physical scanout; real phones, physical controllers and full-game progression remain unqualified.
+
+Controlled checks also rejected three scheduler calls in Firefox and delayed three Chromium completions by 100 ms. Their 30-second windows retained no intervals above 20 ms, no audio underruns and successful pause/resume. Firefox's maximum interval was 17.26 ms; Chromium's was 16.67 ms. Separate fallback tests disabled the API, held all posted messages for 150 ms and verified stale-message ownership, recovery and pause/resume on both builds. Each advanced two guest frames and one displayed callback during that forced hold, so this test establishes liveness and recovery, not 60 fps under complete task starvation.
+
+Both builds passed eight reload/recovery flows, including cached-page resume, browser refresh, cancellation of a held graphics readback, unfinished-save protection, aspect/resolution changes, card import and runtime-error recovery. Every reload preserved the exact career-card hash. One initial compatibility attempt timed out before Play became ready; a diagnostic retry and a rerun of the normal assertions each passed all eight flows without errors or warnings. The initial cause remains unidentified and its failure log is retained. Future failures now capture loader/runtime state and a screenshot. Native compilation, nine native checks and all four asset-free JavaScript suites passed.
+
 ## Repeatable checks
 
 Follow the README for asset-free native checks. Browser scripts use these common environment variables:

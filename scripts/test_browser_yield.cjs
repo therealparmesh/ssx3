@@ -16,6 +16,10 @@ let browser;
     Object.defineProperty(WebAssembly, 'Suspending', { configurable: true, value: undefined });
     Object.defineProperty(WebAssembly, 'promising', { configurable: true, value: undefined });
   });
+  // Exercise the posted-task fallback even when the native scheduler is available.
+  await context.addInitScript(() => {
+    if (globalThis.scheduler) Object.defineProperty(scheduler, 'yield', { value: undefined, configurable: true });
+  });
   const page = await context.newPage(), errors = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (['error', 'warning'].includes(m.type())) errors.push(m.text()); });

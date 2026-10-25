@@ -32,6 +32,7 @@ jobs:
           node scripts/test_disc_fetch.cjs
           node scripts/test_frame_presentation.cjs
           node scripts/test_queue_wait.cjs
+          node scripts/test_yield_tasks.cjs
 
   wasm-vu-jit:
     runs-on: ubuntu-24.04

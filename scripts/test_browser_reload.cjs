@@ -7,7 +7,7 @@ const base = process.env.SSX3_TEST_URL || 'http://127.0.0.1:8679';
 const output = process.env.SSX3_TEST_OUTPUT || 'build/browser-reload';
 const card = fs.readFileSync(process.env.SSX3_TEST_CARD);
 const hash = crypto.createHash('sha256').update(card).digest('hex');
-let browser;
+let browser, page, failureLog;
 (async () => {
   fs.mkdirSync(output, { recursive: true });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE, headless: true,
@@ -31,7 +31,9 @@ let browser;
       }
     };
   }, process.env.SSX3_TEST_DISABLE_JSPI === '1');
-  const page = await context.newPage(), errors = [], warnings = [], results = [];
+  page = await context.newPage();
+  const errors = [], warnings = [], results = [];
+  failureLog = { errors, warnings };
   page.on('pageerror', e => errors.push(e.stack));
   page.on('console', m => { if (['error', 'warning'].includes(m.type()) && m.text() !== 'Player stopped QA runtime recovery') warnings.push(m.text()); });
   const ready = async () => {
@@ -118,4 +120,27 @@ let browser;
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ results, cardSha256: hash, errors, warnings, compat: process.env.SSX3_TEST_DISABLE_JSPI === '1' }, null, 2));
   console.log('PASS', results.join('; '));
   await browser.close();
-})().catch(async error => { console.error(error); if (browser) await browser.close(); process.exitCode = 1; });
+})().catch(async error => {
+  console.error(error);
+  if (page && !page.isClosed()) {
+    try {
+      const state = await page.evaluate(() => ({
+        url: location.href, title: document.title,
+        status: document.querySelector('#status')?.textContent,
+        help: document.querySelector('#help')?.textContent,
+        button: document.querySelector('#start')?.textContent,
+        compiler: window.qaCompiler,
+        missing: typeof missing === 'undefined' ? null : missing,
+        runtime: typeof Module === 'undefined' ? null : {
+          failed: Module.failed, calledRun: Module.calledRun,
+          gpu: Module.gpuInfo, discBytes: Module.discSize,
+        },
+      }));
+      fs.mkdirSync(output, { recursive: true });
+      fs.writeFileSync(path.join(output, 'failure.json'), JSON.stringify({ state, ...failureLog, error: error.stack }, null, 2));
+      await page.screenshot({ path: path.join(output, 'failure.png'), timeout: 5000 });
+    } catch (diagnosticError) { console.error('Could not capture reload failure:', diagnosticError.message); }
+  }
+  if (browser) await browser.close();
+  process.exitCode = 1;
+});
