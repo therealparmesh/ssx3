@@ -40,6 +40,14 @@ The final revision was cold-booted again in a fresh Firefox profile with both fi
 
 Hosted checks on both release variants verified exact asset selection, cross-origin isolation, creation of the one-shot compiler worker, exclusive memory-card ownership, second-tab rejection, actual frame presentation and acknowledged pause/resume without console warnings or errors. These used headless Chromium's copy presentation path and cover startup behavior, not hosted race cadence or physical scanout. Both identity and gzip forms of all twelve runtime assets were verified against the release manifests before deployment; prior-release fallback remains available.
 
+## Primary Chromium Peak 3 check
+
+The version-32 primary JSPI build was cold-booted in a fresh, visible Chromium 156.0.8078.47 window at 1280×800 on the desktop above. All three runtime asset hashes matched the deployed primary release. This browser selected the GPU frame-copy presentation path. No memory card or save-state fixture was used; the built-in peak unlock enabled course access without qualifying career progression.
+
+A continuous 420.916-second window began at the visually verified Gravitude briefing on Peak 3, covering its countdown, full race and results tail. Simulated standard-controller jump/grab inputs ran only from seconds 20 to 90; the rider finished sixth in 3:57. All 25,256 measured refreshes received a fresh image, approximately 60.002 submissions/second, with zero missed/overwritten submissions, zero animation gaps above 25 ms and a 16.67 ms maximum gap. The three-record copy presentation pool recorded zero underflows or producer replacements. The actual 48 kHz worklet produced 20,206,080 stereo frames without underruns, with at least 34.67 ms queued. The heap held at 307.25 MiB after growth. The VU interpreter counter remained zero and no application errors or warnings were recorded. No build, upload or profiler ran during the window; screenshots were taken before and after it.
+
+This adds current primary-build and Peak 3 event coverage. The timed window includes the results tail and measures browser submissions, not physical scanout. It does not qualify other hardware, every event, physical controllers or real phones. Agent device access was still disabled when this check was run. No runtime change was made for this check.
+
 ## Repeatable checks
 
 Follow the README for asset-free native checks. Browser scripts use these common environment variables:
