@@ -48,6 +48,16 @@ A continuous 420.916-second window began at the visually verified Gravitude brie
 
 This adds current primary-build and Peak 3 event coverage. The timed window includes the results tail and measures browser submissions, not physical scanout. It does not qualify other hardware, every event, physical controllers or real phones. Agent device access was still disabled when this check was run. No runtime change was made for this check.
 
+## Hosted HTTPS race check
+
+The private version-32 primary release was also tested directly from its deployed HTTPS origin in a fresh, visible Chromium context on the same desktop. The normal game worker and disc reader fetched from the hosted service; no local server or save-state fixture supplied the game. Owner-authorized test headers were scoped to that origin, including worker requests. The browser selected its GPU frame-copy path. An initial test-setup attempt using page-only authentication timed out before Play became available and produced no race measurement; the working context-wide setup is the one reported here.
+
+A continuous 421.083-second window began at the visually verified Gravitude briefing and covered countdown, racing and the results tail. Jump/grab inputs ran only during seconds 20–90. Zoe finished sixth in 4:02. All 25,266 measured refreshes received fresh submissions, approximately 60.002/second. There were zero missed/overwritten refreshes, zero callback gaps above 25 ms, a 16.67 ms maximum gap, zero presentation-pool underflows/replacements and no console warnings or errors. The worklet produced 20,213,248 stereo frames without underruns, with at least 48 ms queued. Its elapsed clock differed from the emulated frame clock by about 7.3 ms; this is digital clock agreement, not physical A/V synchronization. The heap held at 307.25 MiB and the VU interpreter counter remained zero.
+
+During measurement, 78 HTTP Range reads completed successfully with status 206, transferring 19.5 MiB. Observed fetch durations ranged from 120.04 to 985.32 ms, with a 193.11 ms median. These timings include the actual hosted route and authenticated test setup; they do not establish performance for other network conditions. No builds, uploads, profiler or screenshot capture ran inside the window.
+
+To check for repeated content as well as fresh submissions, the test sampled a 16×12 grid from each copy-presenter ImageData already available on the CPU, without adding GPU readbacks. During seconds 10–210, all 12,000 sampled image signatures differed from the signature two images earlier, including the check for a repeating two-field pattern. This is a sampled content check over that gameplay interval, not exhaustive pixel comparison or physical scanout verification. No runtime or hosting change was required for this test. Real phones, physical controllers and broader game progression remain unqualified.
+
 ## Repeatable checks
 
 Follow the README for asset-free native checks. Browser scripts use these common environment variables:
