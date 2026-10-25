@@ -58,6 +58,25 @@ During measurement, 78 HTTP Range reads completed successfully with status 206, 
 
 To check for repeated content as well as fresh submissions, the test sampled a 16×12 grid from each copy-presenter ImageData already available on the CPU, without adding GPU readbacks. During seconds 10–210, all 12,000 sampled image signatures differed from the signature two images earlier, including the check for a repeating two-field pattern. This is a sampled content check over that gameplay interval, not exhaustive pixel comparison or physical scanout verification. No runtime or hosting change was required for this test. Real phones, physical controllers and broader game progression remain unqualified.
 
+## Hosted fresh-career save and reload
+
+The version-32 primary release was tested on the same desktop in an isolated, visible Chromium context at 1280×800, directly from its private HTTPS origin. This session used the default inserted memory card, initially unformatted, with no existing card file, imported fixture, save state or unlock code. Normal keyboard and simulated standard-controller inputs entered Conquer The Mountain as Zoe. The game's Save game flow formatted the card and created `PLAYER1` in slot 1, ending with its own **Save complete** acknowledgement.
+
+The 8,650,752-byte card was exported through the player's actual export handler. After the normal player reload, the card restored from browser storage had the identical SHA-256 before Play was pressed. The game's Load game screen recognized `PLAYER1`, completed the load, and returned to a playable Zoe career on the mountain. A subsequent save to the same slot exercised the game's overwrite confirmation and produced **Save complete** again. Its card hash changed, and a second export/reload restored that updated hash exactly. These checks used real game writes rather than JavaScript-created save markers.
+
+Four separately scoped measurements covered the operations below. The windows include menu/acknowledgement tails; they are not continuous racing. Screenshots, hashing, exports and reloads occurred outside the measured windows.
+
+| Window | Seconds | Fresh refreshes | Missed refreshes | Audio underruns |
+| --- | ---: | ---: | ---: | ---: |
+| First format and save | 45.232 | 2,714 | 0 | 0 |
+| Confirmed card load | 25.199 | 1,512 | 0 | 0 |
+| Enter restored career | 40.215 | 2,413 | 0 | 0 |
+| Overwrite existing slot | 30.199 | 1,812 | 0 | 0 |
+
+Each window measured approximately 60.002 fresh browser submissions/second, a 16.67 ms maximum callback gap, zero overwritten submissions, zero presentation-pool underflows/replacements and no application warnings or errors. The actual 48 kHz worklet produced 6,765,056 stereo frames across these windows with zero underruns and at least 44 ms queued. The format/first-save window contained three native save notifications and three successful browser-storage commits; the overwrite window contained one of each. Storage commits took 27.37–28.44 ms without a measured refresh miss. Revisions matched after saving, the native pending flag cleared, and the player displayed **Saved on this device**.
+
+This qualifies fresh-card formatting, one career slot, loading and overwriting on this hosted desktop path. It does not qualify every career event, all six slots, browser-storage durability after OS eviction, physical display/audio timing or real phones. No runtime or hosting change was needed.
+
 ## Repeatable checks
 
 Follow the README for asset-free native checks. Browser scripts use these common environment variables:
