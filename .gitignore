@@ -1,0 +1,32 @@
+# Private game inputs and generated translations/build output
+/games/
+/generated/
+/build/
+/tools/
+/third_party/wgpu-native/
+*.iso
+*.chd
+*.cso
+*.bin
+*.elf
+*.wasm
+*.data
+*.ps2
+*.state
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+*.ppm
+*.wav
+*.mp4
+*.webp
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.openai/
+.sites-state/
+*.log
+__pycache__/

@@ -1,0 +1,13 @@
+// SSX 3 USA, SLUS_207.72, CRC 08FFF00D.
+// Original ELF SHA-1: 77114dfd1205eaccf1ccc18c5f9650097fa78bd8.
+// Omit decorative lens glows/flares and their synchronous depth queries.
+// This changes the visuals. It does not disable the separate OcclusionMan.
+// Patch the ELF before translation; changing RAM alone cannot replace
+// instructions already compiled into the browser's WebAssembly module.
+
+// LensFX prepare/draw entry: return before changing render state.
+patch=0,EE,002E30D0,word,03E00008
+patch=0,EE,002E30D4,word,00000000
+// LensFX visibility callback: return before any GS depth transfers.
+patch=0,EE,002E3130,word,03E00008
+patch=0,EE,002E3134,word,00000000
