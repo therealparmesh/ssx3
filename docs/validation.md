@@ -18,6 +18,14 @@ The game still requires initialization and disc loading; skipping the opening is
 
 Real phones, physical controllers, Bluetooth routing, physical A/V synchronization, exhaustive cutscene coverage and the whole game remain unqualified.
 
+## Latest split-screen check, October 25
+
+The current compatibility build was cold-booted locally in a normal Firefox window on the desktop above, with no card or save-state fixture. Its Wasm/JavaScript/data hashes match the version-31 release manifest. Two simulated standard controllers independently selected Zoe and Moby. The session started from the R&B menu selection; automated jump/grab/confirmation inputs subsequently advanced into Snow Jam. Snow Jam gameplay and its two-player results were verified visually: Player 1 finished in 4:15 and Player 2 in 4:24.
+
+Two measured windows of 300.083 and 120.083 seconds totalled 25,210 refresh intervals over 420.165 seconds, approximately 60.000 fresh submissions/second. They had zero missed/overwritten submissions, zero animation gaps above 25 ms and a 17.48 ms maximum gap. The actual 48 kHz worklet produced 20,170,240 stereo frames without underruns. The heap held at 307.25 MiB and the presentation pool at three records. There were no application errors.
+
+The first window mixes loading, menu confirmations and split-screen gameplay. Inputs were released before the separate finish window, which reached the results screen. Screenshots and the gap between windows are excluded; these are not 420 seconds of continuous racing. The pool counter installed before menu navigation accumulated 64 producer replacements before it was reset, so that unscoped count cannot establish when they occurred. After resetting it, the finish window recorded zero producer replacements or pool underflows, with at least 52.67 ms of audio queued before each measured quantum. This local streaming check does not qualify mobile hardware, hosted network conditions or physical scanout.
+
 ## Repeatable checks
 
 Follow the README for asset-free native checks. Browser scripts use these common environment variables:
@@ -34,4 +42,4 @@ Fixtures contain game data and are intentionally absent. Generate them locally w
 
 `scripts/test_browser_media.cjs` cold-boots through the original opening with `?intro=1` and samples actual stereo AudioWorklet quanta. `SSX3_TEST_END_FRAME=18000` extends its default window. It checks measured cadence, digital clock agreement and pause/audio interruption recovery; it does not qualify physical audio latency.
 
-A fresh asset-free build of this publication snapshot passed all nine native checks and the JavaScript disc-fetch/presentation checks. The configured GitHub Actions job has not run until the repository is uploaded.
+A fresh asset-free build of this publication snapshot passed all nine native checks and the JavaScript disc-fetch/presentation checks. The first [GitHub Actions source run](https://github.com/therealparmesh/ssx3/actions/runs/40199851623) also passed all nine native checks and both JavaScript checks on a clean Ubuntu 24.04 runner using Clang 18/libc++.
