@@ -27,6 +27,13 @@ Path g_paths[4];
 std::uint32_t g_stat = 0;
 std::uint64_t g_tags[4][4];
 std::vector<std::uint8_t> g_masked_path3;
+std::size_t g_masked_path3_begin = 0;
+
+void compact_masked_path3() {
+    if (!g_masked_path3_begin) return;
+    g_masked_path3.erase(g_masked_path3.begin(), g_masked_path3.begin() + static_cast<std::ptrdiff_t>(g_masked_path3_begin));
+    g_masked_path3_begin = 0;
+}
 
 template <typename Sink>
 void walk(Path &p, const std::uint8_t *data, std::uint32_t qwc, Sink &sink) {
@@ -159,6 +166,7 @@ Path g_scan[4];
 void reset() {
     g_stat = 0;
     g_masked_path3.clear();
+    g_masked_path3_begin = 0;
     if (gs::queue::active()) {
         for (Path &p : g_scan) p = Path{};
         gs::queue::post(gs::queue::kGifReset, 0, 0, nullptr, 0);
@@ -178,6 +186,9 @@ void render(int path, const std::uint8_t *data, std::uint32_t qwc) {
 
 void transfer(int path, const std::uint8_t *data, std::uint32_t qwc) {
     if (path == 3 && ((g_stat & 2u) || !g_masked_path3.empty())) {
+        // Reclaim consumed storage only after at least half has been read.
+        // Moving the unread tail for every EOP made long streams quadratic.
+        if (g_masked_path3_begin >= g_masked_path3.size() - g_masked_path3_begin) compact_masked_path3();
         g_masked_path3.insert(g_masked_path3.end(), data, data + static_cast<std::size_t>(qwc) * 16);
         return;
     }
@@ -194,7 +205,7 @@ void scan_signals(int path, const std::uint8_t *data, std::uint32_t qwc) { scan(
 bool busy(int path) { return g_paths[path].active; }
 
 void stats() {
-    std::fprintf(stderr, "[gif] deferred PATH3: %zu bytes\n", g_masked_path3.size());
+    std::fprintf(stderr, "[gif] deferred PATH3: %zu bytes\n", g_masked_path3.size() - g_masked_path3_begin);
     for (int p = 1; p < 4; ++p)
         std::fprintf(stderr, "[gif] path %d tags: packed %llu reglist %llu image %llu\n", p,
                      static_cast<unsigned long long>(g_tags[p][0]), static_cast<unsigned long long>(g_tags[p][1]),
@@ -223,17 +234,24 @@ void set_path3_masked(bool masked) {
         // has used it. Advance through one EOP boundary at a time.
         Path probe = gs::queue::active() ? g_scan[3] : g_paths[3];
         ProbeSink sink;
+        const std::uint8_t *pending = g_masked_path3.data() + g_masked_path3_begin;
+        const std::size_t available = g_masked_path3.size() - g_masked_path3_begin;
         std::size_t bytes = 0;
         do {
-            walk(probe, g_masked_path3.data() + bytes, 1, sink);
+            walk(probe, pending + bytes, 1, sink);
             bytes += 16;
-        } while (bytes < g_masked_path3.size() && (probe.active || !probe.eop));
-        std::vector<std::uint8_t> pending(g_masked_path3.begin(), g_masked_path3.begin() + static_cast<std::ptrdiff_t>(bytes));
-        g_masked_path3.erase(g_masked_path3.begin(), g_masked_path3.begin() + static_cast<std::ptrdiff_t>(bytes));
-        if (!gs::queue::active()) render(3, pending.data(), static_cast<std::uint32_t>(bytes / 16));
+        } while (bytes < available && (probe.active || !probe.eop));
+        if (!gs::queue::active()) render(3, pending, static_cast<std::uint32_t>(bytes / 16));
         else {
-            scan(g_scan[3], pending.data(), static_cast<std::uint32_t>(bytes / 16));
-            gs::queue::post(gs::queue::kGif, 3, static_cast<std::uint32_t>(bytes / 16), pending.data(), static_cast<std::uint32_t>(bytes));
+            scan(g_scan[3], pending, static_cast<std::uint32_t>(bytes / 16));
+            // post copies the payload before returning; the backing storage
+            // remains valid throughout delivery, including a queue wait.
+            gs::queue::post(gs::queue::kGif, 3, static_cast<std::uint32_t>(bytes / 16), pending, static_cast<std::uint32_t>(bytes));
+        }
+        g_masked_path3_begin += bytes;
+        if (g_masked_path3_begin == g_masked_path3.size()) {
+            g_masked_path3.clear();
+            g_masked_path3_begin = 0;
         }
     }
     static const bool trace = std::getenv("PS2_TRACE_PATH3") != nullptr;
@@ -250,8 +268,15 @@ void state(ps2::state::Stream &s) {
     s.pod(g_stat);
     s.pod(g_tags);
     s.pod(g_scan);
-    if (s.version() >= 5) s.vec(g_masked_path3);
-    else if (s.loading()) g_masked_path3.clear();
+    if (s.version() >= 5) {
+        // Keep the version-5 layout: snapshots contain only unread bytes.
+        if (s.saving()) compact_masked_path3();
+        else g_masked_path3_begin = 0;
+        s.vec(g_masked_path3);
+    } else if (s.loading()) {
+        g_masked_path3.clear();
+        g_masked_path3_begin = 0;
+    }
 }
 
 }

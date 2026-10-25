@@ -49,7 +49,9 @@ EM_JS(int, ps2jit_instantiate, (const std::uint8_t *bytes, int size), {
         const module = new WebAssembly.Module(HEAPU8.slice(bytes, bytes + size));
         const env = {memory: wasmMemory};
         for (const entry of WebAssembly.Module.imports(module))
-            if (entry.kind === 'function') env[entry.name] = wasmExports['ps2jit_' + entry.name];
+            // Optimized builds rename raw Wasm exports. KEEPALIVE retains
+            // these public Module bindings in both the host and workers.
+            if (entry.kind === 'function') env[entry.name] = Module['_ps2jit_' + entry.name];
         const instance = new WebAssembly.Instance(module, {env: env});
         return addFunction(instance.exports.run, 'vii');
     } catch (e) {

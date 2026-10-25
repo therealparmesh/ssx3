@@ -68,6 +68,8 @@ node scripts/test_frame_presentation.cjs
 node scripts/test_disc_fetch.cjs
 ```
 
+After installing the pinned Emscripten SDK, run `python3 scripts/test_vu_jit_web.py` for the asset-free optimized Wasm VU compiler and worker check.
+
 If your compiler needs libc++, add `-DCMAKE_CXX_FLAGS=-stdlib=libc++` when configuring. Browser regressions require a local build, a WebGPU-capable browser and locally generated fixtures; instructions are in [validation](docs/validation.md).
 
 ## Credits and license

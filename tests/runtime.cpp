@@ -1,5 +1,6 @@
 #include "gs/gif.hpp"
 #include "gs/gs.hpp"
+#include "gs/queue.hpp"
 #include "gs/gpu/readback_cache.hpp"
 #include "hw.hpp"
 #include "iop/sio2.hpp"
@@ -287,6 +288,73 @@ void path_three_keeps_packet_order() {
     expect(ps2::gs::g_state.texa == 0x11, "GIF reset retained a deferred transfer");
 }
 
+void path_three_streams_append_and_restore(bool queued) {
+    using namespace ps2;
+    const auto drain = [&] {
+        if (!queued) return;
+        gs::queue::Header header;
+        const std::uint8_t *payload;
+        while (gs::queue::render().peek(header, payload)) {
+            if (header.type == gs::queue::kGifReset) gif::render_reset();
+            else {
+                expect(header.type == gs::queue::kGif && header.arg0 == 3 && header.bytes == 32,
+                       "Deferred PATH3 queued the wrong packet boundary");
+                gif::render(3, payload, header.arg1);
+            }
+            gs::queue::render().pop(header);
+        }
+    };
+    gs::render_reset();
+    gif::reset();
+    drain();
+    const auto append = [](unsigned first, unsigned last) {
+        std::vector<Reg128> stream;
+        for (unsigned i = first; i <= last; ++i) {
+            const auto p = packet(i);
+            stream.insert(stream.end(), p.begin(), p.end());
+        }
+        gif::transfer(3, reinterpret_cast<const std::uint8_t *>(stream.data()), static_cast<std::uint32_t>(stream.size()));
+    };
+    const auto release = [&](unsigned expected) {
+        gif::set_path3_masked(false);
+        drain();
+        expect(gs::g_state.texa == expected, "Deferred PATH3 reordered, repeated or skipped a streamed packet");
+    };
+    gif::set_path3_masked(true);
+    append(1, 96);
+    for (unsigned i = 1; i <= 32; ++i) release(i);
+    append(97, 128); // Append with less than half the storage consumed.
+    for (unsigned i = 33; i <= 96; ++i) release(i);
+    append(129, 224); // Reclaim a mostly consumed prefix before appending.
+    for (unsigned i = 97; i <= 120; ++i) release(i);
+    BufferState saved(true);
+    gif::state(saved);
+    std::uint32_t unread = 0;
+    std::memcpy(&unread, saved.data.data() + saved.data.size() - 104 * 32 - 4, 4);
+    expect(unread == 104 * 32, "Version-5 snapshot included consumed PATH3 bytes");
+    release(121);
+    BufferState rewind(false, saved.data);
+    gif::state(rewind); // Loading over a partially consumed queue resets its cursor.
+    for (unsigned i = 121; i <= 224; ++i) release(i);
+    // The queue must own its payload after the backing vector is cleared.
+    gif::set_path3_masked(true);
+    append(225, 225);
+    gif::set_path3_masked(false);
+    append(226, 226);
+    drain();
+    expect(gs::g_state.texa == 226, "Queued PATH3 payload changed after its source was reused");
+    BufferState restored(false, saved.data);
+    gif::state(restored);
+    for (unsigned i = 121; i <= 224; ++i) release(i);
+    release(224); // Empty queue cannot replay the final packet.
+    gif::set_path3_masked(true);
+    append(1, 4);
+    release(1);
+    gif::reset();
+    drain();
+    release(1); // Reset must discard the unread suffix as well as its cursor.
+}
+
 }
 
 int main() {
@@ -298,6 +366,9 @@ int main() {
         clip_flags_arrive_after_four_cycles();
         path_three_keeps_packet_order();
         memory_card_retries_failed_writes();
+        path_three_streams_append_and_restore(false);
+        ps2::gs::queue::render().start(65536);
+        path_three_streams_append_and_restore(true);
         std::puts("PASS: packed colours, STMOD row updates, VU CLIP latency, PATH3 ordering, snapshot and reset");
         return 0;
     } catch (const std::exception &e) {

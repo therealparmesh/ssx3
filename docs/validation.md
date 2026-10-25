@@ -6,7 +6,7 @@ Prior full Snow Jam runs on this runtime line measured approximately 60 fresh br
 
 These counters measure work submitted before paint, not physical display scanout. The presentation queue trades about 33–50 ms of buffering for stable delivery. Restoring original decorative lens effects caused isolated misses in a desktop copy-path test; Performance remains the default.
 
-The final revision passed:
+The startup/control revision passed:
 
 - Nine native checks covering disc-cache reservation, code-generation transitions/VU warmup, runtime behavior, SPU2 audio, IPU streaming and optional visual/startup hooks.
 - Thirteen Firefox functional checks on each build: keyboard/controller assignment, both sticks, opposing directions, Start/fullscreen separation, Escape pause/resume, resizing, refresh, card persistence/import, runtime/device recovery, both startup modes and failed-save protection.
@@ -27,6 +27,14 @@ Two measured windows of 300.083 and 120.083 seconds totalled 25,210 refresh inte
 The first window mixes loading, menu confirmations and split-screen gameplay. Inputs were released before the separate finish window, which reached the results screen. Screenshots and the gap between windows are excluded; these are not 420 seconds of continuous racing. The pool counter installed before menu navigation accumulated 64 producer replacements before it was reset, so that unscoped count cannot establish when they occurred. After resetting it, the finish window recorded zero producer replacements or pool underflows, with at least 52.67 ms of audio queued before each measured quantum. This local streaming check does not qualify mobile hardware, hosted network conditions or physical scanout.
 
 A follow-up cold boot kept the entire R&B Slopestyle event in one 331.034-second measurement, including loading and its results tail. Queue counters were reset at the start and active only during measurement; one-second health samples were retained and no screenshots were taken inside the window. Different jump/grab inputs ran for each controller only between seconds 20 and 90, preventing automatic confirmation at the end. The actual R&B results showed Player 2 winning with 17,901 points and the unattended Player 1 marked DNF. All 19,862 measured refresh intervals had fresh submissions, approximately 60.000/second, with zero missed/overwritten submissions, zero gaps above 25 ms, a 17.28 ms maximum gap and no application errors. The worklet produced 15,890,944 stereo frames with zero underruns and at least 38.67 ms queued; the heap held at 307.25 MiB after loading. One queued producer image was replaced at 22.706 seconds, with no pool underflow or presentation miss. This verifies stable displayed cadence through the event; it does not establish zero producer-image replacement, two successful rider finishes, physical scanout or full-game coverage. No runtime change was made.
+
+## Later-peak texture streaming and runtime VU compilation
+
+Broader testing reached Peak 2's Intimidator through the game's normal single-event menus in a disposable no-card profile, using the built-in peak-unlock code only for course access. A cold version-31 run recorded 53 refreshes without a fresh image over 330.900 seconds, a worst one-second sample of 47.008 submissions/second, and 44,256 missing stereo worklet frames. The player completed the event. A warm replay and a separate profiled cold run did not reproduce that cluster, so these were not deterministic before/after trials.
+
+A diagnostic CPU profile exposed repeated copying inside deferred PATH3 delivery: each released texture packet allocated a temporary vector and shifted the entire remaining queue. Delivery now advances a read cursor, occasionally compacts consumed storage on append, and clears an exhausted queue. Packet boundaries, interleaved PATH1 writes and version-5 snapshot contents retain their existing behavior. Native checks exercise direct and queued delivery, appending before/after compaction, payload ownership after source reuse, partial-queue snapshot restoration and reset.
+
+The expanded event also exposed a separate VU compiler failure: optimized builds rename raw Wasm exports, so constructing dynamic import names against `wasmExports` produced an undefined helper and a link error. The compiler now uses the public KEEPALIVE bindings on `Module`. An asset-free test reproduces the old link failure and verifies compilation, helper imports, integer arithmetic and end-delay memory writes on both the host and a pthread worker. GitHub Actions runs it using the pinned Emscripten SDK.
 
 ## Repeatable checks
 
