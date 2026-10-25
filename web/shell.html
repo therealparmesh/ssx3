@@ -1121,6 +1121,7 @@ var Module = {
     }
     // URL options must not enable native diagnostics that write arbitrary files.
     Module.ENV.PS2_SCALE = scale;
+    Module.ENV.PS2_GPU_TIMESTAMPS = params.has('debug') ? '1' : '0';
     Module.addRunDependency('disc');
     Promise.all([discSize(), chooseGpu()]).then(([bytes, gpu]) => {
       if (Module.failed) return;

@@ -1271,7 +1271,15 @@ bool init(Mode m) {
     WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
     dd.requiredLimits = &limits;
     const WGPUFeatureName timestamp_feature = WGPUFeatureName_TimestampQuery;
-    g_timestamps = wgpuAdapterHasFeature(adapter, WGPUFeatureName_TimestampQuery);
+#ifdef __EMSCRIPTEN__
+    // Timing readbacks add asynchronous GPU work; browser play opts in for diagnostics.
+    bool timestamps = false;
+#else
+    bool timestamps = true;
+#endif
+    if (const char *value = std::getenv("PS2_GPU_TIMESTAMPS")) timestamps = std::atoi(value) != 0;
+    timestamps = timestamps || std::getenv("PS2_GPU_PROFILE") != nullptr;
+    g_timestamps = timestamps && wgpuAdapterHasFeature(adapter, WGPUFeatureName_TimestampQuery);
     if (g_timestamps) {
         dd.requiredFeatureCount = 1;
         dd.requiredFeatures = &timestamp_feature;

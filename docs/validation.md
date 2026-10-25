@@ -153,6 +153,25 @@ Both windows recorded zero presentation-pool underflows, zero overwritten submis
 Firefox retained one 30.44 ms image interval at 39.039 seconds, alongside a 21.46 ms maximum animation-callback interval; prepared images remained available. Chromium's measured image intervals stayed two display refreshes apart. These independent, nondeterministic runs do not establish an improvement or regression in the worst natural callback gap relative to version 34. The controlled tests prove recovery from the reproduced timestamp-drift defect; ordinary callback delays are not eliminated. No build, upload or profiler ran inside either timed window, and screenshots were outside them. The display was returned to its original 60 Hz mode. Measurements count browser submissions before paint, not physical scanout. Real iPhone/Android performance, physical controllers and whole-game progression remain unqualified.
 
 
+## GPU timings only during diagnostics
+
+Normal browser play previously requested the optional timestamp-query device feature, measured compute passes, resolved timestamps and copied/mapped their results even though the normal HUD hid those statistics. An instrumented Firefox baseline counted 2,624 timestamp resolves, measured passes and 16-byte readback maps in 30.083 seconds, approximately 87 of each per second.
+
+Browser builds now collect those timings only with `?debug`. Native runs retain their existing default, and explicit native file profiling still requests timestamps. The URL exposes only the safe debug switch, not file-writing native diagnostics. Actual WebGPU API hooks verified that normal play on both browser paths requested no timestamp feature, created no timestamp query sets and executed zero timestamp resolves, measured passes or timing readback maps.
+
+The optimized builds were checked in fresh, visible windows on the same Linux desktop at a calibrated 120 Hz, 1280×800 CSS pixels and device pixel ratio 1. Each loaded the local no-card Snow Jam briefing snapshot and entered the race with real Space input before measurement. Both reached the record screen showing 3:35; the windows include their results tails.
+
+| Normal-play window | Seconds | Fresh images/s | Maximum gap, ms | Gaps above 20 ms | Producer replacements |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Firefox 158.0.1 compatibility / GPU surface | 360.926 | 59.993 | 33.300 | 3 | 3 |
+| Chromium 156.0.8078.47 primary / frame copy | 360.602 | 60.002 | 16.670 | 0 | 0 |
+
+Both windows had zero presentation-pool underflows, overwritten submissions, audio underruns, full-scale audio samples or application errors/warnings. The pool stayed bounded at three records, the Wasm heap remained 256 MiB and the VU interpreter counter stayed zero. Firefox produced 17,325,568 actual 48 kHz stereo worklet frames with at least 67.33 ms queued; Chromium produced 17,309,696 with at least 68.67 ms queued. Acknowledged Escape pause froze native frames and submitted images, then resumed successfully outside each window. Screenshots outside measurement verified gameplay and the record screens.
+
+The Firefox run still contained three longer intervals, with a 25.22 ms maximum animation-callback interval. These independent observations establish removal of unused profiling operations and check gameplay behavior; they do not establish a speedup or eliminate natural callback delays. No builds, uploads or profilers ran during measurement. The display returned to its original 60 Hz mode. These are browser submissions before paint, not physical scanout, and real phones, physical controllers and whole-game progression remain unqualified.
+
+Separate 30-second debug checks on both builds requested the timestamp feature, created its query set and performed positive timing resolves/readbacks, preserving the detailed GPU statistics. Real pause/resume passed in both modes. Both existing browser configuration checks preserved the sentinel file and ignored file-writing/thread-control URL parameters. The first headless primary configuration attempt timed out at its historical frame-number threshold; a diagnostic retry and subsequent unchanged checks on both builds passed. Its initial cause remains unidentified, and the timeout is retained in the evidence. Native compilation, all nine native checks and the three JavaScript regression suites also passed.
+
 ## Repeatable checks
 
 Follow the README for asset-free native checks. Browser scripts use these common environment variables:

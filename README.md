@@ -47,11 +47,13 @@ Opening logos, the timed legal screen and startup movies are skipped by default.
 
 **Performance** visual effects are the default. **Original (lens flares)** restores the translated decorative effects and can reduce frame rate. Resolution and aspect ratio are also selectable. Settings save the current memory card before reloading; a failed save leaves the old setting intact.
 
+GPU timestamp queries and their asynchronous readbacks are disabled during normal browser play. Add `?debug` to the player URL to enable detailed statistics and GPU timings when the adapter supports them.
+
 Saves use the browser's storage for the current origin. Export the `.ps2` card before changing browser, device or host. Import restores that card on the destination. Concurrent tabs cannot independently overwrite the same origin's card.
 
 ## Status and testing
 
-Desktop Firefox and Chromium gameplay, keyboard input, simulated controllers, save/recovery flows, startup modes and seven touch layouts have been exercised. Recent six-minute Snow Jam checks at 120 Hz averaged approximately 60 fresh submissions per second, with an isolated Firefox callback timing gap. Hosted HTTPS Gravitude and Firefox Snow Jam qualifier runs also passed frame/audio checks while streaming disc data. Hosted career checks verified card formatting, saving, loading, overwriting, cross-browser import and exact card persistence across reloads. Both presentation paths pace the game on high-refresh displays; source regressions cover nominal clock offsets, correlated timestamp drift and display-rate changes. Render waits also check shared work readiness at refreshes to recover from delayed asynchronous wakes. See [validation scope](docs/validation.md) for the hardware, measurements and limits.
+Desktop Firefox and Chromium gameplay, keyboard input, simulated controllers, save/recovery flows, startup modes and seven touch layouts have been exercised. Recent six-minute Snow Jam checks at 120 Hz averaged approximately 60 fresh submissions per second, with occasional Firefox callback timing gaps. Hosted HTTPS Gravitude and Firefox Snow Jam qualifier runs also passed frame/audio checks while streaming disc data. Hosted career checks verified card formatting, saving, loading, overwriting, cross-browser import and exact card persistence across reloads. Both presentation paths pace the game on high-refresh displays; source regressions cover nominal clock offsets, correlated timestamp drift and display-rate changes. Render waits also check shared work readiness at refreshes to recover from delayed asynchronous wakes. See [validation scope](docs/validation.md) for the hardware, measurements and limits.
 
 Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
 
