@@ -3,6 +3,7 @@ addToLibrary({
     var period = 1000 / 60;
     var next = 0, lastRefresh = 0, refreshPeriod = 0;
     var sampleTime = 0, sampleTicks = 0, ticksSincePresented = 0, followDisplay = false;
+    var haveAverage = false;
     return {
       due: function(now) {
         var elapsed = now - lastRefresh;
@@ -16,12 +17,22 @@ addToLibrary({
           if (sampleTicks >= 16) {
             // Firefox timestamps can vary by ~1 ms at a steady refresh rate.
             // Average several refreshes before selecting a display multiple.
-            refreshPeriod = sampleTime / sampleTicks;
+            var measured = sampleTime / sampleTicks;
+            // A short burst of late/early timestamps must not repeatedly
+            // switch a steady 120 Hz display into fractional pacing.
+            // Adopt a real display-rate change promptly, while damping
+            // smaller timestamp fluctuations within the same display mode.
+            refreshPeriod = !haveAverage || Math.abs(measured - refreshPeriod) > refreshPeriod * 0.1
+              ? measured : refreshPeriod * 0.75 + measured * 0.25;
+            haveAverage = true;
             sampleTime = sampleTicks = 0;
           }
         } else {
           sampleTime = sampleTicks = 0;
-          if (elapsed >= period * 2) refreshPeriod = next = 0;
+          if (elapsed >= period * 2) {
+            refreshPeriod = next = 0;
+            haveAverage = false;
+          }
         }
         ticksSincePresented += ticks;
         var multiple = Math.max(1, Math.round(period / refreshPeriod));
@@ -40,6 +51,7 @@ addToLibrary({
       },
       reset: function() {
         next = lastRefresh = refreshPeriod = sampleTime = sampleTicks = ticksSincePresented = 0;
+        haveAverage = false;
       },
     };
   },

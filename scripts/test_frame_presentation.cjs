@@ -161,6 +161,44 @@ for (const kind of ['copy', 'surface']) {
     }
   }
 
+  // Firefox timestamp error can drift across several refreshes, so a short
+  // average temporarily resembles 117/123 Hz despite a steady 120 Hz stream.
+  // There are no missing callbacks: every pair must still deliver one image.
+  const drifting = makePresenter(kind);
+  let produced = 0, lastDelivery = -2;
+  for (let i = 0; i < 2400; ++i) {
+    if (i % 4 === 0) { drifting.produce(++produced % 251); drifting.produce(++produced % 251); }
+    let jitter = 0;
+    if (i >= 240) {
+      const phase = (i - 240) % 64;
+      jitter = phase < 16 ? phase * 0.2 : phase < 48 ? 3.2 - (phase - 16) * 0.2 : -3.2 + (phase - 48) * 0.2;
+    }
+    const count = drifting.presented.length;
+    drifting.refresh(i * 1000 / 120 + jitter);
+    if (drifting.presented.length !== count) {
+      assert.equal(i - lastDelivery, 2, kind + ': gradual timestamp drift must not produce one/three-refresh judder');
+      lastDelivery = i;
+    }
+  }
+  assert.equal(drifting.presented.length, 1200);
+  assert.deepEqual(drifting.presented.map(f => f.value), Array.from({ length: 1200 }, (_, i) => (i + 1) % 251));
+
+  const changing = makePresenter(kind);
+  let time = 0, generated = 0;
+  for (const hz of [60, 120, 90, 144, 240, 60]) {
+    const start = time;
+    for (let i = 0; i < hz * 3; ++i) {
+      const now = start + i * 1000 / hz;
+      while (generated < 2 + Math.floor(now * 60 / 1000 + 1e-8)) changing.produce(++generated % 251);
+      changing.refresh(now);
+    }
+    time += 3000;
+    const settled = changing.presented.filter(frame => frame.time >= start + 1000 && frame.time < time);
+    assert(settled.length >= 118 && settled.length <= 122, kind + ': retain 60 fps after changing to ' + hz + ' Hz');
+    for (let i = 1; i < settled.length; ++i)
+      assert(settled[i].time - settled[i - 1].time <= Math.ceil(hz / 60) * 1000 / hz + 0.51, 'Display-rate changes must not leave the clock in the previous pacing mode');
+  }
+
   // Recover from a long pause/stall at high refresh without draining stale
   // deadlines as a rapid burst. The queue must remain bounded throughout.
   for (const pause of [false, true]) {
@@ -174,4 +212,4 @@ for (const kind of ['copy', 'surface']) {
     assert.deepEqual(resumed.presented.slice(1).map(f => Math.round(f.time * 1000)), [1000000, 1016667, 1033333]);
   }
 }
-console.log('Both presenters: FIFO pixels/fields, 50–240 Hz pacing, paired production, bounded pool, pause/stall recovery, resize and failure passed');
+console.log('Both presenters: FIFO pixels/fields, 50–240 Hz pacing, paired production, timestamp drift and display changes, bounded pool, pause/stall recovery, resize and failure passed');
