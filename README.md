@@ -28,7 +28,7 @@ Keyboard positions follow [PCSX2's layout](https://github.com/PCSX2/pcsx2/blob/m
 | Action | Keys |
 | --- | --- |
 | Move / steer | WASD or arrows |
-| Jump / select (Cross) | Space or K |
+| Crouch / jump / select (Cross) | Space or K |
 | Back (Triangle) | I |
 | Square / Circle | J / L |
 | L1 / R1 | Q / E |
@@ -40,6 +40,8 @@ Keyboard positions follow [PCSX2's layout](https://github.com/PCSX2/pcsx2/blob/m
 | Fullscreen | Alt+Enter or double-click the game |
 
 Z/X remain Cross/Circle aliases. Opposing stick directions cancel to neutral. Browser shortcuts and focused form controls do not become game inputs. Browsers can consume Escape while leaving native fullscreen.
+
+Hold Space/K (Cross) to crouch and charge a jump; release it to jump. J (Square) boosts when adrenaline is available. Q/E/1/3 operate the shoulder grabs while airborne.
 
 ## Startup, graphics and saves
 
