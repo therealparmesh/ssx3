@@ -5,6 +5,7 @@ addToLibrary({
     var sampleTime = 0, sampleTicks = 0, ticksSincePresented = 0, followDisplay = false;
     var haveAverage = false;
     return {
+      refreshInterval: function() { return refreshPeriod || period; },
       due: function(now) {
         var elapsed = now - lastRefresh;
         lastRefresh = now;

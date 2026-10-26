@@ -602,6 +602,17 @@ double gpu_busy_ms() { return gs::gpu_busy_ms(); }
 
 #ifdef __EMSCRIPTEN__
 EM_ASYNC_JS(void, ps2_browser_yield, (), {
+    // With two completed images buffered, give the display its next refresh
+    // before preparing more work. Posted-task continuations can otherwise
+    // occupy the main thread across that refresh despite a healthy queue.
+    // Preserve 40 ms of audio through this wait, the frame-completion wait
+    // and a six-millisecond render slice, using the measured refresh period.
+    if (Module.yieldForBufferedFrames && Module.bufferedSurface && Module.surfaceFrames?.length >= 2 &&
+        Module.audioQueuedMs() >= 40 + 6 + 2 * Module.surfaceClock.refreshInterval()) {
+        Module.yieldResumesLeft = 0;
+        await new Promise(resolve => { Module.surfaceYield = resolve; });
+        return;
+    }
     // A delayed task must not cost another entire refresh for every small
     // native slice. Permit a short, bounded continuation burst after a refresh
     // wins. The count also bounds progress when privacy settings round time.

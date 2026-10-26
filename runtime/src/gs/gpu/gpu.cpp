@@ -68,7 +68,7 @@ EM_JS(void, ps2_webgpu_queue_frame,
             return { uniform, group, params: new Uint32Array(8) };
         });
         Module.surfacePrimed = false;
-        const clock = ps2webFrameClock();
+        const clock = Module.surfaceClock = ps2webFrameClock();
         const present = (now) => {
             if (!Module.paused && !Module.failed && !Module.stoppedForReload) {
                 if (Module.surfaceFrames.length >= 2) Module.surfacePrimed = true;
@@ -107,6 +107,9 @@ EM_JS(void, ps2_webgpu_queue_frame,
                 }
             } else clock.reset();
             requestAnimationFrame(present);
+            const wake = Module.surfaceYield;
+            Module.surfaceYield = undefined;
+            if (wake) wake();
         };
         requestAnimationFrame(present);
     }

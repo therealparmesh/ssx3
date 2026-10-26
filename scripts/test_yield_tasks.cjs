@@ -9,6 +9,17 @@ assert(declaration >= 0);
 const start = source.indexOf(', {', declaration) + 3;
 const body = source.slice(start, source.indexOf('\n});', start));
 const flush = () => new Promise(resolve => setImmediate(resolve));
+const shell = fs.readFileSync(path.join(__dirname, '../web/shell.html'), 'utf8');
+const selector = /yieldForBufferedFrames:\s*(.+),/.exec(shell)[1];
+for (const [mode, userAgent, expected] of [
+  ['asyncify', 'Mozilla/5.0 Chrome/156.0.8078.47 Safari/537.36', true],
+  ['asyncify', 'Mozilla/5.0 Chromium/156.0.8078.47', true],
+  ['jspi', 'Mozilla/5.0 Chrome/156.0.8078.47 Safari/537.36', false],
+  ['asyncify', 'Mozilla/5.0 Gecko/20100101 Firefox/158.0', false],
+  ['asyncify', 'Mozilla/5.0 Version/26.0 Mobile Safari/604.1', false],
+  ['asyncify', 'Mozilla/5.0 CriOS/156.0 Mobile Safari/604.1', false],
+]) assert.equal(vm.runInNewContext('(' + selector.replaceAll('@PS2_WEB_ASYNC@', mode) + ')', {navigator:{userAgent}}), expected,
+  'Enable the optional wait only on the qualified Chromium compatibility path');
 
 function setup(mode) {
   const Module = {}, refreshes = new Map(), timers = new Map(), messages = [], tasks = [];
@@ -40,6 +51,7 @@ function setup(mode) {
     completed: () => completed, channels: () => channels,
     advance: delta => { now += delta; },
     retry() { const ready = [...timers.values()]; timers.clear(); for (const callback of ready) callback(); },
+    surfaceRefresh() { const wake = Module.surfaceYield; Module.surfaceYield = undefined; if (wake) wake(); },
     refresh() {
       const ready = [...refreshes.values()]; refreshes.clear();
       for (const callback of ready) callback(now);
@@ -150,6 +162,42 @@ function setup(mode) {
   assert.equal(direct.timers.size, 0, 'Prepared GPU surfaces need no readback recovery timer');
   direct.deliver(); await flush(); assert.equal(direct.completed(), 1);
   direct.deliver(); await gpuNext;
+
+  const buffered = setup('native');
+  Object.assign(buffered.Module, { yieldForBufferedFrames:true, bufferedSurface:true, surfaceFrames:[{},{}], audioQueuedMs:()=>80,
+    surfaceClock:{refreshInterval:()=>1000/60},
+    yieldResumesLeft:8, yieldResumeUntil:103 });
+  const displayFirst = buffered.yield();
+  assert.equal(buffered.tasks.length, 0, 'A healthy two-image queue must yield to display rather than another posted task');
+  assert.equal(buffered.refreshes.size, 0, 'Capacity wait uses the existing presenter callback');
+  assert.equal(typeof buffered.Module.surfaceYield, 'function', 'The presenter owns the pending capacity wake');
+  assert.equal(buffered.Module.yieldResumesLeft, 0, 'Capacity wait must override the continuation burst');
+  await flush(); assert.equal(buffered.completed(), 0);
+  buffered.surfaceRefresh(); await displayFirst;
+  assert.equal(buffered.completed(), 1);
+  buffered.Module.surfaceFrames.pop();
+  const refill = buffered.yield();
+  assert.equal(buffered.tasks.length, 1, 'A one-image queue must prepare work promptly');
+  buffered.tasks.shift().resolve(); await refill;
+  buffered.Module.surfaceFrames.push({}); buffered.Module.audioQueuedMs = () => 79;
+  const catchUp = buffered.yield();
+  assert.equal(buffered.tasks.length, 1, 'Audio below the reserve for two refreshes and a render slice must refill promptly');
+  buffered.tasks.shift().resolve(); await catchUp;
+  assert.equal(buffered.refreshes.size, 0);
+  buffered.Module.yieldForBufferedFrames = false; buffered.Module.audioQueuedMs = () => 80;
+  const primary = buffered.yield();
+  assert.equal(buffered.tasks.length, 1, 'The primary build retains its existing task scheduling');
+  buffered.tasks.shift().resolve(); await primary;
+  buffered.Module.yieldForBufferedFrames = true;
+  buffered.Module.surfaceClock.refreshInterval = () => 1000/120;
+  buffered.Module.audioQueuedMs = () => 64;
+  const fasterDisplay = buffered.yield();
+  assert.equal(buffered.tasks.length, 0, 'A faster display needs less reserve for its two refresh waits');
+  buffered.surfaceRefresh(); await fasterDisplay;
+  buffered.Module.audioQueuedMs = () => 62;
+  const reserveLow = buffered.yield();
+  assert.equal(buffered.tasks.length, 1, 'A fast display must also retain its calculated audio reserve');
+  buffered.tasks.shift().resolve(); await reserveLow;
 
   const deferred = setup('missing');
   for (let i = 0; i < 512; ++i) {

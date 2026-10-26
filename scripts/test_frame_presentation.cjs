@@ -82,9 +82,12 @@ for (const kind of ['copy', 'surface']) {
   assert.deepEqual(p.presented.map(f => f.value), Array.from({ length: 101 }, (_, i) => i + 1), kind + ': FIFO with zero/two-frame production at 60 Hz');
   assert(p.sourceCanvases() <= 4, 'At most three source canvases and one scaling canvas are needed');
   p.Module.paused = true;
+  let pausedWake = 0;
+  if (kind === 'surface') p.Module.surfaceYield = () => ++pausedWake;
   for (const value of [150, 151, 152, 153]) p.produce(value);
   const count = p.presented.length;
   refresh(); refresh(); assert.equal(p.presented.length, count, 'Pause freezes the displayed image');
+  if (kind === 'surface') assert.equal(pausedWake, 1, 'Pause releases a pending capacity wake without submitting an image');
   p.Module.paused = false;
   refresh(); refresh(); refresh();
   assert.deepEqual(p.presented.slice(-3).map(f => f.value), [151, 152, 153], 'Overflow keeps the newest three images');
@@ -95,12 +98,19 @@ for (const kind of ['copy', 'surface']) {
   // The old presenter drains a pair on adjacent 120 Hz refreshes, resulting in
   // alternating 8.3/25 ms image gaps despite its apparently correct 60 fps average.
   const paired = makePresenter(kind);
+  let released = 0;
+  if (kind === 'surface') paired.Module.surfaceYield = () => {
+    assert.equal(paired.presented.length, 1, 'Submit the prepared image before waking native preparation');
+    assert.equal(paired.Module.surfaceYield, undefined, 'Retire the wake before resuming its producer');
+    ++released;
+  };
   let value = 1;
   for (let i = 0; i < 1200; ++i) {
     if (i % 4 === 0) { paired.produce(value++ % 251); paired.produce(value++ % 251); }
     paired.refresh(i * 1000 / 120);
   }
   assert.equal(paired.presented.length, 600, kind + ': paired producer sustains 60 fps on a 120 Hz display');
+  if (kind === 'surface') assert.equal(released, 1, 'The presenter releases a capacity suspension exactly once');
   assert.deepEqual(paired.presented.map(f => f.value), Array.from({ length: 600 }, (_, i) => (i + 1) % 251));
   for (let i = 1; i < paired.presented.length; ++i)
     assert(Math.abs(paired.presented[i].time - paired.presented[i - 1].time - step) < 1e-6, kind + ': no 8.3/25 ms catch-up judder');
@@ -110,11 +120,13 @@ for (const kind of ['copy', 'surface']) {
     let produced = 0;
     const produce = () => { const value = ++produced % 251; expected.push(value); paced.produce(value); };
     produce(); produce();
+    if (kind === 'surface') assert.equal(paced.Module.surfaceClock.refreshInterval(), step, 'Before calibration the audio reserve assumes a 60 Hz refresh');
     for (let i = 0; i <= hz * 5; ++i) {
       while (produced < 2 + Math.floor(i * 60 / hz + 1e-8)) produce();
       paced.refresh(i * 1000 / hz);
     }
     assert.equal(paced.presented.length, 301, kind + ': retain 60 fps rather than rounding deadlines at ' + hz + ' Hz');
+    if (kind === 'surface') assert(Math.abs(paced.Module.surfaceClock.refreshInterval() - 1000 / hz) < 1e-6, 'The audio reserve uses the measured display period at ' + hz + ' Hz');
     assert.deepEqual(paced.presented.map(f => f.value), expected.slice(0, 301));
     for (let i = 1; i < paced.presented.length; ++i) {
       const ticks = (paced.presented[i].time - paced.presented[i - 1].time) * hz / 1000;
