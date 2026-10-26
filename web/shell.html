@@ -404,6 +404,7 @@ function stopCompiler() {
 }
 let stopForReload = null;
 function stopPlayerForReload() {
+  cancelStartup();
   cancelResume();
   if (stopForReload) return stopForReload;
   stopForReload = (async () => {
@@ -432,6 +433,7 @@ function failPlayer(message, error) {
   // Deliberate terminal teardown can reject suspended Wasm work after its
   // thread state is cleared. It must not revive the old failure UI.
   if (Module.failed || Module.stoppedForReload) return;
+  cancelStartup();
   cancelResume();
   Module.failed = true;
   clearTimeout(startupTimer);
@@ -723,14 +725,24 @@ class Output extends AudioWorkletProcessor {
 }
 registerProcessor('ps2-output', Output);`;
 
-let audio = null, node = null, pendingResume = null;
+let audio = null, node = null, pendingResume = null, pendingStartup = null;
 function cancelResume() {
   if (!pendingResume) return;
   pendingResume = null;
   if (audio) audio.suspend().catch(() => {});
   document.getElementById('start').disabled = false;
 }
+function cancelStartup() {
+  if (!pendingStartup) return;
+  const request = pendingStartup;
+  pendingStartup = null;
+  if (request.url) { URL.revokeObjectURL(request.url); request.url = null; }
+  if (request.audio) request.audio.close().catch(() => {});
+  if (audio === request.audio) { audio = null; node = null; }
+  document.getElementById('start').disabled = false;
+}
 function pausePlayer() {
+  cancelStartup();
   // A hidden tab can interrupt audio recovery while the game is still paused.
   // Invalidate that request even when there is no new native pause to send.
   cancelResume();
@@ -751,23 +763,28 @@ function pausePlayer() {
 }
 document.getElementById('pause').addEventListener('click', pausePlayer);
 document.addEventListener('visibilitychange', () => { if (document.hidden) pausePlayer(); });
-async function startAudio() {
-  audio = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+async function startAudio(request) {
+  const context = request.audio = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+  audio = context;
   audio.addEventListener('statechange', () => {
-    if (Module.running && !Module.paused && audio && audio.state !== 'running') pausePlayer();
+    if (audio === context && Module.running && !Module.paused && context.state !== 'running') pausePlayer();
   });
-  const url = URL.createObjectURL(new Blob([workletSource], { type: 'application/javascript' }));
+  request.url = URL.createObjectURL(new Blob([workletSource], { type: 'application/javascript' }));
   try {
-    await audio.audioWorklet.addModule(url);
-    await audio.resume();
+    await context.audioWorklet.addModule(request.url);
+    if (pendingStartup !== request) return;
+    await context.resume();
+    if (pendingStartup !== request) return;
+    if (context.state !== 'running') throw new Error('Audio is still interrupted');
   } finally {
-    URL.revokeObjectURL(url);
+    if (request.url) { URL.revokeObjectURL(request.url); request.url = null; }
   }
-  node = new AudioWorkletNode(audio, 'ps2-output', {
+  const output = new AudioWorkletNode(context, 'ps2-output', {
     outputChannelCount: [2],
     processorOptions: { buffer: Module.HEAPU8.buffer, base: Module._ps2web_audio_ring() },
   });
-  node.connect(audio.destination);
+  output.connect(context.destination);
+  node = output;
 }
 
 const keys = new Set();
@@ -1304,12 +1321,15 @@ document.getElementById('start').addEventListener('click', async () => {
     statusEl.textContent = 'Game disc unavailable. Reload to try again.';
     return;
   }
+  if (pendingStartup || Module.running || document.hidden) return;
+  const request = pendingStartup = {};
   start.disabled = true;
   try {
-    await startAudio();
+    await startAudio(request);
   } catch (error) {
-    if (audio) await audio.close().catch(() => {});
-    audio = null;
+    if (pendingStartup !== request) return;
+    cancelStartup();
+    if (Module.failed || Module.stoppedForReload) return;
     start.disabled = false;
     const help = document.getElementById('help');
     help.textContent = 'Could not start audio. Tap Play SSX 3 to try again.';
@@ -1317,6 +1337,9 @@ document.getElementById('start').addEventListener('click', async () => {
     console.warn('Audio startup failed', error);
     return;
   }
+  if (pendingStartup !== request) return;
+  if (Module.failed || Module.stoppedForReload || document.hidden) { cancelStartup(); return; }
+  pendingStartup = null;
   document.getElementById('overlay').hidden = true;
   document.getElementById('settings').open = false;
   document.getElementById('pause').hidden = false;

@@ -7,9 +7,9 @@ const shell = fs.readFileSync(path.join(__dirname, '../web/shell.html'), 'utf8')
 const inputStart = shell.indexOf('const keys = new Set();');
 const inputEnd = shell.indexOf('// some browsers cannot show a canvas', inputStart);
 const pauseStart = shell.indexOf('function cancelResume() {');
-const pauseEnd = shell.indexOf('async function startAudio()', pauseStart);
+const pauseEnd = shell.indexOf('async function startAudio(', pauseStart);
 const audioListenerStart = shell.indexOf("  audio.addEventListener('statechange', () => {", pauseEnd);
-const audioListenerEnd = shell.indexOf('  const url =', audioListenerStart);
+const audioListenerEnd = shell.indexOf('  request.url =', audioListenerStart);
 const stopStart = shell.indexOf('let stopForReload = null;');
 const stopEnd = shell.indexOf('function failPlayer(', stopStart);
 const failureStart = shell.indexOf('function failPlayer(message, error) {');
@@ -60,10 +60,10 @@ function fixture() {
     startupTimer: 0, noteTimer: 0, clearTimeout() {}, stopCompiler() {}, cardRecovery: null,
     resetFrameStats() {}, note: message => notes.push(message),
   });
-  vm.runInContext('let pendingResume = null;', context);
+  vm.runInContext('let pendingResume = null, pendingStartup = null;', context);
   vm.runInContext(shell.slice(inputStart, inputEnd), context);
   vm.runInContext(shell.slice(pauseStart, pauseEnd), context);
-  vm.runInContext(shell.slice(audioListenerStart, audioListenerEnd), context);
+  vm.runInContext('(function(context) {' + shell.slice(audioListenerStart, audioListenerEnd) + '})(audio)', context);
   vm.runInContext(shell.slice(stopStart, stopEnd), context);
   vm.runInContext(shell.slice(failureStart, failureEnd), context);
   vm.runInContext(shell.slice(resumeStart, resumeEnd + '\n});'.length), context);
