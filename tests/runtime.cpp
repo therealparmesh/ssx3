@@ -2,6 +2,7 @@
 #include "gs/gs.hpp"
 #include "gs/queue.hpp"
 #include "gs/gpu/readback_cache.hpp"
+#include "gs/gpu/upload_history.hpp"
 #include "hw.hpp"
 #include "iop/sio2.hpp"
 #include "ps2/memory.hpp"
@@ -151,6 +152,27 @@ void readback_cache_tracks_gpu_writes() {
     cache.store(0, Cache::size, input.data());
     cache.invalidate(256, Cache::size + 256ull);
     expect(!cache.copy(Cache::page_size * 2, 1, output.data()), "Full VRAM write retained cached data");
+}
+
+void upload_history_survives_capacity_pressure() {
+    ps2::gs::gpu::UploadHistory<1> colliding;
+    for (const auto key : {0ull, 1ull, 2ull, ~0ull}) {
+        expect(!colliding.seen_before(key), "Distinct upload was reported as repeated");
+        expect(colliding.seen_before(key), "Repeated upload was not admitted");
+    }
+    expect(!colliding.seen_before(3), "History collision admitted a different upload");
+    expect(colliding.seen_before(~0ull), "Local replacement forgot an unrelated recent upload");
+    expect(!colliding.seen_before(0), "Displaced history key was falsely recognized");
+    expect(colliding.seen_before(0), "Displaced upload was not recognized when repeated again");
+
+    ps2::gs::gpu::UploadHistory<> history;
+    // The former table cleared every entry at 65,537 distinct uploads. Retain
+    // recent history through repeated saturation instead of restarting it.
+    for (std::uint64_t i = 1; i <= 200000; ++i) {
+        const auto key = i * 0x9E3779B97F4A7C15ull;
+        expect(!history.seen_before(key), "Unique upload matched a different history key");
+        expect(history.seen_before(key), "Capacity pressure lost the newest upload");
+    }
 }
 
 void feed(std::vector<std::uint32_t> words) {
@@ -360,6 +382,7 @@ void path_three_streams_append_and_restore(bool queued) {
 int main() {
     try {
         readback_cache_tracks_gpu_writes();
+        upload_history_survives_capacity_pressure();
         packed_colours_bypass_stmod();
         mode_three_updates_row();
         contiguous_unpack_wraps_and_preserves_padding_state();

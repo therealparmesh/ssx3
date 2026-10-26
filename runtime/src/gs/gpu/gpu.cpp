@@ -1,5 +1,6 @@
 #include "gpu.hpp"
 #include "readback_cache.hpp"
+#include "upload_history.hpp"
 #include "ps2/system.hpp"
 
 #include <webgpu/webgpu.h>
@@ -360,7 +361,7 @@ WGPUBuffer g_cache = nullptr;
 std::vector<std::uint32_t> g_cache_copy;
 std::deque<CacheEntry> g_cache_ring;
 std::unordered_multimap<std::uint64_t, CacheEntry *> g_cache_index;
-std::unordered_map<std::uint64_t, std::uint32_t> g_cache_seen;
+UploadHistory<> g_cache_seen;
 std::uint32_t g_cache_head = 0;
 std::uint64_t g_serial = 1;
 
@@ -775,8 +776,7 @@ std::uint64_t queue_upload(const std::uint8_t *bytes, std::size_t size, std::uin
     std::uint32_t offset = 0, source = 0;
     if (n >= kCacheMinBytes) {
         const std::uint64_t key = content_key(bytes, n);
-        if (cache_find(key, bytes, n, offset) || (++g_cache_seen[key] >= 2 && cache_insert(key, bytes, n, offset))) source = 0x80000000u;
-        if (g_cache_seen.size() > 65536) g_cache_seen.clear();
+        if (cache_find(key, bytes, n, offset) || (g_cache_seen.seen_before(key) && cache_insert(key, bytes, n, offset))) source = 0x80000000u;
     }
     if (!source) offset = arena_append(bytes, n);
     const std::uint32_t rec[11] = {im.dbp, im.dbw, im.dpsm, im.dsax, im.dsay, im.rrw, im.done, pixels, offset, lead_bits, im.bpp | source};
