@@ -35,6 +35,7 @@ jobs:
           node scripts/test_yield_tasks.cjs
           node scripts/test_gpu_probe.cjs
           node scripts/test_staged_uploads.cjs
+          node scripts/test_input_resume.cjs
 
   wasm-vu-jit:
     runs-on: ubuntu-24.04

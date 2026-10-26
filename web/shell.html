@@ -1263,6 +1263,9 @@ document.getElementById('start').addEventListener('click', async () => {
     Module.paused = false;
     resetFrameStats();
     document.getElementById('settings').open = false;
+    // Restore held controller inputs before waking the emulation worker.
+    // Its first frame must not observe the neutral state used while paused.
+    pollInput();
     Module._ps2web_pause(0);
     document.getElementById('overlay').hidden = true;
     document.getElementById('pause').hidden = false;
