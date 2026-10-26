@@ -124,7 +124,30 @@ EM_JS(void, ps2web_frame_done, (int displayed), {
     }
     if (Module.onFrame) Module.onFrame(!!displayed);
 });
-EM_ASYNC_JS(void, ps2web_wait_shown, (), {
+EM_JS(int, ps2web_wait_capacity_safe, (double audio_ms), {
+    // A full queue needs capacity, not another completed image. Near 60 Hz,
+    // use the actual presentation time rather than a potentially old RAF stamp.
+    if (!Module.yieldForBufferedFrames || !Module.bufferedSurface || Module.paused || Module.failed ||
+        Module.stoppedForReload || Module.surfaceFrames?.length !== 3) return 0;
+    const refresh = Module.surfaceClock.refreshInterval();
+    if (!Number.isFinite(refresh) || Math.abs(refresh - 1000 / 60) > 0.25) return 0;
+    const elapsed = performance.now() - Module.surfacePresentedAt;
+    if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 2 * refresh) return 0;
+    const remaining = refresh - elapsed % refresh;
+    // The existing 40 ms gate budgets a full refresh. Charge only the
+    // remaining portion while preserving that gate's post-refresh headroom.
+    return audio_ms >= 40 - refresh + remaining ? 1 : 0;
+});
+EM_ASYNC_JS(void, ps2web_wait_shown, (int capacity_only), {
+    if (capacity_only || (Module.yieldForBufferedFrames && Module.bufferedSurface && !Module.paused &&
+        !Module.failed && !Module.stoppedForReload && Module.surfaceFrames?.length === 3 &&
+        Math.abs(Module.surfaceClock.refreshInterval() - 1000 / 60) <= 0.25)) {
+        do {
+            await new Promise(resolve => { Module.surfaceYield = resolve; });
+        } while (!Module.paused && !Module.failed && !Module.stoppedForReload &&
+                 Module.surfaceFrames.length === 3 && Module.audioQueuedMs() >= (capacity_only ? 20 : 40));
+        return;
+    }
     // Fill a bounded GPU presentation queue before waiting for consumption.
     // This preserves a prepared image when command preparation straddles a refresh.
     if (Module.shownPending && (!Module.surfaceFrames || Module.surfaceFrames.length >= 2))
@@ -555,10 +578,12 @@ int main(int argc, char **argv) {
     const std::function<void(const std::uint32_t *, std::uint32_t, std::uint32_t)> none;
     const std::function<void()> wait_shown = [] {
         const double start = emscripten_get_now();
-        // Audio consumption already clocks the EE worker at the native rate.
-        // Do not add a display wait while the audio buffer is running dry.
-        if (g_audio.active.load() && audio_queued_ms() < 40.0) return;
-        ps2web_wait_shown();
+        // Audio consumption clocks the EE worker. With low reserve, only
+        // wait to release a full queue if the expected refresh leaves headroom.
+        const double audio_ms = audio_queued_ms();
+        const bool capacity_only = g_audio.active.load() && audio_ms < 40.0;
+        if (capacity_only && !ps2web_wait_capacity_safe(audio_ms)) return;
+        ps2web_wait_shown(capacity_only ? 1 : 0);
         g_render_idle.store(g_render_idle.load() + emscripten_get_now() - start);
     };
     for (;;) {

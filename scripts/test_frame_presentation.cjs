@@ -16,7 +16,7 @@ function makePresenter(kind) {
   assert(start > declaration);
   const body = source.slice(start, source.indexOf('\n});', start));
   const presented = [], callbacks = [], canvases = [];
-  let now = -1, notified = 0, uniforms = 0, params;
+  let now = -1, wallNow = -1, notified = 0, uniforms = 0, params;
   const record = (value, width, height) => presented.push({ value, width, height, time: now });
   class ImageData {
     constructor(width, height) { this.width = width; this.height = height; this.data = new Uint8ClampedArray(width * height * 4); }
@@ -41,7 +41,7 @@ function makePresenter(kind) {
   const Module = { canvas: { width: 8, height: 6, getContext: name => name === 'webgpu' ? surface : copy },
     paused: false, failed: false, onPresent: () => ++notified };
   const heap = new Uint8Array(64), library = {};
-  const context = vm.createContext({ Module, HEAPU8: heap, ImageData, OffscreenCanvas,
+  const context = vm.createContext({ Module, performance: { now: () => wallNow }, HEAPU8: heap, ImageData, OffscreenCanvas,
     WebGPU: { getJsObject: pointer => objects[pointer] }, GPUBufferUsage: { UNIFORM: 1, COPY_DST: 2 },
     addToLibrary: entries => Object.assign(library, entries), requestAnimationFrame: callback => callbacks.push(callback) });
   vm.runInContext(fs.readFileSync(path.join(root, 'web/frame-presentation.js'), 'utf8'), context);
@@ -56,8 +56,8 @@ function makePresenter(kind) {
       if (gpu) send(0, 1, 2, 3, width, height, value, value - 1, 0, wide);
       else { heap.fill(value); send(0, width, height, wide); heap.fill(255); }
     },
-    refresh(time) {
-      assert(time > now, 'Refresh timestamps must increase'); now = time;
+    refresh(time, actualTime = time) {
+      assert(time > now, 'Refresh timestamps must increase'); now = time; wallNow = actualTime;
       for (const callback of callbacks.splice(0)) callback(now);
       assert.equal(callbacks.length, 1, 'Exactly one presentation callback is scheduled');
       assert.equal(notified, presented.length, 'Only real image submissions notify onPresent');
@@ -223,5 +223,14 @@ for (const kind of ['copy', 'surface']) {
     assert.deepEqual(resumed.presented.map(f => f.value), [1, 4, 5, 6]);
     assert.deepEqual(resumed.presented.slice(1).map(f => Math.round(f.time * 1000)), [1000000, 1016667, 1033333]);
   }
+}
+{
+  const p = makePresenter('surface');
+  p.produce(1); p.produce(2); p.refresh(10, 15.4);
+  assert.equal(p.Module.surfacePresentedAt, 15.4, 'Capacity prediction uses actual submission time when RAF timestamps lag');
+  p.Module.paused = true; p.refresh(26.7, 35);
+  assert.equal(p.Module.surfacePresentedAt, 15.4, 'A paused refresh does not claim a new submission');
+  p.Module.paused = false; p.refresh(43.4, 49);
+  assert.equal(p.Module.surfacePresentedAt, 49, 'Resuming records the next actual submission');
 }
 console.log('Both presenters: FIFO pixels/fields, 50–240 Hz pacing, paired production, timestamp drift and display changes, bounded pool, pause/stall recovery, resize and failure passed');

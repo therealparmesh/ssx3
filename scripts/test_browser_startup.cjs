@@ -137,7 +137,10 @@ async function snapshot() {
   } : {
     executablePath: process.env.CHROMIUM_EXECUTABLE || '/usr/bin/chromium',
     headless: process.env.SSX3_TEST_HEADLESS !== '0', defaultViewport: { width: 1280, height: 800 },
-    args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface'],
+    // Visible windows use compositor defaults; forcing the headless backend
+    // options can stall native window presentation on Linux.
+    args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan',
+      ...(process.env.SSX3_TEST_HEADLESS !== '0' ? ['--use-angle=vulkan', '--disable-vulkan-surface'] : [])],
   });
   for (const mode of cases) {
     current = mode;

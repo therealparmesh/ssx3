@@ -37,6 +37,7 @@ jobs:
           node scripts/test_staged_uploads.cjs
           node scripts/test_input_resume.cjs
           node scripts/test_startup_audio.cjs
+          node scripts/test_display_capacity.cjs
 
   wasm-vu-jit:
     runs-on: ubuntu-24.04

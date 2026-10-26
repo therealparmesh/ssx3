@@ -110,6 +110,7 @@ EM_JS(void, ps2_webgpu_queue_frame,
                         pass.draw(3);
                         pass.end();
                         queue.submit([encoder.finish()]);
+                        Module.surfacePresentedAt = performance.now();
                         if (Module.onPresent) Module.onPresent();
                     } catch (error) {
                         if (Module.onHalt) Module.onHalt('The graphics connection was lost. Export your memory card, then reload.');
