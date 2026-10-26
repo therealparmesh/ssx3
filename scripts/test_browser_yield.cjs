@@ -34,8 +34,8 @@ let browser;
     const frame = Module.onFrame, before = Module._ps2web_frames();
     let displayedWhileHeld = 0;
     Module.onFrame = displayed => { frame(displayed); if (displayed) ++displayedWhileHeld; };
-    // Preserve FIFO order. Release every held task after refresh callbacks
-    // have had time to resume several yields; stale callbacks must be no-ops.
+    // Hold the one outstanding wake while refresh/timer callbacks resume
+    // several yields. Releasing it must not consume a newer suspension.
     Module.yieldPort.postMessage = (...args) => queue.push(args);
     setTimeout(() => {
       Module.yieldPort.postMessage = post;
@@ -57,9 +57,10 @@ let browser;
   const result = { held, resumed, paused, errors };
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(result, null, 2));
   await page.screenshot({ path: path.join(output, 'resumed.png') });
-  assert(held.heldMessages >= 2, 'Exercise multiple stale callbacks');
-  assert(held.displayedWhileHeld > 0, 'Refresh callbacks must keep rendering while posted tasks are held');
-  assert(resumed.pendingYields <= 2, 'Held callbacks must drain in FIFO order');
+  assert.equal(held.heldMessages, 1, 'Extended deferral keeps one outstanding posted wake');
+  assert(held.displayedWhileHeld >= 8, 'A qualified 60 fps scene must keep presenting during task deferral');
+  assert(held.after - held.before >= 8, 'Guest progress must track the held interval');
+  assert(resumed.pendingYields <= 1, 'Retired wake drains before posting the latest unfinished yield');
   assert.equal(resumed.failed, false);
   assert.equal(errors.length, 0);
   console.log(JSON.stringify(result));

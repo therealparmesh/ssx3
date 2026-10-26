@@ -602,12 +602,27 @@ double gpu_busy_ms() { return gs::gpu_busy_ms(); }
 
 #ifdef __EMSCRIPTEN__
 EM_ASYNC_JS(void, ps2_browser_yield, (), {
+    // A delayed task must not cost another entire refresh for every small
+    // native slice. Permit a short, bounded continuation burst after a refresh
+    // wins. The count also bounds progress when privacy settings round time.
+    if (Module.yieldResumesLeft > 0 && performance.now() < Module.yieldResumeUntil) {
+        --Module.yieldResumesLeft;
+        return;
+    }
+    Module.yieldResumesLeft = 0;
     await new Promise((resolve) => {
         let finished = false;
-        const finish = () => {
+        let retry;
+        const finish = (stamp, recovered = false) => {
             if (finished) return;
             finished = true;
+            if (typeof stamp === 'number') {
+                Module.yieldResumeUntil = performance.now() + (recovered ? 1 : 3);
+                Module.yieldResumesLeft = 8;
+                if (!recovered) Module.yieldTaskRetryUntil = performance.now() + 250;
+            }
             cancelAnimationFrame(refresh);
+            if (retry !== undefined) clearTimeout(retry);
             resolve();
         };
         // Input handling may defer the posted task until after the next
@@ -620,11 +635,28 @@ EM_ASYNC_JS(void, ps2_browser_yield, (), {
             if (!Module.yieldPort) {
                 const channel = new MessageChannel();
                 Module.yieldWaiters = [];
-                channel.port1.onmessage = () => Module.yieldWaiters.shift()();
+                channel.port1.onmessage = () => {
+                    Module.yieldMessagePending = false;
+                    Module.yieldWaiters.shift()();
+                    const next = Module.yieldNextPost;
+                    Module.yieldNextPost = undefined;
+                    if (next) next();
+                };
                 Module.yieldPort = channel.port2;
             }
-            Module.yieldWaiters.push(finish);
-            Module.yieldPort.postMessage(0);
+            // Coalesce requests while an older posted wake is still queued.
+            // Its handler retires that callback before posting the latest
+            // unfinished request, preserving ownership with bounded storage.
+            if (!Module.yieldMessagePending) {
+                Module.yieldMessagePending = true;
+                Module.yieldWaiters.push(finish);
+                Module.yieldPort.postMessage(0);
+            } else Module.yieldNextPost = post;
+            // A refresh win identifies delayed posted tasks. Temporarily race
+            // a timer from another task source so GPU readbacks need not wait
+            // for yet another refresh. Normal task delivery stays unchanged.
+            if (!finished && retry === undefined && !Module.bufferedSurface && Module.yieldTaskRetryUntil > performance.now())
+                retry = setTimeout(() => finish(performance.now(), true), 0);
         };
         // Let the browser prioritize rendering/input between native slices.
         // A refresh still wins if task delivery is deferred during input.

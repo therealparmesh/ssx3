@@ -11,8 +11,8 @@ const body = source.slice(start, source.indexOf('\n});', start));
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 function setup(mode) {
-  const Module = {}, refreshes = new Map(), messages = [], tasks = [];
-  let sequence = 0, completed = 0, channels = 0;
+  const Module = {}, refreshes = new Map(), timers = new Map(), messages = [], tasks = [];
+  let sequence = 0, completed = 0, channels = 0, now = 100;
   const scheduler = mode === 'missing' ? undefined : {
     yield() {
       if (mode === 'throw') throw new Error('Task scheduling unavailable');
@@ -20,7 +20,7 @@ function setup(mode) {
     },
   };
   const context = vm.createContext({
-    Module, scheduler,
+    Module, scheduler, performance: { now: () => now },
     MessageChannel: class {
       constructor() {
         ++channels;
@@ -28,17 +28,21 @@ function setup(mode) {
         this.port2 = {postMessage: () => messages.push(() => this.port1.onmessage())};
       }
     },
+    setTimeout(callback) { const id = ++sequence; timers.set(id, callback); return id; },
+    clearTimeout(id) { timers.delete(id); },
     requestAnimationFrame(callback) { const id = ++sequence; refreshes.set(id, callback); return id; },
     cancelAnimationFrame(id) { refreshes.delete(id); },
   });
   const yieldWork = vm.runInContext('(async function(){' + body + '})', context);
   return {
-    Module, refreshes, messages, tasks,
+    Module, refreshes, timers, messages, tasks,
     yield: () => yieldWork().then(() => ++completed),
     completed: () => completed, channels: () => channels,
+    advance: delta => { now += delta; },
+    retry() { const ready = [...timers.values()]; timers.clear(); for (const callback of ready) callback(); },
     refresh() {
       const ready = [...refreshes.values()]; refreshes.clear();
-      for (const callback of ready) callback(100);
+      for (const callback of ready) callback(now);
     },
     deliver() { assert(messages.length); messages.shift()(); },
   };
@@ -59,6 +63,7 @@ function setup(mode) {
   const old = race.yield();
   const oldTask = race.tasks.shift();
   race.refresh(); await old;
+  race.advance(3);
   const next = race.yield();
   oldTask.resolve(); await flush();
   assert.equal(race.completed(), 1, 'Late scheduler completion cannot consume a new yield');
@@ -70,12 +75,14 @@ function setup(mode) {
     const fallback = setup(mode);
     const pending = fallback.yield();
     assert.equal(fallback.messages.length, 1);
+    assert.equal(fallback.timers.size, 0, 'Ordinary posted work needs no recovery timer');
     fallback.deliver(); await pending;
     assert.equal(fallback.Module.yieldWaiters.length, 0);
     assert.equal(fallback.refreshes.size, 0);
 
     const earlier = fallback.yield();
     fallback.refresh(); await earlier;
+    fallback.advance(3);
     const later = fallback.yield();
     fallback.deliver(); await flush();
     assert.equal(fallback.completed(), 2, 'A late posted fallback must retain FIFO ownership');
@@ -99,17 +106,78 @@ function setup(mode) {
   assert.equal(retired.channels(), 0, 'Late rejection must not schedule redundant work');
   assert.equal(retired.completed(), 1);
 
+  const bounded = setup('missing');
+  const waiting = bounded.yield(); bounded.refresh(); await waiting;
+  for (let i = 0; i < 8; ++i) await bounded.yield();
+  assert.equal(bounded.messages.length, 1, 'Continuation burst needs no further posted tasks');
+  assert.equal(bounded.refreshes.size, 0);
+  const limited = bounded.yield();
+  assert.equal(bounded.messages.length, 1, 'Frozen clock must wait without adding another posted wake');
+  bounded.deliver(); await flush();
+  assert.equal(bounded.completed(), 9, 'Stale callback must not release the bounded wait');
+  bounded.deliver(); await limited;
+
+  const timed = setup('missing');
+  const initial = timed.yield(); timed.refresh(); await initial;
+  timed.advance(1); await timed.yield();
+  timed.advance(2);
+  const expired = timed.yield();
+  assert.equal(timed.messages.length, 1, 'Expired burst must wait while retaining only one posted wake');
+  timed.deliver(); await flush(); assert.equal(timed.completed(), 2);
+  timed.deliver(); await expired;
+
+  const recovery = setup('missing');
+  const held = recovery.yield(); recovery.refresh(); await held;
+  const recoveryUntil = recovery.Module.yieldTaskRetryUntil;
+  recovery.advance(4);
+  const retried = recovery.yield();
+  assert.equal(recovery.timers.size, 1);
+  const staleTimer = [...recovery.timers.values()][0];
+  recovery.retry(); await retried;
+  assert.equal(recovery.Module.yieldTaskRetryUntil, recoveryUntil, 'Recovery timer must not extend its own mode indefinitely');
+  assert.equal(recovery.Module.yieldResumesLeft, 8);
+  recovery.deliver(); staleTimer(); await flush();
+  assert.equal(recovery.completed(), 2, 'Retired posted/timer callbacks cannot resume again');
+  recovery.advance(251);
+  const ordinary = recovery.yield();
+  assert.equal(recovery.timers.size, 0, 'Recovery mode must expire');
+  recovery.deliver(); await ordinary;
+
+  const direct = setup('missing'); direct.Module.bufferedSurface = true;
+  const gpuWait = direct.yield(); direct.refresh(); await gpuWait;
+  direct.advance(4);
+  const gpuNext = direct.yield();
+  assert.equal(direct.timers.size, 0, 'Prepared GPU surfaces need no readback recovery timer');
+  direct.deliver(); await flush(); assert.equal(direct.completed(), 1);
+  direct.deliver(); await gpuNext;
+
+  const deferred = setup('missing');
+  for (let i = 0; i < 512; ++i) {
+    const work = deferred.yield(); deferred.refresh(); await work; deferred.advance(4);
+    assert.equal(deferred.messages.length, 1, 'Extended deferral must not grow the browser task queue');
+    assert.equal(deferred.Module.yieldWaiters.length, 1, 'Extended deferral retains one retired callback');
+    assert.equal(deferred.timers.size, 0);
+  }
+  const live = deferred.yield();
+  deferred.deliver(); await flush();
+  assert.equal(deferred.completed(), 512, 'Retired wake must post a new task rather than consume the current waiter');
+  deferred.deliver(); await live;
+  assert.equal(deferred.messages.length, 0);
+  assert.equal(deferred.Module.yieldWaiters.length, 0);
+  assert.equal(deferred.Module.yieldNextPost, undefined);
+
   const stress = setup('native');
   for (let i = 0; i < 512; ++i) {
     const work = stress.yield(), native = stress.tasks.shift();
     if (i % 3 === 0) { stress.refresh(); await work; native.resolve(); }
     else if (i % 3 === 1) native.resolve();
     else { native.reject(new Error('Abort')); await flush(); stress.deliver(); }
-    await work; await flush();
+    await work; await flush(); stress.advance(3);
     assert.equal(stress.completed(), i + 1);
     assert.equal(stress.refreshes.size, 0);
     assert.equal(stress.messages.length, 0);
+    assert.equal(stress.timers.size, 0);
     assert.equal(stress.Module.yieldWaiters?.length || 0, 0);
   }
-  console.log('Browser yield: scheduler/refresh races, missing/rejected/throwing APIs, FIFO fallback and bounded repeated resumes passed');
+  console.log('Browser yield: scheduler/refresh races, missing/rejected/throwing APIs, FIFO fallback, bounded continuation windows, temporary timer recovery and repeated resumes passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
