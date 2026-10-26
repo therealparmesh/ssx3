@@ -903,7 +903,7 @@ function pollInput() {
 
 // some browsers cannot show a canvas drawn by another GPU (hybrid laptops on Linux), so each adapter draws a few test frames first
 async function canPresent(power) {
-  let device, probe, finishFrame, timeout;
+  let device, probe, bitmap, finishFrame, timeout;
   let retired = false, failed = false;
   const check = async () => {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: power });
@@ -933,15 +933,25 @@ async function canPresent(power) {
       const encoder = device.createCommandEncoder();
       encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 0.25, 0, 1] }] }).end();
       device.queue.submit([encoder.finish()]);
-      await device.queue.onSubmittedWorkDone();
+      // Snapshot in the submission task: the canvas texture can expire while
+      // awaiting GPU completion. Checking the later canvas can falsely report
+      // transparent pixels even though the submitted frame rendered correctly.
+      const snapshot = createImageBitmap(probe).then((image) => {
+        if (retired) { image.close(); return null; }
+        bitmap = image;
+        return image;
+      });
+      await Promise.all([device.queue.onSubmittedWorkDone(), snapshot]);
       if (retired) return null;
       // A successful submission can still produce a blank canvas on some
       // browser/GPU combinations. Check visible pixels before choosing it.
       const copy = document.createElement('canvas');
       copy.width = copy.height = 1;
       const ctx = copy.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(probe, 0, 0, 1, 1);
+      ctx.drawImage(bitmap, 0, 0, 1, 1);
       const pixel = ctx.getImageData(0, 0, 1, 1).data;
+      bitmap.close();
+      bitmap = null;
       if (pixel[0] < 200 || pixel[1] < 30 || pixel[3] < 200) failed = true;
       // Hidden tabs can stop animation callbacks while downloads and GPU work
       // continue. Startup must not depend on receiving a painted frame.
@@ -974,6 +984,7 @@ async function canPresent(power) {
     retired = true;
     clearTimeout(timeout);
     if (finishFrame) finishFrame();
+    if (bitmap) bitmap.close();
     if (probe) probe.remove();
     if (device) device.destroy();
   }
@@ -1000,7 +1011,7 @@ async function chooseGpu() {
   if (adapter.info.isFallbackAdapter || adapter.info.architecture === 'swiftshader')
     throw new Error('Hardware graphics acceleration is unavailable. Enable it in your browser, then reload.');
   const useSurface = (name) => {
-    Module.bufferedSurface = !Module.presentCopy && !Module.noSurface && navigator.userAgent.includes('Firefox/');
+    Module.bufferedSurface = !Module.presentCopy && !Module.noSurface;
     return 'GPU ' + name;
   };
   const forced = params.get('gpu');

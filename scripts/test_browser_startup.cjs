@@ -6,7 +6,7 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
 const base = process.env.SSX3_TEST_URL || 'http://127.0.0.1:8686';
 const output = process.env.SSX3_TEST_OUTPUT || 'build/browser-startup';
 const firefox = process.env.SSX3_TEST_BROWSER === 'firefox';
-const cases = (process.env.SSX3_TEST_STARTUP_CASES || 'normal,held-animation,device-rejected,adapter-rejected,work-timeout,late-device').split(',');
+const cases = (process.env.SSX3_TEST_STARTUP_CASES || 'normal,held-animation,device-rejected,adapter-rejected,work-timeout,late-device,snapshot-rejected,late-snapshot,snapshot-late-error,blank-snapshot').split(',');
 let browser, page, current, logs;
 const results = [];
 
@@ -18,7 +18,36 @@ function installFault(mode, compat) {
     Object.defineProperty(WebAssembly, 'Suspending', { configurable: true, value: undefined });
     Object.defineProperty(WebAssembly, 'promising', { configurable: true, value: undefined });
   }
-  const qa = window.qaStartup = { adapters: 0, devices: [], queues: 0, heldFrames: new Map(), fault: false };
+  const qa = window.qaStartup = { adapters: 0, devices: [], queues: 0, snapshots: 0, bitmaps: [], heldFrames: new Map(), fault: false };
+  const makeBitmap = createImageBitmap;
+  window.createImageBitmap = function(source, ...args) {
+    if (!(source instanceof HTMLCanvasElement) || source.id === 'canvas') return makeBitmap.call(this, source, ...args);
+    const first = ++qa.snapshots === 1;
+    if (first && mode === 'snapshot-rejected') {
+      qa.fault = true;
+      return Promise.reject(new Error('QA first presentation snapshot unavailable'));
+    }
+    if (first && mode === 'snapshot-late-error') {
+      qa.fault = true;
+      return new Promise((resolve, reject) => { qa.release = () => reject(new Error('QA late snapshot failure')); });
+    }
+    if (mode === 'blank-snapshot') {
+      qa.fault = true;
+      source = document.createElement('canvas');
+      source.width = source.height = 64;
+    }
+    return makeBitmap.call(this, source, ...args).then(bitmap => {
+      const record = { closed: 0 };
+      qa.bitmaps.push(record);
+      const close = bitmap.close.bind(bitmap);
+      bitmap.close = () => { ++record.closed; close(); };
+      if (first && mode === 'late-snapshot') {
+        qa.fault = true;
+        return new Promise(resolve => { qa.release = () => resolve(bitmap); });
+      }
+      return bitmap;
+    });
+  };
   const requestAdapter = GPU.prototype.requestAdapter;
   GPU.prototype.requestAdapter = function(...args) {
     ++qa.adapters;
@@ -92,6 +121,7 @@ async function snapshot() {
     },
     qa: window.qaStartup ? {
       adapters: qaStartup.adapters, devices: qaStartup.devices, queues: qaStartup.queues,
+      snapshots: qaStartup.snapshots, bitmaps: qaStartup.bitmaps,
       fault: qaStartup.fault, heldFrames: qaStartup.heldFrames.size,
     } : null,
     probeCanvases: document.querySelectorAll('canvas:not(#canvas)').length,
@@ -135,9 +165,18 @@ async function snapshot() {
       assert.equal(ready.qa.devices[0].destroyed, 0);
       assert(ready.qa.devices.length >= 2, 'Another device must recover startup before the late request resolves');
     }
+    if (mode === 'late-snapshot') assert.equal(ready.qa.bitmaps[0].closed, 0);
+    if (mode === 'blank-snapshot') {
+      assert.equal(ready.runtime.copy, true, 'A failed pixel check must select frame copying');
+      assert.equal(!!ready.runtime.surface, false);
+    } else if (process.env.SSX3_TEST_EXPECT_GPU_SURFACE === '1') {
+      assert.equal(ready.runtime.copy, false, 'This qualified adapter must pass the pixel check');
+      assert.equal(ready.runtime.surface, true, 'A working probe should select buffered GPU presentation');
+    }
     await page.evaluate(() => qaStartup.release?.());
     if (mode === 'late-device') await page.waitForFunction(() => qaStartup.devices[0].destroyed === 1);
     await page.waitForFunction(() => qaStartup.devices.every(device => device.rejected || device.destroyed === 1));
+    await page.waitForFunction(() => qaStartup.bitmaps.every(bitmap => bitmap.closed === 1));
     // Once the probe finishes, exercise actual gameplay with the unmodified GPU
     // interfaces. Preserve device records to catch any late duplicate cleanup.
     await page.evaluate(() => {
@@ -153,7 +192,7 @@ async function snapshot() {
     assert.equal((await snapshot()).probeCanvases, 0);
     const unexpected = logs.filter(log => !log.message.startsWith('[gpu check] '));
     assert.deepEqual(unexpected, []);
-    if (mode === 'normal' || mode === 'held-animation') assert.deepEqual(logs, []);
+    if (mode === 'normal' || mode === 'held-animation' || mode === 'blank-snapshot') assert.deepEqual(logs, []);
     else assert(logs.some(log => log.message.includes(mode.includes('rejected') ? 'QA first presentation' : 'presentation check timed out')));
     const result = { mode, browser: firefox ? 'firefox' : 'chromium', readyMs, ready, final: await snapshot(), logs };
     results.push(result);

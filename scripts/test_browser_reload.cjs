@@ -10,7 +10,7 @@ const hash = crypto.createHash('sha256').update(card).digest('hex');
 let browser, page, failureLog;
 (async () => {
   fs.mkdirSync(output, { recursive: true });
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE, headless: true,
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE, headless: process.env.SSX3_TEST_HEADLESS !== '0',
     args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface'] });
   const context = await browser.newContext();
   await context.addInitScript(compat => {
@@ -39,6 +39,8 @@ let browser, page, failureLog;
   const ready = async () => {
     await page.waitForFunction(() => document.querySelector('#start')?.textContent === 'Play SSX 3' && !document.querySelector('#start').disabled, null, { timeout: 90000 });
     assert.deepEqual(await page.evaluate(() => qaCompiler), { created: 1, terminated: 1 });
+    if (process.env.SSX3_TEST_EXPECT_GPU_SURFACE === '1')
+      assert.equal(await page.evaluate(() => Module.bufferedSurface && !Module.presentCopy), true);
   };
   const cardHash = () => page.evaluate(async () => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', FS.readFile('/memcard/Mcd001.ps2')))).map(x => x.toString(16).padStart(2, '0')).join(''));
   const startAndPause = async () => {
@@ -73,24 +75,29 @@ let browser, page, failureLog;
   await reloadBy(() => page.reload());
   await startAndPause();
   results.push('browser refresh preserves card and restarts gameplay');
-  // Discard while the renderer is suspended in a graphics readback, not only
-  // while paused in its idle wait. The following document must start cleanly.
+  // Discard while the active renderer is suspended: copying awaits a readback,
+  // while the GPU presenter waits for its queued refresh to be acknowledged.
+  const surface = await page.evaluate(() => !!Module.bufferedSurface);
   await page.evaluate(() => {
+    if (Module.bufferedSurface) {
+      Module.finishShown = () => { window.qaHeldRenderWait = true; };
+      return;
+    }
     const map = GPUBuffer.prototype.mapAsync;
     GPUBuffer.prototype.mapAsync = function(...args) {
       const result = map.apply(this, args);
-      if (this.size > 16 && !window.qaHeldReadback) {
-        window.qaHeldReadback = true;
+      if (this.size > 16 && !window.qaHeldRenderWait) {
+        window.qaHeldRenderWait = true;
         return result.then(() => new Promise(() => {}));
       }
       return result;
     };
   });
   await page.locator('#start').click();
-  await page.waitForFunction(() => window.qaHeldReadback === true);
+  await page.waitForFunction(() => window.qaHeldRenderWait === true && (!Module.bufferedSurface || Module.shownWaiters.length > 0));
   await reloadBy(() => page.reload());
   await startAndPause();
-  results.push('browser refresh cancels pending graphics readback');
+  results.push(surface ? 'browser refresh cancels pending GPU presentation wait' : 'browser refresh cancels pending graphics readback');
   // An unfinished native save must keep the current runtime alive for recovery.
   await page.evaluate(async () => { Module.ps2CardSaveFailed(); await reloadPlayer(); });
   assert.equal(await page.evaluate(() => !!Module.stoppedForReload), false);
