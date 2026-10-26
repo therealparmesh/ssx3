@@ -1,5 +1,11 @@
 # Validation scope
 
+The current release still has an open Chromium timing failure. A version-49 hosted full race measured 59.954 fresh submissions/second over 270.806 seconds, with twelve late animation callbacks, eight queued-image replacements and zero missing stereo audio frames. Its maximum actual submission interval was 35.215 ms. The same problem reproduced with Puppeteer's network monitoring disabled. Historical clean windows below do not resolve this failure.
+
+The media check now measures successful canvas/GPU submissions using `performance.now()` independently of animation timestamps. A controlled Chromium 156 test produced an actual 47.36-ms submission gap while every recorded animation timestamp remained nominal; the new gate rejected it. The asset-free regression covers both presenters, inactive/reset boundaries, failed/unrelated output and bounded diagnostic storage. These measurements still describe software submissions, rather than physical scanout.
+
+The updated check passed a separate 32.099-second local Firefox 158 opening-media window at 1280×800/DPR 1: approximately 59.999 fresh submissions/second, an 18-ms maximum actual submission interval, 1,541,120 stereo worklet frames without underruns and no application errors. Actual pause/resume and simulated audio interruption/recovery also passed. This short media check does not resolve the Chromium race failure or qualify physical A/V synchronization, phones, physical controllers or full-game progression.
+
 The source was tested on a Linux desktop with an AMD Ryzen 7 8745HS / Radeon 780M, a 60 Hz display and a 1280×800 CSS browser viewport. Firefox 158.0.1 used `dom.webgpu.enabled=true`. Chromium 156 used the runner's Vulkan/WebGPU flags. Browser runners use isolated profiles and local test cards.
 
 Prior full Snow Jam runs on this runtime line measured approximately 60 fresh browser submissions/second over about 341 seconds, with no missed or overwritten submissions. Firefox's worklet produced 16,362,496 stereo frames in its full-course run without underruns. The final startup/control revision repeated a 61.150-second segment at 60.000 submissions/second, with no misses, queue drops or audio underruns and a 256 MiB Wasm heap.

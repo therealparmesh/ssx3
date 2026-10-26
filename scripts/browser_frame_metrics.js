@@ -1,9 +1,23 @@
 (disable=>{
   if(disable){Object.defineProperty(WebAssembly,'Suspending',{value:undefined});Object.defineProperty(WebAssembly,'promising',{value:undefined})}
   const make=()=>({intervals:0,withoutImage:0,overwritten:0,longRafGaps:0,maxRafGapMs:0,maxFreshGapMs:0,elapsedMs:0});
+  const makeWall=()=>({intervals:0,elapsedMs:0,maxGapMs:0,longGaps:0,events:[]});
   window.qa={timerMaps:0,id:0,active:false,phase:'startup',phases:{},total:make(),lastTime:0,lastId:0,lastFresh:0,stamp:0,flip:false,ring:new Float64Array(32*7),ringIndex:0,events:[],longTasks:[],exclusions:[]};
+  qa.wall=makeWall();qa.lastSubmission=null;
   window.qaPhase=name=>{qa.phase=name;if(!qa.phases[name])qa.phases[name]=make()};
-  window.qaActive=active=>{qa.active=active;qa.lastTime=0;qa.lastFresh=0;qa.exclusions.push({active,time:performance.now()})};
+  window.qaActive=active=>{qa.active=active;qa.lastTime=0;qa.lastFresh=0;qa.lastSubmission=null;if(active)qa.wall=makeWall();qa.exclusions.push({active,time:performance.now()})};
+  // RAF timestamps can remain evenly spaced across a delayed callback. Record
+  // actual successful submissions independently so that delay cannot pass QA.
+  const submitted=()=>{
+   ++qa.id;
+   if(!qa.active||!Module.running||Module.failed||Module.paused){qa.lastSubmission=null;return}
+   const now=performance.now();
+   if(qa.lastSubmission!==null){
+    const gap=now-qa.lastSubmission;++qa.wall.intervals;qa.wall.elapsedMs+=gap;qa.wall.maxGapMs=Math.max(qa.wall.maxGapMs,gap);
+    if(gap>25){++qa.wall.longGaps;if(qa.wall.events.length<200)qa.wall.events.push({time:now,gapMs:gap,phase:qa.phase})}
+   }
+   qa.lastSubmission=now;
+  };
   const map=GPUBuffer.prototype.mapAsync;GPUBuffer.prototype.mapAsync=function(mode,offset,size){if(qa.active&&this.size===16)++qa.timerMaps;return map.call(this,mode,offset,size)};
   const draw=CanvasRenderingContext2D.prototype.drawImage;
   CanvasRenderingContext2D.prototype.drawImage=function(image,sx,sy,sw,sh,dx,dy,dw,dh){
@@ -12,8 +26,13 @@
    else if(arguments.length===3)result=draw.call(this,image,sx,sy);
    else if(arguments.length===9)result=draw.call(this,image,sx,sy,sw,sh,dx,dy,dw,dh);
    else result=draw.apply(this,arguments);
-   if(this.canvas.id==='canvas')++qa.id;return result;
+   if(this.canvas.id==='canvas')submitted();return result;
   };
+  if(typeof GPUCanvasContext!=='undefined'&&typeof GPUQueue!=='undefined'){
+   const texture=GPUCanvasContext.prototype.getCurrentTexture,submit=GPUQueue.prototype.submit;let pending=false;
+   GPUCanvasContext.prototype.getCurrentTexture=function(){const result=texture.call(this);if(this.canvas.id==='canvas')pending=true;return result};
+   GPUQueue.prototype.submit=function(commands){const visible=pending;pending=false;const result=submit.call(this,commands);if(visible)submitted();return result};
+  }
   const add=(s,dt,n,freshGap)=>{++s.intervals;s.elapsedMs+=dt;s.maxRafGapMs=Math.max(s.maxRafGapMs,dt);s.maxFreshGapMs=Math.max(s.maxFreshGapMs,freshGap);if(dt>25)++s.longRafGaps;if(n===0)++s.withoutImage;else s.overwritten+=Math.max(0,n-1)};
   window.qaInstall=()=>{
    const sentinel=document.createElement('div');sentinel.style.cssText='position:fixed;left:-100px;top:-100px;width:1px;height:1px;contain:strict;visibility:hidden';document.body.append(sentinel);

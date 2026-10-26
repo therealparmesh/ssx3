@@ -17,7 +17,6 @@ let browser, monitor;
   page.on('console', message => {if (['error','warn','warning'].includes(message.type())) errors.push(message.text());});
   let frameMetrics=fs.readFileSync(path.join(__dirname,'browser_frame_metrics.js'),'utf8').replace('SSX3_DISABLE_JSPI','true');
   frameMetrics=frameMetrics.replace('try{new PerformanceObserver',"try{if(PerformanceObserver.supportedEntryTypes.includes('longtask'))new PerformanceObserver");
-  frameMetrics+=`;(()=>{const texture=GPUCanvasContext.prototype.getCurrentTexture,submit=GPUQueue.prototype.submit;let pending=false;GPUCanvasContext.prototype.getCurrentTexture=function(){const t=texture.call(this);if(this.canvas.id==='canvas')pending=true;return t};GPUQueue.prototype.submit=function(commands){const r=submit.call(this,commands);if(pending){++qa.id;pending=false}return r}})();`;
   await page.evaluateOnNewDocument('if(typeof GPUBuffer!=="undefined"){'+frameMetrics+'}');
   await page.evaluateOnNewDocument(() => {
     if (typeof AudioWorkletNode === 'undefined' || typeof AudioWorklet === 'undefined') return;
@@ -107,7 +106,7 @@ let browser, monitor;
     const q=qaAV.ints,s=new Float64Array(qaAV.buffer,128,8);
     return {browser:navigator.userAgent,instrumented:qaAV.processorInstrumented,start:qaAV.start,end:qaAV.end,
       audio:{quanta:q[1],frames:q[2],underrunFrames:q[3],underrunQuanta:q[4],peak:q[5]/32768,zeroFrames:q[6],fullScaleFrames:q[7],minimumQueuedFrames:q[8],maximumQueuedFrames:q[9],stereoDifferentFrames:q[10],rmsLeft:Math.sqrt(s[0]/q[2]),rmsRight:Math.sqrt(s[1]/q[2])},
-      presentation:{...qa.total,freshSubmissionsPerSecond:qa.total.intervals*1000/qa.total.elapsedMs},states:qaAV.states,failed:!!Module.failed,bufferedSurface:Module.bufferedSurface,checks:['actual 48 kHz stereo worklet output','pause freezes simulation and audio clock','explicit resume restores audio and simulation','simulated audio suspension pauses game and resumes']};
+      presentation:{...qa.total,actualSubmissions:qa.wall,freshSubmissionsPerSecond:qa.total.intervals*1000/qa.total.elapsedMs},states:qaAV.states,failed:!!Module.failed,bufferedSurface:Module.bufferedSurface,checks:['actual 48 kHz stereo worklet output','actual presentation submission intervals','pause freezes simulation and audio clock','explicit resume restores audio and simulation','simulated audio suspension pauses game and resumes']};
   });
   result.audioVsFrameElapsedDifferenceMs=1000*((result.end.audioTime-result.start.audioTime)-(result.end.frame-result.start.frame)/60);
   result.errors=errors;
@@ -116,6 +115,8 @@ let browser, monitor;
   assert.deepEqual(errors,[]); assert.equal(result.failed,false); assert(result.audio.frames>=48000*28);
   assert(Math.abs(result.audioVsFrameElapsedDifferenceMs)<50, "Audio and emulated frame clocks diverged");
   assert.equal(result.presentation.longRafGaps,0);assert.equal(result.presentation.overwritten,0);
+  assert(result.presentation.actualSubmissions.intervals>0,'Actual presentation submissions must be measured');
+  assert.equal(result.presentation.actualSubmissions.longGaps,0,'Actual submission gaps above 25 ms must fail even with regular RAF timestamps');
   assert.equal(result.presentation.withoutImage,0);assert.equal(result.audio.underrunFrames,0); assert(result.audio.peak>0.01); assert(result.audio.stereoDifferentFrames>0);
   await browser.close(); browser=null;
 })().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{clearInterval(monitor);if(browser)await browser.close();});
