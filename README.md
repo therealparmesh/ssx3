@@ -69,6 +69,8 @@ ctest --test-dir build/checks --output-on-failure
 node scripts/test_frame_presentation.cjs
 node scripts/test_queue_wait.cjs
 node scripts/test_yield_tasks.cjs
+node scripts/test_gpu_probe.cjs
+node scripts/test_staged_uploads.cjs
 node scripts/test_disc_fetch.cjs
 ```
 

@@ -15,11 +15,12 @@ for (const [mode, userAgent, expected] of [
   ['asyncify', 'Mozilla/5.0 Chrome/156.0.8078.47 Safari/537.36', true],
   ['asyncify', 'Mozilla/5.0 Chromium/156.0.8078.47', true],
   ['jspi', 'Mozilla/5.0 Chrome/156.0.8078.47 Safari/537.36', false],
-  ['asyncify', 'Mozilla/5.0 Gecko/20100101 Firefox/158.0', false],
+  ['asyncify', 'Mozilla/5.0 Gecko/20100101 Firefox/158.0', true],
+  ['jspi', 'Mozilla/5.0 Gecko/20100101 Firefox/158.0', false],
   ['asyncify', 'Mozilla/5.0 Version/26.0 Mobile Safari/604.1', false],
   ['asyncify', 'Mozilla/5.0 CriOS/156.0 Mobile Safari/604.1', false],
 ]) assert.equal(vm.runInNewContext('(' + selector.replaceAll('@PS2_WEB_ASYNC@', mode) + ')', {navigator:{userAgent}}), expected,
-  'Enable the optional wait only on the qualified Chromium compatibility path');
+  'Enable the optional wait on Chromium and staged-upload Firefox compatibility paths');
 
 function setup(mode) {
   const Module = {}, refreshes = new Map(), timers = new Map(), messages = [], tasks = [];

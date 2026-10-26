@@ -1106,7 +1106,8 @@ function instantiatePlayer(imports, receive) {
   return {};
 }
 var Module = {
-  yieldForBufferedFrames: '@PS2_WEB_ASYNC@' === 'asyncify' && /Chrom(?:e|ium)\//.test(navigator.userAgent),
+  yieldForBufferedFrames: '@PS2_WEB_ASYNC@' === 'asyncify' && /(?:Chrom(?:e|ium)|Firefox)\//.test(navigator.userAgent),
+  stagedUploads: '@PS2_WEB_ASYNC@' === 'asyncify' && /Firefox\//.test(navigator.userAgent),
   canvas,
   locateFile: (file, prefix) => (globalThis.SSX3_ASSET_BASE || prefix || '') + file,
   instantiateWasm: instantiatePlayer,

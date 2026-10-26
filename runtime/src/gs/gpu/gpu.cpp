@@ -24,6 +24,18 @@
 #ifdef __EMSCRIPTEN__
 EM_JS_DEPS(ps2_webgpu_futures, "$WebGPU");
 EM_JS_DEPS(ps2_webgpu_frame_clock, "$ps2webFrameClock");
+EM_JS_DEPS(ps2_webgpu_upload_buffers, "$ps2webUploadBuffers");
+EM_JS(int, ps2_webgpu_stage_uploads, (WGPUDevice device, WGPUCommandEncoder encoder, WGPUBuffer data_target, WGPUBuffer params_target,
+                                    const void *data, std::uint32_t data_bytes, const void *params, std::uint32_t params_bytes), {
+    if (!Module.stagedUploads) return 0;
+    if (Module.failed || Module.stoppedForReload) { Module.uploadBuffers?.dispose(); return 0; }
+    const uploads = Module.uploadBuffers ||= ps2webUploadBuffers(WebGPU.getJsObject(device));
+    return uploads.stage(WebGPU.getJsObject(encoder), WebGPU.getJsObject(data_target), WebGPU.getJsObject(params_target),
+                         HEAPU8, data, data_bytes, params, params_bytes);
+});
+EM_JS(void, ps2_webgpu_uploads_submitted, (int token), {
+    if (token) Module.uploadBuffers.submitted(token);
+});
 EM_JS(void, ps2_webgpu_manage_futures, (), {
     const state = WebGPU.Internals;
     if (state.ps2ManagedFutures) return;
@@ -165,6 +177,9 @@ WGPUBuffer g_blit_params = nullptr;
 std::uint32_t g_field = 0, g_last_width = 0, g_last_height = 0;
 bool g_have_previous = false;
 bool g_buffered_surface = false;
+#ifdef __EMSCRIPTEN__
+bool g_staged_uploads = false;
+#endif
 std::uint32_t g_scale = 1, g_copy_words = 1u << 20, g_field_words = 1u << 19;
 
 std::uint32_t field_base(std::uint32_t field) { return g_copy_words + (field & (g_buffered_surface ? 3u : 1u)) * g_field_words; }
@@ -970,7 +985,8 @@ void profile_submit() {
     g_clut_loads = 0;
 }
 
-// Browsers copy writes above about 1 MiB through a slower path, so large uploads go in pieces.
+// Reuse mapped upload buffers on the selected browser path. Their GPU copies
+// share the compute command buffer; unavailable slots keep normal queue writes.
 void submit(WGPUTextureView present_view = nullptr) {
     if (g_commands.empty() && !present_view) return;
     if (g_profile_out && !present_view && g_timestamps && frame_count() >= g_profile_from && frame_count() < g_profile_to) {
@@ -978,8 +994,20 @@ void submit(WGPUTextureView present_view = nullptr) {
         return;
     }
     ensure_capacity();
-    wgpuQueueWriteBuffer(g_queue, g_data, 0, g_arena.data(), g_arena.size() * 4);
-    wgpuQueueWriteBuffer(g_queue, g_params, 0, g_param_records.data(), g_param_records.size() * kParamStride);
+    WGPUCommandEncoder enc = nullptr;
+#ifdef __EMSCRIPTEN__
+    int upload = 0;
+    if (g_staged_uploads) {
+        enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
+        upload = ps2_webgpu_stage_uploads(g_device, enc, g_data, g_params, g_arena.data(), g_arena.size() * 4,
+                                         g_param_records.data(), g_param_records.size() * kParamStride);
+    }
+    if (!upload)
+#endif
+    {
+        wgpuQueueWriteBuffer(g_queue, g_data, 0, g_arena.data(), g_arena.size() * 4);
+        wgpuQueueWriteBuffer(g_queue, g_params, 0, g_param_records.data(), g_param_records.size() * kParamStride);
+    }
     if (g_query_ready) {
         const void *mapped = wgpuBufferGetConstMappedRange(g_query_read, 0, 16);
         if (mapped) {
@@ -994,7 +1022,7 @@ void submit(WGPUTextureView present_view = nullptr) {
         g_query_ready = g_query_pending = false;
     }
     const bool measure = g_timestamps && !g_query_pending;
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
+    if (!enc) enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
     WGPUPassTimestampWrites writes = WGPU_PASS_TIMESTAMP_WRITES_INIT;
     writes.querySet = g_queries;
     writes.beginningOfPassWriteIndex = 0;
@@ -1043,6 +1071,9 @@ void submit(WGPUTextureView present_view = nullptr) {
     }
     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
     wgpuQueueSubmit(g_queue, 1, &cmd);
+#ifdef __EMSCRIPTEN__
+    if (upload) ps2_webgpu_uploads_submitted(upload);
+#endif
     wgpuCommandBufferRelease(cmd);
     wgpuCommandEncoderRelease(enc);
     if (measure) {
@@ -1394,6 +1425,9 @@ bool init(Mode m) {
     wgpuShaderModuleRelease(module);
     ensure_capacity();
     g_mode = m;
+#ifdef __EMSCRIPTEN__
+    g_staged_uploads = EM_ASM_INT({ return Module.stagedUploads ? 1 : 0; });
+#endif
     return true;
 }
 
