@@ -4,6 +4,31 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
 const shell = fs.readFileSync(process.env.SSX3_TEST_PROBE_SHELL || path.join(__dirname, '../web/shell.html'), 'utf8');
+const policyStart = shell.indexOf('function preferFrameCopy()');
+const policyEnd = shell.indexOf('\nvar Module', policyStart);
+assert(policyStart >= 0 && policyEnd > policyStart);
+const policy = shell.slice(policyStart, policyEnd);
+for (const [mode, userAgent, query, expected] of [
+  ['jspi', 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0 Safari/537.36', '', true],
+  ['jspi', 'Mozilla/5.0 (X11; Linux x86_64) Chromium/156.0', '', true],
+  ['jspi', 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0 Edg/156.0', '', true],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0', '', false],
+  ['jspi', 'Mozilla/5.0 (Windows NT 10.0) Chrome/156.0', '', false],
+  ['jspi', 'Mozilla/5.0 (Macintosh; Intel Mac OS X) Chrome/156.0', '', false],
+  ['jspi', 'Mozilla/5.0 (Linux; Android 16) Chrome/156.0 Mobile Safari/537.36', '', false],
+  ['jspi', 'Mozilla/5.0 (Linux) Chrome/156.0 Mobile', '', false],
+  ['jspi', 'Mozilla/5.0 (X11; CrOS x86_64) Chrome/156.0', '', false],
+  ['jspi', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', '', false],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', '', false],
+  ['asyncify', 'Mozilla/5.0 (iPhone) Version/26.0 Mobile Safari/604.1', '', false],
+  ['jspi', 'Mozilla/5.0 (Windows NT 10.0) Chrome/156.0', 'copy', true],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', 'copy', true],
+]) {
+  assert.equal(vm.runInNewContext(policy.replaceAll('@PS2_WEB_ASYNC@', mode) + '\npreferFrameCopy()', {
+    navigator: { userAgent }, params: new URLSearchParams(query),
+  }), expected, 'Select the qualified presentation path while preserving the explicit copy request');
+}
+console.log('Presentation selection: 14 browser/build/explicit-request cases passed');
 const first = shell.indexOf('async function canPresent(');
 const last = shell.indexOf('\nfunction webgpuHelp', first);
 assert(first >= 0 && last > first);

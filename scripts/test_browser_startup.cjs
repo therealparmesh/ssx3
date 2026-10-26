@@ -175,6 +175,9 @@ async function snapshot() {
     } else if (process.env.SSX3_TEST_EXPECT_GPU_SURFACE === '1') {
       assert.equal(ready.runtime.copy, false, 'This qualified adapter must pass the pixel check');
       assert.equal(ready.runtime.surface, true, 'A working probe should select buffered GPU presentation');
+    } else if (process.env.SSX3_TEST_EXPECT_GPU_SURFACE === '0') {
+      assert.equal(ready.runtime.copy, true, 'This qualified configuration must select frame copying');
+      assert.equal(!!ready.runtime.surface, false);
     }
     await page.evaluate(() => qaStartup.release?.());
     if (mode === 'late-device') await page.waitForFunction(() => qaStartup.devices[0].destroyed === 1);

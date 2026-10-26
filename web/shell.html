@@ -1133,6 +1133,14 @@ function instantiatePlayer(imports, receive) {
   finally { if (source) URL.revokeObjectURL(source); }
   return {};
 }
+function preferFrameCopy() {
+  // The primary Chromium path on desktop Linux can delay direct surface
+  // presentation. The existing copy presenter passed complete local and
+  // private HTTPS races without those delays on the qualified desktop.
+  return params.has('copy') || ('@PS2_WEB_ASYNC@' === 'jspi' &&
+    /Linux/.test(navigator.userAgent) && !/(Android|Mobile)/.test(navigator.userAgent) &&
+    /Chrom(?:e|ium)\//.test(navigator.userAgent));
+}
 var Module = {
   yieldForBufferedFrames: '@PS2_WEB_ASYNC@' === 'asyncify' && /(?:Chrom(?:e|ium)|Firefox)\//.test(navigator.userAgent),
   stagedUploads: '@PS2_WEB_ASYNC@' === 'asyncify' && /Firefox\//.test(navigator.userAgent),
@@ -1144,7 +1152,7 @@ var Module = {
   stateUrl: params.get('state'),
   noSurface: params.has('nosurface'),
   noCard: params.has('nocard'),
-  presentCopy: params.has('copy'),
+  presentCopy: preferFrameCopy(),
   fullEffects: effects === 'original',
   fastBoot: bootMode === 'quick',
   onHalt: (reason) => {
