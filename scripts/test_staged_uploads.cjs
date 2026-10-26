@@ -33,6 +33,12 @@ function setup(){
  const onlyParams=setup();assert(onlyParams.pool.stage(onlyParams.encoder,onlyParams.data,onlyParams.params,onlyParams.heap,0,0,72,16));assert.equal(onlyParams.copies.length,1);assert.equal(onlyParams.copies[0].start,0);
  const oversized=setup();assert.equal(oversized.pool.stage(oversized.encoder,null,null,oversized.heap,0,2*1024*1024,0,4),0);assert.equal(oversized.buffers.length,0);
  const bounded=setup();for(let i=0;i<256;++i)assert(bounded.stage());assert.equal(bounded.stage(),0);assert.equal(bounded.pool.stats.allocatedBytes,16*1024*1024);assert.equal(bounded.buffers.length,256);assert.equal(bounded.pool.stats.fallback,1);
+ const cold=setup(),smallTokens=[];for(let i=0;i<256;++i)smallTokens.push(cold.stage());cold.submit();for(const id of smallTokens)cold.pool.submitted(id);await cold.finish();
+ const largeHeap=new Uint8Array(1048640);for(let i=0;i<largeHeap.length;++i)largeHeap[i]=(i*13+7)&255;
+ const largeData=new Uint8Array(1048576),largeParams=new Uint8Array(16),largeTokens=[];
+ for(let i=0;i<8;++i){const id=cold.pool.stage(cold.encoder,largeData,largeParams,largeHeap,8,1048576,1048584,16);assert(id>0&&id<=256,'Retired token slots must be reused');largeTokens.push(id);assert(cold.pool.stats.allocatedBytes<=16*1024*1024)}
+ assert.equal(cold.pool.stats.retired,256);assert.equal(cold.pool.stats.buffers,8);assert.equal(cold.buffers.filter(b=>!b.destroyed).length,8);assert.equal(cold.stage(),0,'In-flight large buffers cannot be reclaimed');
+ cold.submit();for(const id of largeTokens)cold.pool.submitted(id);await cold.finish();assert.deepEqual(largeData,largeHeap.slice(8,1048584));assert.deepEqual(largeParams,largeHeap.slice(1048584,1048600));assert(cold.stage()>0);cold.pool.dispose();assert(cold.buffers.every(b=>b.destroyed));
  const allocation=setup();allocation.device.failCreate=true;assert.equal(allocation.stage(),0);assert.equal(allocation.pool.stats.failures,1);assert.equal(allocation.stage(),0);
  assert.equal(allocation.device.scopes,0,'Allocation failures must close the temporary error scope');
  const oom=setup();oom.device.scopeError={message:'Out of memory'};oom.stage();await flush();assert.equal(oom.stage(),0);assert.equal(oom.pool.stats.failures,1);assert(oom.buffers.every(b=>b.destroyed));assert.equal(oom.device.scopes,0);
@@ -44,5 +50,5 @@ function setup(){
  const cpp=fs.readFileSync(path.join(__dirname,'../runtime/src/gs/gpu/gpu.cpp'),'utf8'),body=cpp.slice(cpp.indexOf('void submit(WGPUTextureView'));
  assert(body.indexOf('wgpuQueueSubmit(')<body.indexOf('ps2_webgpu_uploads_submitted(upload)'),'Start remapping after submitting the command buffer');
  assert(body.indexOf('ps2_webgpu_stage_uploads(')<body.indexOf('wgpuCommandEncoderBeginComputePass('),'Upload copies must precede dependent compute commands');
- console.log('PASS: staged upload bytes, reuse, submission order, memory bound, allocation/map failure, device loss, disposal and browser selection');
+ console.log('PASS: staged upload bytes, reuse, cold size-class adaptation, submission order, memory bound, allocation/map failure, device loss, disposal and browser selection');
 })().catch(error=>{console.error(error);process.exitCode=1});

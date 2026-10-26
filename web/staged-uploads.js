@@ -2,12 +2,12 @@ addToLibrary({
   $ps2webUploadBuffers: function(device) {
     var records = [], ready = [], allocated = 0, closed = false;
     var budget = 16 * 1024 * 1024, maximum = 2 * 1024 * 1024;
-    var stats = { staged: 0, bytes: 0, fallback: 0, maps: 0, failures: 0, allocatedBytes: 0, buffers: 0 };
+    var stats = { staged: 0, bytes: 0, fallback: 0, maps: 0, failures: 0, allocatedBytes: 0, buffers: 0, retired: 0 };
     var dispose = function() {
       if (closed) return;
       closed = true;
       ready.length = 0;
-      for (var record of records) record.buffer.destroy();
+      for (var record of records) if (record) record.buffer.destroy();
     };
     var fail = function() { if (!closed) { ++stats.failures; dispose(); } };
     device.lost.then(dispose, dispose);
@@ -27,11 +27,33 @@ addToLibrary({
           ready.pop();
         } else {
           var capacity = Math.pow(2, Math.ceil(Math.log2(Math.max(65536, total))));
-          if (allocated + capacity > budget) { ++stats.fallback; return 0; }
+          if (allocated + capacity > budget) {
+            // Cold boot can fill the budget with small uploads. Reclaim only
+            // completed, mapped buffers so later size classes can still fit.
+            var reclaimable = 0;
+            for (var free of ready) reclaimable += free.capacity;
+            if (allocated + capacity - reclaimable > budget) { ++stats.fallback; return 0; }
+            while (allocated + capacity > budget) {
+              var largest = 0;
+              for (var i = 1; i < ready.length; ++i)
+                if (ready[i].capacity > ready[largest].capacity) largest = i;
+              var retired = ready[largest];
+              ready[largest] = ready[ready.length - 1];
+              ready.pop();
+              retired.buffer.destroy();
+              records[retired.token - 1] = null;
+              allocated -= retired.capacity;
+              --stats.buffers;
+              ++stats.retired;
+            }
+            stats.allocatedBytes = allocated;
+          }
+          var slot = 0;
+          while (slot < records.length && records[slot]) ++slot;
           device.pushErrorScope('out-of-memory');
           try {
             var buffer = device.createBuffer({ size: capacity, usage: GPUBufferUsage.MAP_WRITE | GPUBufferUsage.COPY_SRC, mappedAtCreation: true });
-            record = { buffer: buffer, view: new Uint8Array(buffer.getMappedRange()), capacity: capacity, token: records.length + 1 };
+            record = { buffer: buffer, view: new Uint8Array(buffer.getMappedRange()), capacity: capacity, token: slot + 1 };
           } catch (_) {
             if (buffer) buffer.destroy();
             fail();
@@ -40,10 +62,10 @@ addToLibrary({
           } finally {
             device.popErrorScope().then(function(error) { if (error) fail(); }, fail);
           }
-          records.push(record);
+          records[slot] = record;
           allocated += capacity;
           stats.allocatedBytes = allocated;
-          stats.buffers = records.length;
+          ++stats.buffers;
         }
         record.view.set(heap.subarray(data, data + dataBytes), 0);
         record.view.set(heap.subarray(params, params + paramsBytes), dataBytes);
