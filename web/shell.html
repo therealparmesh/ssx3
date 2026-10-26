@@ -404,6 +404,7 @@ function stopCompiler() {
 }
 let stopForReload = null;
 function stopPlayerForReload() {
+  cancelResume();
   if (stopForReload) return stopForReload;
   stopForReload = (async () => {
     stopCompiler();
@@ -431,6 +432,7 @@ function failPlayer(message, error) {
   // Deliberate terminal teardown can reject suspended Wasm work after its
   // thread state is cleared. It must not revive the old failure UI.
   if (Module.failed || Module.stoppedForReload) return;
+  cancelResume();
   Module.failed = true;
   clearTimeout(startupTimer);
   stopCompiler();
@@ -721,8 +723,17 @@ class Output extends AudioWorkletProcessor {
 }
 registerProcessor('ps2-output', Output);`;
 
-let audio = null, node = null;
+let audio = null, node = null, pendingResume = null;
+function cancelResume() {
+  if (!pendingResume) return;
+  pendingResume = null;
+  if (audio) audio.suspend().catch(() => {});
+  document.getElementById('start').disabled = false;
+}
 function pausePlayer() {
+  // A hidden tab can interrupt audio recovery while the game is still paused.
+  // Invalidate that request even when there is no new native pause to send.
+  cancelResume();
   if (!Module.running || Module.paused) return;
   releaseInput();
   Module.paused = true;
@@ -743,7 +754,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) pause
 async function startAudio() {
   audio = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
   audio.addEventListener('statechange', () => {
-    if (Module.running && audio && audio.state !== 'running') pausePlayer();
+    if (Module.running && !Module.paused && audio && audio.state !== 'running') pausePlayer();
   });
   const url = URL.createObjectURL(new Blob([workletSource], { type: 'application/javascript' }));
   try {
@@ -1257,9 +1268,25 @@ document.getElementById('start').addEventListener('click', async () => {
   if (cardImportBusy) return;
   if (Module.failed || Module.stoppedForReload) { await reloadPlayer(); return; }
   if (Module.paused) {
+    if (pendingResume || !Module.running || document.hidden) return;
+    const request = pendingResume = {};
     start.disabled = true;
-    try { if (audio) await audio.resume(); }
-    catch (error) { start.disabled = false; note('Could not resume audio. Tap Resume to try again.'); return; }
+    try {
+      if (audio) {
+        await audio.resume();
+        if (audio.state !== 'running') throw new Error('Audio is still interrupted');
+      }
+    } catch (error) {
+      if (pendingResume !== request) return;
+      pendingResume = null;
+      if (!Module.running || Module.failed || Module.stoppedForReload) return;
+      start.disabled = false;
+      note('Could not resume audio. Tap Resume to try again.');
+      return;
+    }
+    if (pendingResume !== request) return;
+    if (!Module.running || Module.failed || Module.stoppedForReload || document.hidden) { cancelResume(); return; }
+    pendingResume = null;
     Module.paused = false;
     resetFrameStats();
     document.getElementById('settings').open = false;
