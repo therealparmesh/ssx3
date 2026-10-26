@@ -221,6 +221,16 @@ A sustained follow-up disabled the scheduler API and deferred the one posted wak
 
 The final build also handled three rejected scheduler calls in Firefox and three scheduler completions delayed by 100 ms in Chromium, with no audio underruns or pool underflows. The Firefox rejection window retained an isolated 25.22 ms refresh-timestamp interval; Chromium stayed at 16.67 ms. Both stricter headless fallback checks kept presenting nine images during the 150 ms hold, retained one posted wake, retired it safely and passed acknowledged pause/resume. Both builds passed all eight reload/recovery flows again, including a held graphics readback, cached-page resume, pending-save protection, settings changes, import and runtime-error recovery. Every reload preserved the exact career-card hash; these runs had no application errors or warnings. Nine native checks and all four asset-free JavaScript suites passed. Actual phones, physical controllers, physical A/V and complete game progression remain unqualified.
 
+## Recoverable GPU startup checks
+
+Two startup defects were reproduced on the version-38 player: withholding animation callbacks left the GPU presentation check waiting indefinitely, and rejecting its first test-device request stopped the player instead of trying the alternate path. The check now races each animation callback against a 100 ms timer, bounds each presentation probe to eight seconds and releases its canvas/device on success, rejection or timeout. A device allocated after its probe times out is destroyed without changing the selected path. These deadlines depend on the browser delivering tasks; they are not scheduling guarantees.
+
+`scripts/test_browser_startup.cjs` exercised normal startup, withheld animation callbacks, rejected test-device/adapter requests, stalled submitted-work completion and a late device allocation. All six cases passed on headless Chromium 156.0.8078.47 with each build and visible Firefox 158.0.1 with the compatibility build, on the existing Linux desktop. Every case reached Play, submitted at least 35 real game images from the local no-card Snow Jam fixture and acknowledged pause. No temporary probe canvases remained; test devices were released exactly once, including the late allocation. Normal and withheld-animation cases had no console warnings/errors. The four injected GPU failures produced their expected probe warning without application errors.
+
+Normal Play readiness took 267/280 ms on Chromium primary/compatibility and 772 ms on Firefox; withheld animation callbacks took 452/454/1,038 ms respectively. The deliberately stalled GPU requests recovered in about 8.25 seconds on Chromium and 8.65 seconds on Firefox. Chromium used frame copying; Firefox used the GPU surface and recovered through its low-power selection after the injected first-probe failure. Those labels identify browser adapter preferences, not a claim about different physical GPUs.
+
+The rebuilt Wasm, JavaScript, data and all gzip files match the version-38 deployed assets byte for byte on both builds. This change affects startup HTML only; the existing gameplay timing limits remain. The original intermittent cold-start/redirect failures were not reproduced without injection, and their causes remain unidentified. Real-phone and physical-controller qualification is still outstanding.
+
 ## Repeatable checks
 
 Follow the README for asset-free native checks. Browser scripts use these common environment variables:
@@ -234,6 +244,8 @@ Follow the README for asset-free native checks. Browser scripts use these common
 - `SSX3_TEST_STATE`: a locally captured race/menu fixture for scripts that accept it. The Firefox functional runner expects `test.state` in the served directory.
 
 Fixtures contain game data and are intentionally absent. Generate them locally with the native runner's `--save-state frame:file`; choose a frame limit greater than the save frame. Native `--load-state` replays them. Browser performance checks need a calibrated 60 Hz environment and one active game browser, with no builds, uploads or profilers running concurrently.
+
+The asset-required `scripts/test_browser_startup.cjs` uses Puppeteer Core for Chromium by default; select Firefox with `SSX3_TEST_BROWSER=firefox` and a visible window with `SSX3_TEST_HEADLESS=0`. Use `SSX3_TEST_DISABLE_JSPI=1` when serving the compatibility build. Its default local fixture is `refresh.state`; override it with `SSX3_TEST_STATE`. The injected eight-second probe deadlines are exercised at their real duration.
 
 `scripts/test_browser_media.cjs` cold-boots through the original opening with `?intro=1` and samples actual stereo AudioWorklet quanta. `SSX3_TEST_END_FRAME=18000` extends its default window. It checks measured cadence, digital clock agreement and pause/audio interruption recovery; it does not qualify physical audio latency.
 

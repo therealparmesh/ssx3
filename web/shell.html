@@ -903,31 +903,38 @@ function pollInput() {
 
 // some browsers cannot show a canvas drawn by another GPU (hybrid laptops on Linux), so each adapter draws a few test frames first
 async function canPresent(power) {
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: power });
-  if (!adapter) return null;
-  const device = await adapter.requestDevice();
-  let failed = false;
-  device.lost.then((info) => {
-    if (info.reason === 'destroyed') return;
-    failed = true;
-    console.warn('[gpu check] ' + power + ' device lost: ' + info.message);
-  });
-  device.onuncapturederror = (e) => {
-    failed = true;
-    console.warn('[gpu check] ' + power + ': ' + e.error.message);
-  };
-  const probe = document.createElement('canvas');
-  probe.width = probe.height = 64;
-  probe.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none';
-  document.body.appendChild(probe);
-  try {
+  let device, probe, finishFrame, timeout;
+  let retired = false, failed = false;
+  const check = async () => {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: power });
+    if (retired || !adapter) return null;
+    const candidate = await adapter.requestDevice();
+    // A timed-out request can still allocate a device later. Release it before
+    // it can create a canvas or change the selected presentation path.
+    if (retired) { candidate.destroy(); return null; }
+    device = candidate;
+    device.lost.then((info) => {
+      if (retired || info.reason === 'destroyed') return;
+      failed = true;
+      console.warn('[gpu check] ' + power + ' device lost: ' + info.message);
+    });
+    device.onuncapturederror = (e) => {
+      if (retired) return;
+      failed = true;
+      console.warn('[gpu check] ' + power + ': ' + e.error.message);
+    };
+    probe = document.createElement('canvas');
+    probe.width = probe.height = 64;
+    probe.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none';
+    document.body.appendChild(probe);
     const context = probe.getContext('webgpu');
     context.configure({ device, format: navigator.gpu.getPreferredCanvasFormat(), alphaMode: 'opaque' });
-    for (let i = 0; i < 3 && !failed; ++i) {
+    for (let i = 0; i < 3 && !failed && !retired; ++i) {
       const encoder = device.createCommandEncoder();
       encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 0.25, 0, 1] }] }).end();
       device.queue.submit([encoder.finish()]);
       await device.queue.onSubmittedWorkDone();
+      if (retired) return null;
       // A successful submission can still produce a blank canvas on some
       // browser/GPU combinations. Check visible pixels before choosing it.
       const copy = document.createElement('canvas');
@@ -936,16 +943,40 @@ async function canPresent(power) {
       ctx.drawImage(probe, 0, 0, 1, 1);
       const pixel = ctx.getImageData(0, 0, 1, 1).data;
       if (pixel[0] < 200 || pixel[1] < 30 || pixel[3] < 200) failed = true;
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+      // Hidden tabs can stop animation callbacks while downloads and GPU work
+      // continue. Startup must not depend on receiving a painted frame.
+      await new Promise((resolve) => {
+        let refresh, timer;
+        finishFrame = () => {
+          cancelAnimationFrame(refresh);
+          clearTimeout(timer);
+          finishFrame = null;
+          resolve();
+        };
+        refresh = requestAnimationFrame(finishFrame);
+        timer = setTimeout(finishFrame, 100);
+      });
     }
+    const name = [adapter.info.vendor, adapter.info.architecture].filter(Boolean).join(' ') || power;
+    return failed || retired ? null : name;
+  };
+  try {
+    return await Promise.race([check(), new Promise((resolve) => {
+      timeout = setTimeout(() => {
+        console.warn('[gpu check] ' + power + ': presentation check timed out');
+        resolve(null);
+      }, 8000);
+    })]);
   } catch (e) {
-    failed = true;
     console.warn('[gpu check] ' + power + ': ' + e);
+    return null;
+  } finally {
+    retired = true;
+    clearTimeout(timeout);
+    if (finishFrame) finishFrame();
+    if (probe) probe.remove();
+    if (device) device.destroy();
   }
-  probe.remove();
-  const name = [adapter.info.vendor, adapter.info.architecture].filter(Boolean).join(' ') || power;
-  device.destroy();
-  return failed ? null : name;
 }
 
 function webgpuHelp(onCpu) {
@@ -1008,8 +1039,8 @@ const countShown = () => {
 requestAnimationFrame(countShown);
 
 // Keep streaming compilation and subsequent compiled-code cache writes off
-// the rendering thread. Keep this worker alive while the player is open:
-// browsers may save more optimized code after gameplay has already started.
+// the rendering thread. Release its worker after transferring the compiled
+// module; the runtime and browser own its subsequent optimized-code cache.
 function compilePlayerWorker() {
   self.onmessage = async ({ data: url }) => {
     self.onmessage = null;
