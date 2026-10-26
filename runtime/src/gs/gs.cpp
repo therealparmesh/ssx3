@@ -20,6 +20,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 namespace ps2::gs {
 
@@ -885,9 +888,17 @@ Rendered render_pending(const std::function<void(const DisplayRegs &)> &on_prese
     queue::role() = queue::Role::Render;
     queue::Header h;
     const std::uint8_t *payload = nullptr;
+#ifdef __EMSCRIPTEN__
+    // Budget checks already need milliseconds. Avoid the libc clock bridge
+    // and nanosecond conversion on the browser's rendering hot path.
+    const double start = emscripten_get_now();
+    const auto elapsed_ms = [&] { return emscripten_get_now() - start; };
+#else
     const auto start = std::chrono::steady_clock::now();
+    const auto elapsed_ms = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
+#endif
     for (std::uint32_t n = 1; queue::render().peek(h, payload); ++n) {
-        if (!(n & 7u) && std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() > budget_ms) return Rendered::busy;
+        if (!(n & 7u) && elapsed_ms() > budget_ms) return Rendered::busy;
         bool presented = false, submitted = false;
         switch (h.type) {
         case queue::kGif:
