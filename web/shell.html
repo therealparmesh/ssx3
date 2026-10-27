@@ -811,6 +811,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { keys.delete(e.code); if (Module.running) pollInput(); });
 const padButtons = [[0, 14], [1, 13], [2, 15], [3, 12], [4, 10], [5, 11], [6, 8], [7, 9], [8, 0], [9, 3], [10, 1], [11, 2],
                     [12, 4], [13, 6], [14, 7], [15, 5]];
+const noGamepads = [];
 const axis = (v) => Number.isFinite(v) ? Math.max(0, Math.min(255, Math.round((v + 1) * 127.5))) : 128;
 document.getElementById('settings').addEventListener('toggle', (e) => {
   if (!e.target.open && Module.running) canvas.focus();
@@ -864,7 +865,8 @@ function pollPlayer(port, gamepad, own) {
   }
   const full = buttons;
   if (gamepad) {
-    for (const [index, bit] of padButtons) {
+    for (let i = 0; i < padButtons.length; ++i) {
+      const index = padButtons[i][0], bit = padButtons[i][1];
       const b = gamepad.buttons[index];
       if (!b || !(b.pressed || b.value > 0.05)) continue;
       buttons |= 1 << bit;
@@ -907,26 +909,46 @@ function pollPlayer(port, gamepad, own) {
 }
 function pollInput() {
   if (document.hidden || !inputFocused || Module.paused || Module.failed) return;
-  let pads = [];
+  let pads = noGamepads;
   try {
-    pads = [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter((pad) => pad && pad.connected);
+    pads = navigator.getGamepads ? navigator.getGamepads() : noGamepads;
     // Keep each connected controller on its port when another disconnects.
-    // Browser indices may have holes and are not necessarily zero-based here.
-    for (const player of players) {
-      if (!pads.some(pad => pad.index === player.controllerIndex)) player.controllerIndex = null;
+    // Scan the browser snapshot directly without copying or filtering it.
+    for (let port = 0; port < players.length; ++port) {
+      const player = players[port];
+      let present = false;
+      for (let i = 0; i < pads.length; ++i) {
+        const pad = pads[i];
+        if (pad && pad.connected && pad.index === player.controllerIndex) { present = true; break; }
+      }
+      if (!present) player.controllerIndex = null;
     }
-    for (const player of players) {
-      if (player.controllerIndex === null) {
-        const pad = pads.find(pad => !players.some(other => other.controllerIndex === pad.index));
-        if (pad) player.controllerIndex = pad.index;
+    for (let port = 0; port < players.length; ++port) {
+      const player = players[port];
+      if (player.controllerIndex !== null) continue;
+      for (let i = 0; i < pads.length; ++i) {
+        const pad = pads[i];
+        if (!pad || !pad.connected) continue;
+        let assigned = false;
+        for (let other = 0; other < players.length; ++other)
+          if (players[other].controllerIndex === pad.index) { assigned = true; break; }
+        if (!assigned) { player.controllerIndex = pad.index; break; }
       }
     }
   }
   catch (error) {
+    pads = noGamepads;
     if (!gamepadErrorShown) { note('The browser blocked controller access. Keyboard and touch controls are available.'); gamepadErrorShown = true; }
   }
-  pollPlayer(0, pads.find(pad => pad.index === players[0].controllerIndex) || null, true);
-  pollPlayer(1, pads.find(pad => pad.index === players[1].controllerIndex) || null, false);
+  let first = null, second = null;
+  for (let i = 0; i < pads.length; ++i) {
+    const pad = pads[i];
+    if (!pad || !pad.connected) continue;
+    if (!first && pad.index === players[0].controllerIndex) first = pad;
+    if (!second && pad.index === players[1].controllerIndex) second = pad;
+  }
+  pollPlayer(0, first, true);
+  pollPlayer(1, second, false);
 }
 
 // some browsers cannot show a canvas drawn by another GPU (hybrid laptops on Linux), so each adapter draws a few test frames first

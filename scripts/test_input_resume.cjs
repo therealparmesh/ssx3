@@ -71,6 +71,7 @@ function fixture() {
   return { Module, pads, nativePads, connected, resumes, notes, context,
     seed() { Module.paused = false; poll(); Module.paused = true; vm.runInContext('releaseInput()', context); },
     block() { blocked = true; },
+    unblock() { blocked = false; },
     blur() { windowEvents.get('blur')(); },
     beginResume() { return element('start').listeners.get('click')(); },
     resolveAudio(index = audioRequests.length - 1, state = 'running') { context.audio.state = state; audioRequests[index].resolve(); },
@@ -96,6 +97,34 @@ async function resume(f) {
 }
 
 (async () => {
+  {
+    const f = fixture(); f.Module.paused = false;
+    f.pads[3] = controller(3); f.pads[7] = controller(7); f.pads[12] = controller(12);
+    vm.runInContext('pollInput()', f.context);
+    assert.deepEqual(Array.from(vm.runInContext('players.map(p => p.controllerIndex)', f.context)), [3, 7]);
+    const freshFirst = controller(3), freshSecond = controller(7), newcomer = controller(1);
+    hold(freshFirst, 0); hold(freshSecond, 1); hold(newcomer, 3);
+    f.pads.splice(0, f.pads.length, newcomer, freshSecond, null, freshFirst);
+    vm.runInContext('pollInput()', f.context);
+    assert.deepEqual(Array.from(vm.runInContext('players.map(p => p.controllerIndex)', f.context)), [3, 7], 'Reordered fresh snapshots and a newcomer cannot steal connected ports');
+    assert.equal(f.nativePads[0][0], 16384); assert.equal(f.nativePads[1][0], 8192);
+    f.pads[3] = null;
+    vm.runInContext('pollInput()', f.context);
+    assert.deepEqual(Array.from(vm.runInContext('players.map(p => p.controllerIndex)', f.context)), [1, 7], 'A newcomer may fill only the disconnected port');
+    assert.equal(f.nativePads[0][0], 4096); assert.equal(f.nativePads[1][0], 8192);
+  }
+  {
+    const f = fixture(); f.Module.paused = false;
+    f.pads[3] = controller(3); f.pads[7] = controller(7);
+    vm.runInContext('pollInput()', f.context); f.block();
+    vm.runInContext('pollInput()', f.context); vm.runInContext('pollInput()', f.context);
+    assert.equal(f.notes.length, 1);
+    assert.deepEqual(Array.from(vm.runInContext('players.map(p => p.controllerIndex)', f.context)), [3, 7], 'A temporary controller API failure cannot forget surviving assignments');
+    const freshFirst = controller(3), freshSecond = controller(7);hold(freshFirst, 0);hold(freshSecond, 1);
+    f.pads.splice(0, f.pads.length, freshSecond, null, freshFirst);f.unblock();
+    vm.runInContext('pollInput()', f.context);
+    assert.equal(f.nativePads[0][0], 16384);assert.equal(f.nativePads[1][0], 8192);
+  }
   {
     const f = fixture(), first = f.pads[3] = controller(3), second = f.pads[7] = controller(7);
     f.seed();
@@ -222,5 +251,5 @@ async function resume(f) {
     assert.equal(f.resumes.length, 0, 'Hidden documents must not begin a resume');
     assert.equal(f.start.disabled, false);
   }
-  console.log('Input resume: 18 regression scenarios passed');
+  console.log('Input resume: 20 regression scenarios passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
