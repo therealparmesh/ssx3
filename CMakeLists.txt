@@ -88,6 +88,11 @@ add_library(ps2runtime STATIC
     runtime/src/iop/cdvdfsv.cpp)
 target_include_directories(ps2runtime PUBLIC runtime/include)
 target_compile_options(ps2runtime PRIVATE -Wall -Wextra)
+if(EMSCRIPTEN AND PS2_WEB_ASYNC STREQUAL "asyncify")
+    # The deferred wait-promise workaround is for the compatibility renderer.
+    # JSPI keeps the original native queue notification path.
+    set_property(SOURCE runtime/src/gs/queue.cpp APPEND PROPERTY COMPILE_DEFINITIONS PS2_RENDER_PROXY_WAKE)
+endif()
 
 set(PS2_WGPU_DIR "${CMAKE_SOURCE_DIR}/third_party/wgpu-native" CACHE PATH "wgpu-native release folder")
 if(EMSCRIPTEN OR EXISTS "${PS2_WGPU_DIR}/lib/libwgpu_native.a")

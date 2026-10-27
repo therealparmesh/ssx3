@@ -8,8 +8,10 @@
 
 std::atomic<std::uint32_t> armed{0};
 
-EM_JS(void, hold_old_wakes, (std::atomic<std::uint32_t> *ready), {
+EM_JS(void, hold_old_wakes, (std::atomic<std::uint32_t> *ready, int proxy), {
     Module.queueWaitOriginal = Atomics.waitAsync;
+    Module.yieldForBufferedFrames = !!proxy;
+    Module.queueWaitCalls = 0;
     Module.queueWaitHeld = 0;
     Module.queueWaitRefreshes = 0;
     globalThis.requestAnimationFrame = () => ++Module.queueWaitRefreshes;
@@ -17,10 +19,13 @@ EM_JS(void, hold_old_wakes, (std::atomic<std::uint32_t> *ready), {
     Atomics.waitAsync = function(array, index, seen, timeout) {
         const result = Module.queueWaitOriginal.apply(this, arguments);
         if (result.async && timeout === 50) {
-            ++Module.queueWaitHeld;
+            ++Module.queueWaitCalls;
             Atomics.store(HEAP32, ready >> 2, 1);
             Atomics.notify(HEAP32, ready >> 2);
-            return {async: true, value: new Promise(() => {})};
+            if (proxy) {
+                ++Module.queueWaitHeld;
+                return {async: true, value: new Promise(() => {})};
+            }
         }
         return result;
     };
@@ -33,7 +38,7 @@ EM_JS(void, hold_old_wakes, (std::atomic<std::uint32_t> *ready), {
 EM_JS(int, finish_wake_test, (), {
     clearTimeout(Module.queueWaitDeadline);
     Atomics.waitAsync = Module.queueWaitOriginal;
-    return Module.queueWaitHeld === 2 && Module.queueWaitRefreshes === 2 &&
+    return Module.queueWaitCalls === 2 && Module.queueWaitHeld === (Module.yieldForBufferedFrames ? 2 : 0) && Module.queueWaitRefreshes === 2 &&
            Module.renderWorkWake === undefined;
 });
 
@@ -48,7 +53,12 @@ int main() {
     try {
         auto &queue = ps2::gs::queue::render();
         queue.start(1024);
-        hold_old_wakes(&armed);
+#ifdef PS2_TEST_RENDER_PROXY_ENABLED
+        constexpr bool proxy = true;
+#else
+        constexpr bool proxy = false;
+#endif
+        hold_old_wakes(&armed, proxy ? 1 : 0);
         for (int wake_only = 0; wake_only < 2; ++wake_only) {
             armed.store(0);
             pthread_t worker;
@@ -64,7 +74,9 @@ int main() {
             pthread_join(worker, nullptr);
         }
         if (!finish_wake_test()) throw std::runtime_error("Old wake paths ran or producer callback was not retired");
-        std::puts("PASS: actual Wasm producer wakes the renderer with native promise and RAF withheld; post/wake, command integrity and callback retirement pass");
+        std::puts(proxy
+            ? "PASS: explicit Wasm producer wakes with old paths withheld; post/wake, command integrity and callback retirement pass"
+            : "PASS: native Wasm queue wait works with compatibility notification disabled");
     } catch (const std::exception &error) {
         std::fprintf(stderr, "FAIL: %s\n", error.what());
         emscripten_force_exit(1);

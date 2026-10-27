@@ -12,8 +12,8 @@ const start = source.indexOf(', {', declaration) + 3;
 const body = source.slice(start, source.indexOf('\n});', start));
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function setup(seen = 17, immediate = false) {
-  const Module = {};
+function setup(seen = 17, immediate = false, proxy = true) {
+  const Module = {yieldForBufferedFrames: proxy};
   const heap = new Int32Array(new SharedArrayBuffer(16));
   Atomics.store(heap, 1, seen);
   const callbacks = new Map();
@@ -52,6 +52,12 @@ function setup(seen = 17, immediate = false) {
   assert.equal(immediate.calls(), 1);
   assert.equal(immediate.callbacks.size, 0, 'An immediate wait result must not schedule a refresh');
   assert.equal(immediate.Module.renderWorkWake, undefined);
+
+  const legacy = setup(17, false, false);
+  assert.equal(legacy.Module.renderWorkWake, undefined, 'The JSPI/native wait path must not register a compatibility wake');
+  legacy.wake('ok'); await legacy.promise;
+  assert.equal(legacy.completed(), 1);
+  assert.equal(legacy.callbacks.size, 0);
 
   for (const seen of [17, -2147483648, 2147483648, 4294967295]) {
     const producer = setup(seen);
