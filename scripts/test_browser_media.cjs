@@ -84,7 +84,9 @@ let browser, monitor;
     const q=qaAV.ints,s=new Float64Array(qaAV.buffer,128,8);
     return {browser:navigator.userAgent,instrumented:qaAV.processorInstrumented,start:qaAV.start,end:qaAV.end,
       audio:{quanta:q[1],frames:q[2],underrunFrames:q[3],underrunQuanta:q[4],metricMethod:"actual read-counter delta",estimatedUnderrunFrames:q[11],nativeFramesConsumed:q[12],refillRaceQuanta:q[13],peak:q[5]/32768,zeroFrames:q[6],fullScaleFrames:q[7],minimumQueuedFrames:q[8],maximumQueuedFrames:q[9],stereoDifferentFrames:q[10],rmsLeft:Math.sqrt(s[0]/q[2]),rmsRight:Math.sqrt(s[1]/q[2])},
-      presentation:{...qa.total,actualSubmissions:qa.wall,freshSubmissionsPerSecond:qa.total.intervals*1000/qa.total.elapsedMs},states:qaAV.states,failed:!!Module.failed,bufferedSurface:Module.bufferedSurface,checks:['actual 48 kHz stereo worklet output','actual presentation submission intervals','pause freezes simulation and audio clock','explicit resume restores audio and simulation','simulated audio suspension pauses game and resumes']};
+      presentation:{...qa.total,actualSubmissions:qa.wall,freshSubmissionsPerSecond:(qa.total.intervals-qa.total.withoutImage)*1000/qa.total.elapsedMs},
+      frameDiagnostics:{events:qa.events.map(event=>({...event,ring:Array.from(event.ring)})),longTasks:qa.longTasks,exclusions:qa.exclusions},
+      states:qaAV.states,failed:!!Module.failed,bufferedSurface:Module.bufferedSurface,checks:['actual 48 kHz stereo worklet output','actual presentation submission intervals','pause freezes simulation and audio clock','explicit resume restores audio and simulation','simulated audio suspension pauses game and resumes']};
   });
   result.audioVsFrameElapsedDifferenceMs=1000*((result.end.audioTime-result.start.audioTime)-(result.end.frame-result.start.frame)/60);
   result.errors=errors;
