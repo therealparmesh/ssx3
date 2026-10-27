@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PS2_GENERATED "" CACHE PATH "Folder with the C++ generated for a game")
 option(PS2_DEVELOPER_TOOLS "Include native profiling and named Wasm profiling functions" OFF)
 option(PS2_RUNTIME_TESTS "Build asset-free runtime and code-generation regression tests" OFF)
+option(PS2_GPU_TESTS "Build browser WebGPU regression fixtures without game assets" OFF)
 
 # Keep every indirect game entry point registered. Let the linker remove only
 # host/runtime sections that have no references; playthrough coverage alone
@@ -110,6 +111,23 @@ if(EMSCRIPTEN OR EXISTS "${PS2_WGPU_DIR}/lib/libwgpu_native.a")
             target_link_libraries(ps2runtime PUBLIC "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework CoreFoundation" "-framework IOKit" "-framework IOSurface" objc)
         endif()
     endif()
+endif()
+
+if(PS2_GPU_TESTS)
+    if(NOT EMSCRIPTEN)
+        message(FATAL_ERROR "PS2_GPU_TESTS requires an Emscripten browser build")
+    endif()
+    add_executable(gpu_copy_readback tests/gpu_copy_readback.cpp)
+    target_include_directories(gpu_copy_readback PRIVATE runtime/src)
+    target_link_libraries(gpu_copy_readback PRIVATE ps2runtime)
+    target_link_options(gpu_copy_readback PRIVATE ${PS2_WEB_SUSPEND_FLAGS}
+        -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=16777216
+        -sENVIRONMENT=web -sALLOW_TABLE_GROWTH=1 -sEXPORTED_RUNTIME_METHODS=FS,callMain
+        "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js\""
+        "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js\""
+        "SHELL:--shell-file \"${CMAKE_CURRENT_SOURCE_DIR}/tests/gpu_probe_shell.html\"")
+    set_target_properties(gpu_copy_readback PROPERTIES SUFFIX ".html"
+        LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/gpu_probe_shell.html;${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js;${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js")
 endif()
 
 if(PS2_GENERATED)

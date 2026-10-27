@@ -1,0 +1,7 @@
+<!doctype html><meta charset="utf-8"><title>GS copy submission probe</title><canvas id="canvas" width="64" height="32"></canvas><script>
+window.qaProbe={messages:[],errors:[],result:null};
+var Module={canvas:document.getElementById('canvas'),bufferedSurface:false,stagedUploads:new URLSearchParams(location.search).has('staged'),
+ print:text=>qaProbe.messages.push(text),printErr:text=>{qaProbe.messages.push(text);if(text.includes('error')||text.includes('PROBE_FAIL'))qaProbe.errors.push(text)},
+ onHalt:text=>qaProbe.errors.push(text),onAbort:text=>qaProbe.errors.push(text),
+ preRun:[()=>{ENV.PS2_SCALE=new URLSearchParams(location.search).get('scale')||'1';ENV.PS2_GPU_TIMESTAMPS='0';if(new URLSearchParams(location.search).has('profile')){ENV.PS2_GPU_TIMESTAMPS='1';ENV.PS2_GPU_PROFILE='0,1000,/profile.txt'}}]};
+</script>{{{ SCRIPT }}}

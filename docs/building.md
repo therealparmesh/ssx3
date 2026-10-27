@@ -49,6 +49,26 @@ The browser host passes the selected startup/effects mode to the runtime. The na
 
 Normal browser play disables GPU timestamp queries; `?debug` enables them when supported. Native runs retain timing collection by default. `PS2_GPU_TIMESTAMPS=0` disables native timing collection, while an explicit `PS2_GPU_PROFILE` still requests the timestamps needed for its profile. Native environment variables are not arbitrary URL options.
 
+## GPU readback regression without game assets
+
+With the pinned SDK activated, build the optional fixture against the actual GS renderer and shaders:
+
+```sh
+emcmake cmake -S . -B build/gpu-tests -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DPS2_WEB_ASYNC=asyncify -DPS2_GPU_TESTS=ON
+cmake --build build/gpu-tests --target gpu_copy_readback --parallel 2
+python3 scripts/serve.py build/gpu-tests /dev/null 8722
+```
+
+The disc argument is unused by this fixture. With Puppeteer Core installed, run in a second terminal:
+
+```sh
+SSX3_TEST_BROWSER=firefox node scripts/test_gpu_copy_readback.cjs
+SSX3_TEST_BROWSER=chrome node scripts/test_gpu_copy_readback.cjs
+```
+
+Set `PUPPETEER_MODULE` to its installed directory when it is outside the project. `SSX3_TEST_URL` selects another fixture URL and `SSX3_TEST_OUTPUT` selects the result directory. Optional `SSX3_GPU_TEST_PROFILE=1` also requires timestamp-query support and exercises the profiling submission path. The fixture verifies all pixels from 64 ordered asynchronous frames, varying dimensions, doubled scale, staged uploads, synchronous display and a nonzero-offset VRAM readback. It needs a real WebGPU browser and does not qualify game performance or physical devices.
+
 ## Hosting
 
 A private HTTPS deployment needs WebGPU, secure-context APIs, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, byte-range disc requests and suitable Wasm/JavaScript MIME types. Authentication must cover the player, disc and game assets. The existing private deployment's identity, credentials, bucket bindings and release objects are not part of this repository.

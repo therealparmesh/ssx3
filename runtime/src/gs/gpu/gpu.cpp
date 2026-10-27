@@ -329,6 +329,15 @@ void submit_command(WGPUCommandBuffer command) {
 #endif
 }
 
+void submit_copy(WGPUBuffer source, WGPUBuffer target, std::uint64_t bytes, std::uint64_t offset = 0) {
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
+    wgpuCommandEncoderCopyBufferToBuffer(enc, source, offset, target, 0, bytes);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
+    submit_command(cmd);
+    wgpuCommandBufferRelease(cmd);
+    wgpuCommandEncoderRelease(enc);
+}
+
 void page_size(std::uint32_t psm, std::uint32_t &pw, std::uint32_t &ph) {
     switch (psm) {
     case PSMCT16: case PSMCT16S: case PSMZ16: case PSMZ16S: pw = 64; ph = 64; break;
@@ -1000,10 +1009,16 @@ void profile_submit() {
 
 // Reuse mapped upload buffers on the selected browser path. Their GPU copies
 // share the compute command buffer; unavailable slots keep normal queue writes.
-void submit(WGPUTextureView present_view = nullptr) {
-    if (g_commands.empty() && !present_view) return;
+void submit(WGPUTextureView present_view = nullptr, WGPUBuffer copy_target = nullptr, std::uint64_t copy_bytes = 0) {
+    if (g_commands.empty() && !present_view) {
+        if (copy_target) submit_copy(g_scratch, copy_target, copy_bytes);
+        return;
+    }
     if (g_profile_out && !present_view && g_timestamps && frame_count() >= g_profile_from && frame_count() < g_profile_to) {
         profile_submit();
+        // Profiling waits for its timestamp readback before the display copy,
+        // preserving the diagnostic path's existing submission order.
+        if (copy_target) submit_copy(g_scratch, copy_target, copy_bytes);
         return;
     }
     ensure_capacity();
@@ -1062,6 +1077,9 @@ void submit(WGPUTextureView present_view = nullptr) {
         wgpuCommandEncoderResolveQuerySet(enc, g_queries, 0, 2, g_query_resolve, 0);
         wgpuCommandEncoderCopyBufferToBuffer(enc, g_query_resolve, 0, g_query_read, 0, 16);
     }
+    // The display compute pass has ended. Copy its output before finishing this
+    // encoder, so an asynchronous readback needs no second command buffer.
+    if (copy_target) wgpuCommandEncoderCopyBufferToBuffer(enc, g_scratch, 0, copy_target, 0, copy_bytes);
     if (present_view) {
         WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
         color.view = present_view;
@@ -1114,12 +1132,7 @@ void submit(WGPUTextureView present_view = nullptr) {
 }
 
 bool read_back(WGPUBuffer source, std::uint64_t bytes, void *out, std::uint64_t offset = 0) {
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
-    wgpuCommandEncoderCopyBufferToBuffer(enc, source, offset, g_readback, 0, bytes);
-    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
-    submit_command(cmd);
-    wgpuCommandBufferRelease(cmd);
-    wgpuCommandEncoderRelease(enc);
+    submit_copy(source, g_readback, bytes, offset);
     bool done = false;
     WGPUBufferMapCallbackInfo cb = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
     cb.mode = WGPUCallbackMode_AllowProcessEvents;
@@ -2007,13 +2020,7 @@ bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, s
         flush_all();
         const std::uint32_t param = push_params({src.fbp, src.fbw, src.psm, src.dbx, src.dby, src.width, src.height, src.halved ? 1u : 0u});
         g_commands.push_back({kDisplay, (src.width * g_scale + 7) / 8, (src.height * g_scale + 7) / 8, param});
-        submit();
-        WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
-        wgpuCommandEncoderCopyBufferToBuffer(enc, g_scratch, 0, slot->buffer, 0, bytes);
-        WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
-        submit_command(cmd);
-        wgpuCommandBufferRelease(cmd);
-        wgpuCommandEncoderRelease(enc);
+        submit(nullptr, slot->buffer, bytes);
         slot->busy = true;
         slot->complete = false;
         slot->order = ++g_copy_order;
