@@ -110,5 +110,85 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(f.Module.shownWaiters.length, 1, 'An uninitialized or direct presenter retains its refresh wait');
     f.Module.shownWaiters.shift()(); await task;
   }
-  console.log(`Display capacity: ${cases.length} selection gates, ${reserveGates} reserve gates and 15 wait/recovery scenarios passed`);
+  for (const hz of [60, 90, 120, 144, 240]) {
+    const f = fixture();
+    Object.assign(f.Module, { bufferedSurface: false, prepareCopyFrames: true, yieldForBufferedFrames: false,
+      blitFrames: [{}, {}, {}], blitClock: { refreshInterval: () => 1000 / hz }, audioQueuedMs: () => 19 });
+    assert.equal(f.safe(19), 1, 'An acknowledged copy can wait while the EE fills audio'); ++reserveGates;
+    let finished = false; const task = f.wait(1).then(() => { finished = true; });
+    await flush(); assert(!finished); assert.equal(f.Module.shownWaiters.length, 0);
+    f.wake(); await flush(); assert(!finished, 'A wake without a free slot cannot discard a prepared image');
+    f.Module.blitFrames.pop(); f.wake(); await task;
+    assert.equal(f.Module.surfaceFrames.length, 3, 'A stale surface queue must not govern copy capacity');
+  }
+  for (const refresh of [20, 1000 / 30, 0, -1, NaN]) {
+    const f = fixture();
+    Object.assign(f.Module, { bufferedSurface: false, prepareCopyFrames: true, blitFrames: [{}, {}, {}],
+      blitClock: { refreshInterval: () => refresh }, shownPending: true });
+    assert.equal(f.safe(38), 0, 'Retain the existing fallback when display cadence cannot sustain 60'); ++reserveGates;
+    const task = f.wait(0); assert.equal(f.Module.surfaceYield, undefined);
+    assert.equal(f.Module.shownWaiters.length, 1); f.Module.shownWaiters.shift()(); await task;
+  }
+  for (const flag of ['paused', 'failed', 'stoppedForReload']) {
+    const f = fixture();
+    Object.assign(f.Module, { bufferedSurface: false, prepareCopyFrames: true, blitFrames: [{}, {}, {}],
+      blitClock: { refreshInterval: () => 1000 / 60 } });
+    const task = f.wait(1); f.Module[flag] = true; f.wake(); await task;
+    assert.equal(f.safe(38), 0); ++reserveGates;
+  }
+  {
+    const start = source.indexOf('EM_JS(void, ps2web_blit,');
+    const first = source.indexOf(', {', start) + 3, last = source.indexOf('\n});', first);
+    assert(start >= 0 && first > start && last > first);
+    const refreshes = [], microtasks = [];
+    let draws = 0;
+    const drawing = { fillRect() {}, putImageData() {}, drawImage() { ++draws; } };
+    const Module = { canvas: { width: 1, height: 1, getContext: () => drawing } };
+    const clock = { due: () => true, presented() {}, reset() {}, refreshInterval: () => 1000 / 60 };
+    const context = vm.createContext({ Module, ps2webFrameClock: () => clock,
+      requestAnimationFrame: callback => refreshes.push(callback), queueMicrotask: callback => microtasks.push(callback),
+      HEAPU8: Uint8Array.from([1, 2, 3, 255]),
+      ImageData: class { constructor(width, height) { this.width = width; this.height = height; this.data = new Uint8ClampedArray(width * height * 4); } },
+      OffscreenCanvas: class { constructor(width, height) { this.width = width; this.height = height; } getContext() { return drawing; } },
+    });
+    const blit = vm.runInContext('(function(rgba,width,height,wide){' + source.slice(first, last) + '})', context);
+    const tick = (expectedDraws, expectedFree) => {
+      let resumed = false;
+      Module.surfaceYield = () => { resumed = true; assert.equal(Module.blitFree.length, expectedFree); };
+      const before = draws; refreshes.shift()(100);
+      assert.equal(draws - before, expectedDraws);
+      assert.equal(Module.surfaceYield, undefined, 'Retire the wake before native work resumes');
+      assert.equal(resumed, false, 'Native work must not reenter the presenter before bookkeeping finishes');
+      assert.equal(refreshes.length, 1); assert.equal(microtasks.length, 1);
+      microtasks.shift()(); assert(resumed);
+    };
+    blit(0, 1, 1, 0); assert.equal(Module.blitClock, clock); tick(0, 2);
+    blit(0, 1, 1, 0); tick(1, 2);
+    blit(0, 1, 1, 0); blit(0, 1, 1, 0);
+    for (const flag of ['paused', 'failed', 'stoppedForReload']) {
+      Module[flag] = true; tick(0, 0); Module[flag] = false;
+    }
+  }
+  for (const flag of ['paused', 'failed', 'stoppedForReload']) {
+    const f = fixture();
+    Object.assign(f.Module, { [flag]: true, shownPending: true });
+    await f.wait(0); assert.equal(f.Module.shownWaiters.length, 0);
+    assert.equal(f.Module.surfaceYield, undefined, 'Inactive players cannot create a new display wait');
+  }
+  {
+    const start = source.indexOf('EM_JS(void, ps2web_release_presenter,');
+    const first = source.indexOf(', {', start) + 3, last = source.indexOf('\n});', first);
+    assert(start >= 0 && first > start && last > first);
+    const jobs = []; let capacityWakes = 0, refreshWakes = 0;
+    const Module = { surfaceYield: () => { ++capacityWakes; },
+      shownWaiters: [() => { ++refreshWakes; }], shownPending: true };
+    const context = vm.createContext({ Module, queueMicrotask: job => jobs.push(job) });
+    const release = vm.runInContext('(function(){' + source.slice(first, last) + '})', context);
+    release(); assert.equal(Module.surfaceYield, undefined); assert.equal(Module.shownWaiters.length, 0);
+    assert.equal(Module.shownPending, true, 'Pause must not let a stale RAF retire a future refresh');
+    assert.equal(capacityWakes + refreshWakes, 0, 'Pause cannot reenter suspended native work synchronously');
+    release(); assert.equal(jobs.length, 2, 'Each old waiter is released only once');
+    for (const job of jobs) job(); assert.equal(capacityWakes, 1); assert.equal(refreshWakes, 1);
+  }
+  console.log(`Display capacity: ${cases.length} selection gates, ${reserveGates} reserve gates and 32 wait/recovery scenarios passed`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -502,24 +502,30 @@ Rendered render_pending(bool surface, const std::function<void(const std::uint32
                         const std::function<void()> &before_present, double budget_ms, bool *displayed) {
     static std::vector<std::uint32_t> frame;
     if (displayed) *displayed = false;
-    return gs::render_pending([&](const gs::DisplayRegs &regs) {
+    std::uint32_t width = 0, height = 0;
+    bool copy_ready = false;
+    const Rendered rendered = gs::render_pending([&](const gs::DisplayRegs &regs) {
         if (surface) {
             if (before_present) before_present();
             const bool got = gs::present(regs);
             if (displayed) *displayed = got;
             return;
         }
-        std::uint32_t width = 0, height = 0;
         // Prepare the CPU image and submit the following GPU readback while
         // this refresh is still pending, rather than starting that work at
         // its deadline. Only the final canvas copy must wait for presentation.
-        const bool got = copy && gs::copy_frame(regs, frame, width, height);
+        copy_ready = copy && gs::copy_frame(regs, frame, width, height);
+    }, budget_ms);
+    if (!surface && rendered == Rendered::presented) {
+        // The image is owned by this renderer. Acknowledge its GS work before
+        // the display wait, so the EE worker can replenish audio independently.
         if (before_present) before_present();
-        if (got) {
+        if (copy_ready) {
             copy(frame.data(), width, height);
             if (displayed) *displayed = true;
         }
-    }, budget_ms);
+    }
+    return rendered;
 }
 
 void wait_render_work(int timeout_ms) { gs::queue::render().wait_for_work(timeout_ms); }

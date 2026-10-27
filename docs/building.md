@@ -69,6 +69,18 @@ SSX3_TEST_BROWSER=chrome node scripts/test_gpu_copy_readback.cjs
 
 Set `PUPPETEER_MODULE` to its installed directory when it is outside the project. `SSX3_TEST_URL` selects another fixture URL and `SSX3_TEST_OUTPUT` selects the result directory. Optional `SSX3_GPU_TEST_PROFILE=1` also requires timestamp-query support and exercises the profiling submission path. The fixture verifies all pixels from 64 ordered asynchronous frames, varying dimensions, doubled scale, staged uploads, synchronous display and a nonzero-offset VRAM readback. It needs a real WebGPU browser and does not qualify game performance or physical devices.
 
+## Prepared-copy pause and recovery regression
+
+After building and serving the primary JSPI player, Chromium with JSPI and WebGPU can exercise a full copy queue while animation callbacks are held:
+
+```sh
+SSX3_TEST_URL=http://127.0.0.1:8620 \
+  SSX3_TEST_STATE=test.state \
+  node scripts/test_browser_copy_wait.cjs
+```
+
+Supply your own compatible runtime state in the served directory; it is not included in the repository. Set `PUPPETEER_MODULE` when Puppeteer Core is installed elsewhere, `CHROMIUM_EXECUTABLE` for another Chromium path, and `SSX3_TEST_OUTPUT` for the evidence directory. The default run uses a visible desktop window so another real tab can background the game. It checks pause acknowledgement with frames frozen, backgrounding, runtime failure and a clean reload into gameplay, with no further animation callback available to release the blocked presenter. It uses `nocard` and leaves saved careers untouched. This is a recovery regression, not a performance measurement.
+
 ## Hosting
 
 A private HTTPS deployment needs WebGPU, secure-context APIs, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, byte-range disc requests and suitable Wasm/JavaScript MIME types. Authentication must cover the player, disc and game assets. The existing private deployment's identity, credentials, bucket bindings and release objects are not part of this repository.

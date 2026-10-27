@@ -125,10 +125,17 @@ EM_JS(void, ps2web_frame_done, (int displayed), {
     if (Module.onFrame) Module.onFrame(!!displayed);
 });
 EM_JS(int, ps2web_wait_capacity_safe, (double audio_ms), {
+    if (Module.paused || Module.failed || Module.stoppedForReload) return 0;
+    if (!Module.bufferedSurface) {
+        if (!Module.prepareCopyFrames || Module.blitFrames?.length !== 3) return 0;
+        const refresh = Module.blitClock?.refreshInterval();
+        // Copy preparation has already acknowledged the GS field. The EE can
+        // refill audio while this renderer waits for an actual image slot.
+        return Number.isFinite(refresh) && refresh > 0 && refresh <= 1000 / 60 + 0.25 ? 1 : 0;
+    }
     // A full queue needs capacity, not another completed image. Near 60 Hz,
     // use the actual presentation time rather than a potentially old RAF stamp.
-    if (!Module.yieldForBufferedFrames || !Module.bufferedSurface || Module.paused || Module.failed ||
-        Module.stoppedForReload || Module.surfaceFrames?.length !== 3) return 0;
+    if (!Module.yieldForBufferedFrames || Module.surfaceFrames?.length !== 3) return 0;
     const refresh = Module.surfaceClock.refreshInterval();
     if (!Number.isFinite(refresh) || Math.abs(refresh - 1000 / 60) > 0.25) return 0;
     const elapsed = performance.now() - Module.surfacePresentedAt;
@@ -139,21 +146,37 @@ EM_JS(int, ps2web_wait_capacity_safe, (double audio_ms), {
     return audio_ms >= 40 - refresh + remaining ? 1 : 0;
 });
 EM_ASYNC_JS(void, ps2web_wait_shown, (int capacity_only), {
-    if (capacity_only || (Module.yieldForBufferedFrames && Module.bufferedSurface && !Module.paused &&
+    if (Module.paused || Module.failed || Module.stoppedForReload) return;
+    const frames = Module.bufferedSurface || !Module.prepareCopyFrames ? Module.surfaceFrames : Module.blitFrames;
+    const refresh = !Module.bufferedSurface && Module.prepareCopyFrames ? Module.blitClock?.refreshInterval() : 0;
+    const copy_capacity = frames?.length === 3 && Number.isFinite(refresh) && refresh > 0 && refresh <= 1000 / 60 + 0.25;
+    if (capacity_only || (!Module.paused && !Module.failed && !Module.stoppedForReload && copy_capacity) ||
+        (Module.yieldForBufferedFrames && Module.bufferedSurface && !Module.paused &&
         !Module.failed && !Module.stoppedForReload && Module.surfaceFrames?.length === 3 &&
         Math.abs(Module.surfaceClock.refreshInterval() - 1000 / 60) <= 0.25)) {
         do {
             await new Promise(resolve => { Module.surfaceYield = resolve; });
         } while (!Module.paused && !Module.failed && !Module.stoppedForReload &&
-                 Module.surfaceFrames.length === 3 && Module.audioQueuedMs() >= (capacity_only ? 20 : 40));
+                 frames?.length === 3 && (copy_capacity || Module.audioQueuedMs() >= (capacity_only ? 20 : 40)));
         return;
     }
     // Prepare the copy queue as well as the GPU queue before waiting. An
     // early refresh wait otherwise leaves an existing copy slot unused when
     // the following readback straddles more than one display refresh.
-    const frames = Module.bufferedSurface || !Module.prepareCopyFrames ? Module.surfaceFrames : Module.blitFrames;
     if (Module.shownPending && (!frames || frames.length >= 2))
         await new Promise((resolve) => Module.shownWaiters.push(resolve));
+});
+EM_JS(void, ps2web_release_presenter, (), {
+    // A hidden document may receive no more RAF callbacks. Retire each waiter
+    // before waking it, without consuming the pending refresh's bookkeeping.
+    const wake = Module.surfaceYield;
+    Module.surfaceYield = undefined;
+    if (wake) queueMicrotask(wake);
+    if (Module.shownWaiters?.length) {
+        const waiters = Module.shownWaiters;
+        Module.shownWaiters = [];
+        for (const resolve of waiters) queueMicrotask(resolve);
+    }
 });
 EM_JS(void, ps2web_blit, (const std::uint32_t *rgba, int width, int height, int wide), {
     const canvas = Module.canvas;
@@ -165,9 +188,9 @@ EM_JS(void, ps2web_blit, (const std::uint32_t *rgba, int width, int height, int 
         Module.blitFrames = [];
         Module.blitFree = [{}, {}, {}];
         Module.blitPrimed = false;
-        const clock = ps2webFrameClock();
+        const clock = Module.blitClock = ps2webFrameClock();
         const present = (now) => {
-            if (!Module.paused && !Module.failed) {
+            if (!Module.paused && !Module.failed && !Module.stoppedForReload) {
                 if (Module.blitFrames.length >= 2) Module.blitPrimed = true;
                 const frame = Module.blitPrimed && clock.due(now) && Module.blitFrames.shift();
                 if (frame) {
@@ -197,6 +220,9 @@ EM_JS(void, ps2web_blit, (const std::uint32_t *rgba, int width, int height, int 
                 }
             } else clock.reset();
             requestAnimationFrame(present);
+            const wake = Module.surfaceYield;
+            Module.surfaceYield = undefined;
+            if (wake) queueMicrotask(wake);
         };
         requestAnimationFrame(present);
     }
@@ -466,7 +492,10 @@ extern "C" EMSCRIPTEN_KEEPALIVE int ps2web_rumble(int pad) { return ps2::pad_rum
 extern "C" EMSCRIPTEN_KEEPALIVE void ps2web_pause(int paused) {
     g_paused.store(paused != 0);
     // A rapid resume/pause must not reuse the previous acknowledgement.
-    if (paused) ++g_pause_request;
+    if (paused) {
+        ++g_pause_request;
+        ps2web_release_presenter();
+    }
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int ps2web_pause_ready() {
