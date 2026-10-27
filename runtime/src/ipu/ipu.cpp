@@ -1,6 +1,8 @@
 #include "ipu.hpp"
 
 #include "tables.hpp"
+#include "color.hpp"
+#include "bits.hpp"
 #include "../dmac.hpp"
 #include "../hw.hpp"
 
@@ -132,11 +134,7 @@ bool have(std::size_t bits) {
 std::size_t available() { return g_in.size() * 8 > g_bit ? g_in.size() * 8 - g_bit : 0; }
 
 std::uint32_t bits_at(std::size_t bit, unsigned n) {
-    if (!n) return 0;
-    std::uint64_t v = 0;
-    const std::size_t byte = bit >> 3;
-    for (std::size_t i = 0; i < 8; ++i) v = (v << 8) | (byte + i < g_in.size() ? g_in[byte + i] : 0u);
-    return static_cast<std::uint32_t>((v << (bit & 7u)) >> (64 - n));
+    return detail::read_bits(g_in.data(), g_in.size(), bit, n);
 }
 
 std::uint32_t peek(unsigned n) {
@@ -247,8 +245,8 @@ void idct(const int *in, std::int16_t *out) {
         }
 }
 
-void decode_block(std::int16_t *out, int channel, bool intra, std::uint32_t qsc) {
-    int coef[64] = {};
+void decode_coefficients(int *coef, int channel, bool intra) {
+    std::fill(coef, coef + 64, 0);
     int index = 0;
     const DctLookup &table = intra && intra_vlc_one() ? tables().dct1 : tables().dct0;
     const bool table_one = &table == &tables().dct1;
@@ -273,6 +271,9 @@ void decode_block(std::int16_t *out, int channel, bool intra, std::uint32_t qsc)
         if (index >= 64) throw BadCode{};
         coef[index++] = level;
     }
+}
+
+void reconstruct_block(const int *coef, std::int16_t *out, bool intra, std::uint32_t qsc) {
     const std::uint8_t *scan = alternate_scan() ? kAlternate : kZigzag;
     const std::uint8_t *weights = intra ? g_intra_iq : g_nonintra_iq;
     const int scale = mpeg1() || !nonlinear_q() ? static_cast<int>(qsc) * 2 : kNonLinearScale[qsc & 31u];
@@ -301,9 +302,14 @@ void decode_block(std::int16_t *out, int channel, bool intra, std::uint32_t qsc)
 void decode_macroblock(std::int16_t *raw, bool intra, bool field, bool dc_reset, std::uint32_t qsc) {
     const unsigned cbp = intra ? 0x3Fu : decode(tables().cbp) & 0xFFu;
     if (dc_reset) g_dc[0] = g_dc[1] = g_dc[2] = static_cast<std::int16_t>(128 << dc_precision());
+    // A later block may still need input. Finish parsing all coefficients
+    // before doing transforms, so a FIFO retry cannot discard earlier IDCTs.
+    int coefficients[6][64];
+    for (int b = 0; b < 6; ++b)
+        if (cbp & (32u >> b)) decode_coefficients(coefficients[b], b < 4 ? 0 : b - 3, intra);
     std::int16_t blocks[6][64] = {};
     for (int b = 0; b < 6; ++b)
-        if (cbp & (32u >> b)) decode_block(blocks[b], b < 4 ? 0 : b - 3, intra, qsc);
+        if (cbp & (32u >> b)) reconstruct_block(coefficients[b], blocks[b], intra, qsc);
     for (int i = 0; i < 8; ++i) {
         const int top = field ? 2 * i : i, bottom = field ? 2 * i + 1 : i + 8;
         std::memcpy(raw + top * 16, blocks[0] + i * 8, 16);
@@ -317,27 +323,7 @@ void decode_macroblock(std::int16_t *raw, bool intra, bool field, bool dc_reset,
 
 void convert(const std::uint8_t *raw, bool rgb16) {
     std::uint8_t pixels[1024];
-    std::size_t size = 0;
-    for (int y = 0; y < 16; ++y)
-        for (int x = 0; x < 16; ++x) {
-            const int lum = 149 * std::max(0, raw[y * 16 + x] - 16);
-            const int cb = raw[256 + (y / 2) * 8 + x / 2] - 128, cr = raw[320 + (y / 2) * 8 + x / 2] - 128;
-            const int r = std::clamp((lum + 204 * cr + 64) >> 7, 0, 255);
-            const int g = std::clamp((lum - 50 * cb - 104 * cr + 64) >> 7, 0, 255);
-            const int b = std::clamp((lum + 258 * cb + 64) >> 7, 0, 255);
-            int a = 0x80;
-            if (r < g_th0 && g < g_th0 && b < g_th0) a = 0;
-            else if (r < g_th1 && g < g_th1 && b < g_th1) a = 0x40;
-            if (rgb16) {
-                const std::uint16_t p = static_cast<std::uint16_t>((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10) | (a & 0x80 ? 0x8000 : 0));
-                std::memcpy(pixels + size, &p, 2);
-                size += 2;
-            } else {
-                const std::uint8_t p[4] = {static_cast<std::uint8_t>(r), static_cast<std::uint8_t>(g), static_cast<std::uint8_t>(b), static_cast<std::uint8_t>(a)};
-                std::memcpy(pixels + size, p, 4);
-                size += 4;
-            }
-        }
+    const std::size_t size = detail::convert_pixels(raw, pixels, rgb16, g_th0, g_th1);
     g_out.insert(g_out.end(), pixels, pixels + size);
 }
 

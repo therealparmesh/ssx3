@@ -149,6 +149,7 @@ if(PS2_GENERATED)
             # worker, rather than silently allowing an uninstrumented unwind.
             target_compile_definitions(ps2web PRIVATE PS2_WEB_SYNC_GAME_WORKERS)
             target_link_options(ps2web PRIVATE "-sASYNCIFY_REMOVE=[\"gen::*\"]")
+            target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-workers.js\"")
         endif()
         if(PS2_DEVELOPER_TOOLS)
             target_compile_definitions(ps2web PRIVATE PS2_DEVELOPER_TOOLS)
@@ -174,6 +175,9 @@ if(PS2_GENERATED)
             -sEXPORTED_RUNTIME_METHODS=callMain,addRunDependency,removeRunDependency,HEAPU8,ENV
             --shell-file ${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html --preload-file ${PS2_WEB_ELF}@/game/core.elf)
         set_target_properties(ps2web PROPERTIES SUFFIX ".html" LINK_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html;${CMAKE_CURRENT_SOURCE_DIR}/web/jspi-lifecycle.js;${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js;${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js")
+        if(PS2_WEB_ASYNC STREQUAL "asyncify")
+            set_property(TARGET ps2web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-workers.js")
+        endif()
         return()
     endif()
 

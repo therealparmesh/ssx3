@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdio>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 void expect(bool ok, const char *why) { if (!ok) throw std::runtime_error(why); }
@@ -58,10 +59,68 @@ void invalid_variable_decode() {
     ps2::ipu::write_fifo(zero.data());
     expect(!busy() && (ps2::ipu::read32(0x10002010) & 0x4000), "Invalid picture-type recovery failed");
 }
+void append_bits(std::vector<std::uint8_t> &data, unsigned &bits, const char *code) {
+    for (; *code; ++code) {
+        if (bits / 8 == data.size()) data.push_back(0);
+        if (*code == '1') data[bits / 8] |= 1u << (7 - bits % 8);
+        ++bits;
+    }
+}
+void streamed_macroblock() {
+    std::vector<std::uint8_t> input;
+    unsigned bits = 0;
+    // Six dense intra blocks: zero DC difference, sixty +1 AC values, EOB.
+    // At 1108 bits this cannot fit in the hardware FIFO in one transaction.
+    for (unsigned block = 0; block < 6; ++block) {
+        append_bits(input, bits, block < 4 ? "100" : "00");
+        for (unsigned coefficient = 0; coefficient < 60; ++coefficient) append_bits(input, bits, "110");
+        append_bits(input, bits, "10");
+    }
+    input.resize((input.size() + 15) / 16 * 16, 0);
+    reset(); command(0x2C080000u); // BDEC, intra, reset DC, progressive, QSC 8.
+    for (unsigned at = 0; at < input.size(); at += 16) {
+        ps2::ipu::write_fifo(input.data() + at);
+        const auto control = ps2::ipu::read32(0x10002010u);
+        expect(!(control & 0x4000u), "Valid dense macroblock raised ECD");
+        if (at + 16 < input.size()) {
+            expect(busy() && !(control & 0xF0u), "Partial macroblock committed output early");
+            std::array<std::uint8_t, 16> empty;
+            empty.fill(0xFF); ps2::ipu::read_fifo(empty.data());
+            for (auto value : empty) expect(value == 0, "Partial macroblock exposed temporary pixels");
+            ps2::state::Writer saved; ps2::ipu::state(saved);
+            ps2::state::Reader restored(saved.out.data(), saved.out.size()); ps2::ipu::state(restored);
+        }
+    }
+    unsigned bytes = 0;
+    std::uint32_t hash = 2166136261u;
+    while (ps2::ipu::read32(0x10002010u) & 0xF0u) {
+        std::array<std::uint8_t, 16> word;
+        ps2::ipu::read_fifo(word.data());
+        for (auto value : word) hash = (hash ^ value) * 16777619u;
+        bytes += word.size();
+    }
+    // Frozen from the preceding decoder, including dequantization, mismatch
+    // control, IDCT and luma/chroma layout. No game data is used.
+    expect(bytes == 768 && hash == 0x8F66ACF5u, "Streamed macroblock changed decoded samples or state continuity");
+    expect(!busy(), "Drained macroblock did not release BUSY");
+}
+void sparse_macroblock() {
+    reset();
+    std::array<std::uint8_t, 16> input{};
+    input[0] = 0xAA; // CBP 32 (1010), first coefficient +1 (10), EOB (10).
+    command(0x20080000u); ps2::ipu::write_fifo(input.data());
+    std::array<std::int16_t, 384> output{};
+    for (unsigned at = 0; at < sizeof output; at += 16)
+        ps2::ipu::read_fifo(reinterpret_cast<std::uint8_t *>(output.data()) + at);
+    for (unsigned at = 0; at < output.size(); ++at)
+        expect(output[at] == (at < 128 && at % 16 < 8 ? 3 : 0), "Sparse CBP reconstructed an unselected block or lost its coefficient");
+    expect(!busy() && !(ps2::ipu::read32(0x10002010u) & 0x4000u), "Sparse macroblock did not complete cleanly");
+}
+
 }
 int main() {
     try {
-        partial_fixed_decode(); short_variable_decode(); invalid_variable_decode();
-        std::puts("PASS: IPU unaligned FDEC, partial FIFO/state resume, short VLC and invalid-code handling");
+        partial_fixed_decode(); short_variable_decode(); invalid_variable_decode(); streamed_macroblock(); sparse_macroblock();
+        std::puts("PASS: IPU unaligned FDEC, partial FIFO/state resume, short VLC, invalid-code handling, streamed macroblocks and sparse CBP");
     } catch (const std::exception &error) { std::fprintf(stderr, "FAIL: %s\n", error.what()); return 1; }
 }

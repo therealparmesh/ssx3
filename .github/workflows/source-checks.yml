@@ -42,6 +42,7 @@ jobs:
           node scripts/test_input_resume.cjs
           node scripts/test_startup_audio.cjs
           node scripts/test_display_capacity.cjs
+          node scripts/test_sync_game_workers.cjs
 
   wasm-vu-jit:
     runs-on: ubuntu-24.04
@@ -56,3 +57,19 @@ jobs:
         run: |
           source tools/emsdk/emsdk_env.sh
           python3 scripts/test_vu_jit_web.py
+      - name: Check synchronous worker exports and main-thread suspension
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_sync_game_workers.py
+      - name: Check exact SIMD movie pixels
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_ipu_color.py
+      - name: Check exact SIMD movie bit look-ahead
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_ipu_bits.py
+      - name: Check movie FIFO decoding and state continuity in Wasm
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_ipu_streaming_web.py
