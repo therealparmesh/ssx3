@@ -272,6 +272,18 @@ std::uint64_t g_disc_size = 0, g_use_clock = 0, g_last_chunk = ~0ull, g_run = 0;
 char *g_disc_url = nullptr;
 char *g_state_url = nullptr;
 
+void dispatch_fetch(Slot &slot) {
+    std::uint32_t expected = kWanted;
+    if (!slot.state.compare_exchange_strong(expected, kLoading, std::memory_order_acq_rel)) return;
+    ++slot.attempts;
+    // A renderer waiting for display capacity cannot service the cache loop.
+    // Queue the fetch independently; the loading state reserves this slot
+    // until its main-thread task and network operation have completed.
+    MAIN_THREAD_ASYNC_EM_ASM({
+        if (!Module.stoppedForReload) Module._ps2web_start_fetch($0);
+    }, static_cast<int>(&slot - g_slots));
+}
+
 Slot *find_slot(std::uint64_t index) {
     for (Slot &s : g_slots)
         if (s.state.load(std::memory_order_acquire) != kEmpty && s.index == index) return &s;
@@ -298,6 +310,7 @@ Slot *want(std::uint64_t index, const Slot *keep = nullptr) {
     victim->used = ++g_use_clock;
     victim->attempts = 0;
     victim->state.store(kWanted, std::memory_order_release);
+    dispatch_fetch(*victim);
     ps2::wake_render_thread();
     return victim;
 }
@@ -335,6 +348,7 @@ const Slot *chunk(std::uint64_t index) {
         if (s->attempts >= 4) break;
         usleep(100000);
         s->state.store(kWanted, std::memory_order_release);
+        dispatch_fetch(*s);
         ps2::wake_render_thread();
     }
     fail("Could not read the game disc. Check your connection and reload.");
@@ -353,6 +367,7 @@ bool disc_ready(std::uint64_t offset, std::size_t size) {
                 return false;
             }
             s->state.store(kWanted, std::memory_order_release);
+            dispatch_fetch(*s);
             ps2::wake_render_thread();
         }
         ready = ready && s && s->state.load(std::memory_order_acquire) == kReady;
@@ -378,13 +393,7 @@ std::size_t read_disc(std::uint64_t offset, void *out, std::size_t size) {
 }
 
 void service_disc() {
-    for (Slot &s : g_slots) {
-        std::uint32_t expected = kWanted;
-        if (s.state.compare_exchange_strong(expected, kLoading, std::memory_order_acq_rel)) {
-            ++s.attempts;
-            ps2web_fetch(g_disc_url, static_cast<double>(s.index * kChunk), static_cast<int>(s.size), s.data, &s.state);
-        }
-    }
+    for (Slot &s : g_slots) dispatch_fetch(s);
 }
 
 void push_audio(const std::int16_t *samples, std::size_t frames) {
@@ -470,6 +479,13 @@ void *emulate(void *data) {
     return nullptr;
 }
 
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void ps2web_start_fetch(int slot) {
+    if (static_cast<unsigned>(slot) >= kSlots) return;
+    Slot &s = g_slots[slot];
+    if (s.state.load(std::memory_order_acquire) != kLoading) return;
+    ps2web_fetch(g_disc_url, static_cast<double>(s.index * kChunk), static_cast<int>(s.size), s.data, &s.state);
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE void ps2web_pad(int pad, int buttons, int lx, int ly, int rx, int ry) {

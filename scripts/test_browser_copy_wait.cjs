@@ -53,8 +53,11 @@ const save = () => fs.writeFileSync(output+'/results.json',JSON.stringify({metad
         qaWait.events.push({frame:Module._ps2web_frames(),queue:Module.blitFrames.length,audioMs:Module.audioQueuedMs(),holding:true,waiting:typeof value==='function',refresh:Module.blitClock.refreshInterval()});
       }
     }});
-    const shift=Module.blitFrames.shift;
-    Module.blitFrames.shift=function(){return qaWait.armed?undefined:shift.call(this);};
+    // Hold only the display consumer. The producer may still legitimately
+    // replace an image while refresh calibration selects its slow fallback.
+    // Overriding the shared array's shift also breaks that producer path.
+    const due=Module.blitClock.due;
+    Module.blitClock.due=function(...args){const ready=due.apply(this,args);return !qaWait.armed&&ready;};
   });
   async function arm(){
     // Saturate the existing pool and hold consumption until the real producer
@@ -107,4 +110,11 @@ const save = () => fs.writeFileSync(output+'/results.json',JSON.stringify({metad
   await page.screenshot({path:output+'/reloaded.png'});
   assert.equal(errors.length,0);assert.deepEqual(warnings,[]);
   save();console.log('PASS',JSON.stringify({checks:checks.length,errors,warnings}));await browser.close();
-})().catch(async error=>{failure=error.stack;save();console.error(error);if(browser)await browser.close();process.exitCode=1;});
+})().catch(async error=>{
+  failure=error.stack;
+  try {
+    metadata.failureState=await page.evaluate(()=>({frame:Module._ps2web_frames(),failed:!!Module.failed,paused:!!Module.paused,refresh:Module.blitClock?.refreshInterval(),ready:Module.blitFrames?.length,free:Module.blitFree?.length,waiting:typeof Module.surfaceYield==='function',armed:window.qaWait?.armed,holding:window.qaWait?.holding}));
+    await page.screenshot({path:output+'/unexpected-failure.png'});
+  } catch {}
+  save();console.error(error);if(browser)await browser.close();process.exitCode=1;
+});

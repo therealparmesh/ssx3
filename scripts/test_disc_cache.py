@@ -83,7 +83,7 @@ int main() {
             ++failures;
         }
         const auto *prefetched = find_slot(211);
-        if ((state == kReady && (!prefetched || prefetched->state.load() != kWanted)) ||
+        if ((state == kReady && (!prefetched || prefetched->state.load() != kLoading)) ||
             (state == kLoading && prefetched)) {
             std::fputs("FAIL: read-ahead did not respect available cache capacity\n", stderr);
             ++failures;

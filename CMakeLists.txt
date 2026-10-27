@@ -197,6 +197,9 @@ if(PS2_RUNTIME_TESTS AND NOT EMSCRIPTEN)
     add_test(NAME web-disc-cache COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_disc_cache.py"
         --cxx "${CMAKE_CXX_COMPILER}")
+    add_test(NAME web-disc-dispatch COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_disc_dispatch.py"
+        --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME optional-visuals COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_optional_visuals.py"
         --cxx "${CMAKE_CXX_COMPILER}")
