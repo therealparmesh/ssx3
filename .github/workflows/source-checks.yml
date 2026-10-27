@@ -34,6 +34,7 @@ jobs:
           node scripts/test_queue_submit.cjs
           node scripts/test_frame_metrics.cjs
           node scripts/test_audio_metrics.cjs
+          node scripts/test_audio_refill.cjs
           node scripts/test_queue_wait.cjs
           node scripts/test_yield_tasks.cjs
           node scripts/test_gpu_probe.cjs

@@ -1,5 +1,14 @@
 # Validation scope
 
+## Concurrent audio publication correction
+
+The audio worklet now reloads the producer write position when its current snapshot is exhausted. Previously a batch published during the callback remained unused until the next callback, even while playback was concealing a shortage. Buffered output still uses one write-counter load. Native samples remain ordered and are neither resampled nor discarded; real starvation still produces the existing decay output.
+
+The regression executes the actual production worklet and injects publication during consumption. The previous worklet plays only 64 of 128 available frames; the correction plays all 128 exactly. It also covers native 32-frame batches at the observed 96/128 boundary, unsigned rollover, initially empty playback, publication after output, persistent starvation and the buffered fast path. The audio-consumption verifier continues to count actual native read-counter progress; true shortages remain failures.
+
+This correctness fix is independent of the unshipped display-capacity and queued-fetch candidates. Their desktop performance evidence does not qualify this published runtime. Experimental status, hosted version 55 and remaining device/gameplay qualification are unchanged.
+
+
 The browser port remains **experimental**. The latest GPU-submission, yield-bridge, controller-polling and upload-range corrections reduce transient object creation and excess mapped ArrayBuffer exposure; they do not establish universal 60 fps or eliminate all historical timing outliers. Real phones, physical controllers, physical A/V and full normal progression remain unqualified.
 
 

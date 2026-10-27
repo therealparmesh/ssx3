@@ -703,9 +703,13 @@ class Output extends AudioWorkletProcessor {
   }
   process(inputs, outputs) {
     const left = outputs[0][0], right = outputs[0][1];
-    const write = Atomics.load(this.ring, 0), mask = this.capacity - 1;
+    let write = Atomics.load(this.ring, 0);
+    const mask = this.capacity - 1;
     let read = Atomics.load(this.ring, 1);
     for (let i = 0; i < left.length; ++i) {
+      // A producer may publish another batch while this callback is playing.
+      // Recheck only at exhaustion; buffered playback keeps its single load.
+      if (read === write) write = Atomics.load(this.ring, 0);
       if (read !== write) {
         const at = (read & mask) * 2;
         this.left = this.samples[at] / 32768;
