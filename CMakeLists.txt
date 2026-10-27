@@ -33,6 +33,8 @@ if(EMSCRIPTEN)
     else()
         message(FATAL_ERROR "PS2_WEB_ASYNC must be jspi or asyncify")
     endif()
+    # This callback-based EM_JS import can suspend in either browser mode.
+    list(APPEND PS2_WEB_SUSPEND_FLAGS -sASYNCIFY_IMPORTS=ps2_browser_yield)
     add_compile_options(-msimd128 ${PS2_WEB_MODE_FLAGS} -pthread)
     add_link_options(-msimd128 ${PS2_WEB_MODE_FLAGS} -pthread)
 endif()

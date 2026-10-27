@@ -4,7 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(path.join(__dirname, '../runtime/src/system.cpp'), 'utf8');
-const declaration = source.indexOf('EM_ASYNC_JS(void, ps2_browser_yield,');
+const declaration = source.indexOf('EM_JS(void, ps2_browser_yield,');
 assert(declaration >= 0);
 const start = source.indexOf(', {', declaration) + 3;
 const body = source.slice(start, source.indexOf('\n});', start));
@@ -24,7 +24,7 @@ for (const [mode, userAgent, expected] of [
 
 function setup(mode) {
   const Module = {}, refreshes = new Map(), timers = new Map(), messages = [], tasks = [];
-  let sequence = 0, completed = 0, channels = 0, now = 100;
+  let sequence = 0, completed = 0, channels = 0, immediate = 0, suspended = 0, wakes = 0, now = 100;
   const scheduler = mode === 'missing' ? undefined : {
     yield() {
       if (mode === 'throw') throw new Error('Task scheduling unavailable');
@@ -33,6 +33,22 @@ function setup(mode) {
   };
   const context = vm.createContext({
     Module, scheduler, performance: { now: () => now },
+    queueMicrotask,
+    Asyncify: {
+      handleSleep(start) {
+        let synchronous = true, woke = false;
+        const result = new Promise(resolve => start(() => {
+          assert.equal(woke, false, 'The native continuation must wake exactly once');
+          woke = true;
+          ++wakes;
+          if (synchronous) ++immediate;
+          resolve();
+        }));
+        synchronous = false;
+        if (!woke) ++suspended;
+        return result;
+      },
+    },
     MessageChannel: class {
       constructor() {
         ++channels;
@@ -45,11 +61,12 @@ function setup(mode) {
     requestAnimationFrame(callback) { const id = ++sequence; refreshes.set(id, callback); return id; },
     cancelAnimationFrame(id) { refreshes.delete(id); },
   });
-  const yieldWork = vm.runInContext('(async function(){' + body + '})', context);
+  const yieldWork = vm.runInContext('(function(){' + body + '})', context);
   return {
     Module, refreshes, timers, messages, tasks,
     yield: () => yieldWork().then(() => ++completed),
     completed: () => completed, channels: () => channels,
+    immediate: () => immediate, suspended: () => suspended, wakes: () => wakes,
     advance: delta => { now += delta; },
     retry() { const ready = [...timers.values()]; timers.clear(); for (const callback of ready) callback(); },
     surfaceRefresh() { const wake = Module.surfaceYield; Module.surfaceYield = undefined; if (wake) wake(); },
@@ -89,7 +106,9 @@ function setup(mode) {
     const pending = fallback.yield();
     assert.equal(fallback.messages.length, 1);
     assert.equal(fallback.timers.size, 0, 'Ordinary posted work needs no recovery timer');
-    fallback.deliver(); await pending;
+    fallback.deliver();
+    assert.equal(fallback.wakes(), 0, 'A posted callback must finish retiring its FIFO before native work resumes');
+    await pending;
     assert.equal(fallback.Module.yieldWaiters.length, 0);
     assert.equal(fallback.refreshes.size, 0);
 
@@ -122,9 +141,12 @@ function setup(mode) {
   const bounded = setup('missing');
   const waiting = bounded.yield(); bounded.refresh(); await waiting;
   for (let i = 0; i < 8; ++i) await bounded.yield();
+  assert.equal(bounded.immediate(), 8, 'All eight bounded continuations must return synchronously');
+  assert.equal(bounded.suspended(), 1, 'Immediate continuations must not suspend the native stack');
   assert.equal(bounded.messages.length, 1, 'Continuation burst needs no further posted tasks');
   assert.equal(bounded.refreshes.size, 0);
   const limited = bounded.yield();
+  assert.equal(bounded.suspended(), 2, 'Exhausting the continuation count must suspend again');
   assert.equal(bounded.messages.length, 1, 'Frozen clock must wait without adding another posted wake');
   bounded.deliver(); await flush();
   assert.equal(bounded.completed(), 9, 'Stale callback must not release the bounded wait');
@@ -135,6 +157,8 @@ function setup(mode) {
   timed.advance(1); await timed.yield();
   timed.advance(2);
   const expired = timed.yield();
+  assert.equal(timed.immediate(), 1);
+  assert.equal(timed.suspended(), 2, 'The time budget also bounds synchronous continuations');
   assert.equal(timed.messages.length, 1, 'Expired burst must wait while retaining only one posted wake');
   timed.deliver(); await flush(); assert.equal(timed.completed(), 2);
   timed.deliver(); await expired;
@@ -173,8 +197,11 @@ function setup(mode) {
   assert.equal(buffered.refreshes.size, 0, 'Capacity wait uses the existing presenter callback');
   assert.equal(typeof buffered.Module.surfaceYield, 'function', 'The presenter owns the pending capacity wake');
   assert.equal(buffered.Module.yieldResumesLeft, 0, 'Capacity wait must override the continuation burst');
+  assert.equal(buffered.immediate(), 0, 'A full display queue must never take the synchronous fast path');
   await flush(); assert.equal(buffered.completed(), 0);
-  buffered.surfaceRefresh(); await displayFirst;
+  buffered.surfaceRefresh();
+  assert.equal(buffered.wakes(), 0, 'A presenter callback must finish before native work resumes');
+  await displayFirst;
   assert.equal(buffered.completed(), 1);
   buffered.Module.surfaceFrames.pop();
   const refill = buffered.yield();
