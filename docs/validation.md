@@ -1,6 +1,31 @@
 # Validation scope
 
-The current private hosted version 51 remains **experimental**. Its runtime source is `5df6ab72a75ec20369ba56c139d50b53dcb9a379`. The primary JSPI build prepares the existing copy queue before refresh waits; Asyncify retains its previous wait policy. The final deployed asset sets, rather than an earlier candidate, were checked through ordinary Single Event menus and default rules:
+The browser port remains **experimental**. The latest upload-range correction removes excess mapped ArrayBuffer exposure; it does not establish universal 60 fps or eliminate all historical timing outliers. Real phones, physical controllers, physical A/V and full normal progression remain unqualified.
+
+## Latest upload-range correction
+
+A 270.800-second Firefox diagnostic on hosted version 51 captured a 27.08-ms actual submission gap. The presentation callback arrived 10.20 ms after its animation timestamp and submitted the image in 0.10 ms. Within that gap, native rewind slices peaked at 2.34 ms; 19.08 ms elapsed between the last tracked slice and the next RAF callback entry. Prepared images and 73.33 ms of audio remained available. No image or audio was lost. A separate selected-thread Gecko profile captured a similar 27.38-ms interval: a 6.964-ms incremental major-GC slice was followed by native finalization and cycle-collection cleanup before the delayed callback. This identifies activity in that profiled event, not the cause of every previous outlier; profiling and timing wrappers can perturb scheduling.
+
+The mapped-upload pool previously created a view spanning an entire reusable size class immediately after each map completed. A later small upload could therefore expose a much larger ArrayBuffer. It now calls `getMappedRange(0, total)` only when staging the next upload. Idle mapped slots hold no JavaScript mapped-range view. The 16 MiB GPU-buffer budget, submission order and asynchronous remapping stay the same. A range-access failure disposes the optional pool and returns to ordinary queue writes.
+
+The source regression checks exact ranges for repeated small uploads and for a small upload reusing a large buffer, plus range-access failure, data ownership, size-class reclamation, mapping failure and device loss. The preceding source fails the exact-range assertion. A real Firefox GPU probe ran 68 source-mutated uploads through one reused 2 MiB buffer, including growth and shrinkage. Control/candidate mapped-range totals were 144,703,488 / 2,362,496 bytes, with identical 2 MiB buffer allocation, zero byte mismatches, zero fallbacks and no GPU errors. These totals describe cumulative range exposure, not resident memory.
+
+Two separate ordinary Snow Jam races then compared the current factory and the replacement factory on private HTTPS at 60 Hz, 1280×800 CSS pixels/DPR 1 in visible Firefox 158. Both used default event rules, keyboard menus and the same bounded virtual-controller schedule. No native state fixture or profiler was used in these timed windows; bounded native/GPU timing wrappers and mapped-range counters remained active, so these are diagnostic comparisons rather than final release qualification. The replacement was injected before startup into the unchanged version-51 build. The control was a warm restart; the candidate used a fresh browser session with the existing QA card. Opponents and streamed data differed.
+
+| Factory | Seconds | Fresh submissions/second | Maximum stamped / actual interval, ms | Missing / replaced images | Missing stereo frames | Mapped-range bytes / staged bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full-capacity control | 270.883 | 60.000065 | 17.200 / 22.520 | 0 / 0 | 0 | 3.9478 |
+| Exact-used candidate | 270.217 | 60.000010 | 17.500 / 24.960 | 0 / 0 | 0 | 1.0000 |
+
+The control exposed 116,503,871,488 mapped-range bytes for 29,511,238,172 staged bytes. The candidate exposed exactly its 34,370,234,888 staged bytes over 140,577 uploads. Both pools had zero underflows and both runs had zero application errors. The actual 48-kHz worklets produced 13,003,776 / 12,972,032 stereo frames with minimum audio reserves of 67.33 / 66.67 ms. Both heaps held at 307.25 MiB. Zoe finished fifth in 3:42 / 3:41, without a new top-five record. This verifies the range-volume reduction and completed scoped gameplay; the larger candidate worst-case interval does not demonstrate a timing improvement or elimination of GC pauses.
+
+After the candidate race, actual Escape resumed 44 native frames with running audio, paused again, and an acknowledged pause froze frames for 350 ms. The 8,650,752-byte QA card remained byte-identical at SHA-256 `9a319a89c7a3392b7f0142f8e1ec9c09db1ac9ba4c19e016098075d7e423b8af`, with no pending writes. The candidate session recorded 398 cumulative hosting-provider cookie-domain warnings separately from application errors. An earlier attempted candidate window started on an unaccepted Restart confirmation and was excluded; its driver was deliberately stopped. Keyboard navigation passed after the menu transition completed.
+
+Both canonical builds were subsequently rebuilt. Their Wasm and game-data files stayed byte-identical to the prior build; their generated JavaScript changed. Visible Firefox compatibility and Chromium primary/compatibility each passed normal startup and blank-snapshot fallback against those compiled files using the existing local no-card startup fixture. Those short checks establish compiled startup, presentation, fallback and pause behavior, not a compiled full-course performance result. The final hosted version-51 baseline below remains separate evidence.
+
+## Hosted version-51 baseline
+
+The private hosted version 51 baseline remained **experimental**. Its runtime source is `5df6ab72a75ec20369ba56c139d50b53dcb9a379`. The primary JSPI build prepares the existing copy queue before refresh waits; Asyncify retains its previous wait policy. The final deployed asset sets, rather than an earlier candidate, were checked through ordinary Single Event menus and default rules:
 
 | Browser / presentation | Full-course window, seconds | Fresh submissions/second | Maximum stamped / actual interval, ms | Missing / overwritten images | Missing stereo frames |
 | --- | ---: | ---: | ---: | ---: | ---: |

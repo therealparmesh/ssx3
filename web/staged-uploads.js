@@ -53,7 +53,7 @@ addToLibrary({
           device.pushErrorScope('out-of-memory');
           try {
             var buffer = device.createBuffer({ size: capacity, usage: GPUBufferUsage.MAP_WRITE | GPUBufferUsage.COPY_SRC, mappedAtCreation: true });
-            record = { buffer: buffer, view: new Uint8Array(buffer.getMappedRange()), capacity: capacity, token: slot + 1 };
+            record = { buffer: buffer, capacity: capacity, token: slot + 1 };
           } catch (_) {
             if (buffer) buffer.destroy();
             fail();
@@ -67,10 +67,14 @@ addToLibrary({
           stats.allocatedBytes = allocated;
           ++stats.buffers;
         }
-        record.view.set(heap.subarray(data, data + dataBytes), 0);
-        record.view.set(heap.subarray(params, params + paramsBytes), dataBytes);
-        record.buffer.unmap();
-        record.view = null;
+        // Reused size classes can be much larger than this upload. Expose only
+        // its bytes, without creating mapped ArrayBuffers while a slot is idle.
+        try {
+          var view = new Uint8Array(record.buffer.getMappedRange(0, total));
+          view.set(heap.subarray(data, data + dataBytes), 0);
+          view.set(heap.subarray(params, params + paramsBytes), dataBytes);
+          record.buffer.unmap();
+        } catch (_) { fail(); ++stats.fallback; return 0; }
         record.queued = true;
         if (dataBytes) encoder.copyBufferToBuffer(record.buffer, 0, dataTarget, 0, dataBytes);
         if (paramsBytes) encoder.copyBufferToBuffer(record.buffer, dataBytes, paramsTarget, 0, paramsBytes);
@@ -87,7 +91,6 @@ addToLibrary({
         try {
           record.buffer.mapAsync(GPUMapMode.WRITE).then(function() {
             if (closed) return;
-            record.view = new Uint8Array(record.buffer.getMappedRange());
             ++stats.maps;
             ready.push(record);
           }).catch(fail);
