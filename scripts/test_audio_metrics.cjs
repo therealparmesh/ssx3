@@ -49,7 +49,7 @@ for(const count of [0,1,32,64,127,128,256]){
 {
   const f=fixture({refill:'late'});f.process();
   assert.equal(f.ring[0],128);assert.equal(f.ring[1],0);
-  assert.equal(f.qa[3],128,'Refill after playback took its snapshot cannot hide a real shortage');
+  assert.equal(f.qa[3],128,'Publication after output was computed cannot hide a real shortage');
   f.process();assert.equal(f.ring[1],128);assert.equal(f.qa[3],128,'The late samples remain available for the next quantum');
 }
 {
