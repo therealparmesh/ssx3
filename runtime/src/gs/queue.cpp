@@ -47,8 +47,14 @@ EM_ASYNC_JS(void, ps2_wait_async, (std::atomic<std::uint32_t> *word, std::uint32
             if (finished) return;
             finished = true;
             cancelAnimationFrame(refresh);
+            if (Module.renderWorkWake === wake) Module.renderWorkWake = undefined;
             resolve();
         };
+        const wake = address => {
+            if ((address >>> 0) === (word >>> 0) &&
+                (Atomics.load(HEAP32, word >> 2) >>> 0) !== (seen >>> 0)) finish();
+        };
+        Module.renderWorkWake = wake;
         const check = () => {
             if (finished) return;
             // A worker can post work while the browser delays the wait's
@@ -61,6 +67,15 @@ EM_ASYNC_JS(void, ps2_wait_async, (std::atomic<std::uint32_t> *word, std::uint32
         result.value.then(finish);
     });
 });
+
+void post_render_wake(std::atomic<std::uint32_t> *word) {
+    // A browser may defer the waitAsync promise past the next presentation.
+    // Post a separate wake when the producer actually makes work available.
+    MAIN_THREAD_ASYNC_EM_ASM({
+        const wake = Module.renderWorkWake;
+        if (wake) wake($0);
+    }, word);
+}
 #endif
 
 void wait(std::atomic<std::uint32_t> &value, std::uint32_t seen) {
@@ -126,7 +141,12 @@ void Ring::post(Type type, std::uint32_t arg0, std::uint32_t arg1, const void *d
     if (bytes) std::memcpy(at + sizeof h, data, bytes);
     head_.store(head + need, std::memory_order_release);
     posted_.fetch_add(1);
-    if (consumer_waiting_.exchange(0)) notify(posted_);
+    if (consumer_waiting_.exchange(0)) {
+        notify(posted_);
+#ifdef __EMSCRIPTEN__
+        if (this == &g_render) post_render_wake(&posted_);
+#endif
+    }
 }
 
 bool Ring::peek(Header &header, const std::uint8_t *&payload) {
@@ -153,7 +173,12 @@ void Ring::pop(const Header &header) {
 
 void Ring::wake() {
     posted_.fetch_add(1);
-    if (consumer_waiting_.exchange(0)) notify(posted_);
+    if (consumer_waiting_.exchange(0)) {
+        notify(posted_);
+#ifdef __EMSCRIPTEN__
+        if (this == &g_render) post_render_wake(&posted_);
+#endif
+    }
 }
 
 void Ring::wait_for_work(int timeout_ms) {

@@ -73,3 +73,7 @@ jobs:
         run: |
           source tools/emsdk/emsdk_env.sh
           python3 scripts/test_ipu_streaming_web.py
+      - name: Check producer-to-renderer notification with older wake paths withheld
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_render_queue_web.py
