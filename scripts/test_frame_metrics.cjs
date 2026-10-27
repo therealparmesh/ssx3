@@ -8,6 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, 'browser_frame_metrics.js'),
 
 function fixture(kind) {
   let now = 0, observe;
+  let domCreates = 0, resizeObservers = 0;
   const callbacks = [];
   class CanvasRenderingContext2D {
     constructor(id) { this.canvas = { id }; }
@@ -21,22 +22,42 @@ function fixture(kind) {
   class GPUBuffer { mapAsync() {} }
   const context = vm.createContext({ performance: { now: () => now }, CanvasRenderingContext2D,
     GPUCanvasContext, GPUQueue, GPUBuffer,
-    Module: { running: true, _ps2web_frames: () => 100, audioQueuedMs: () => 80 },
-    document: { body: { append() {} }, createElement: () => ({ style: {} }) },
-    ResizeObserver: class { constructor(callback) { observe = callback; } observe() {} },
+    Module: { blitFrames: kind === 'copy' ? [] : undefined,
+      surfaceFrames: kind === 'surface' ? [] : undefined,
+      running: true, _ps2web_frames: () => 100, audioQueuedMs: () => 80 },
+    document: { body: { append() {} }, createElement() { ++domCreates; return { style: {} }; } },
+    ResizeObserver: class { constructor(callback) { ++resizeObservers; observe = callback; } observe() {} },
     requestAnimationFrame: callback => callbacks.push(callback),
   });
   context.window = context;
   vm.runInContext(source, context);
   const canvas = kind === 'copy' ? new CanvasRenderingContext2D('canvas') : new GPUCanvasContext('canvas');
   const queue = new GPUQueue();
-  return {
+  const f = {
     context, canvas, queue,
     at(time) { now = time; },
     submit() { if (kind === 'copy') return canvas.drawImage({}, 0, 0); canvas.getCurrentTexture(); return queue.submit([]); },
-    refresh(stamp) { callbacks.shift()(stamp); observe(); },
-    begin() { context.qaPhase('test'); context.qaInstall(); context.qaActive(true); },
+    refresh(stamp) {
+      for (const callback of callbacks.splice(0)) callback(stamp);
+      if (observe) observe();
+    },
+    begin() {
+      context.qaPhase('test'); context.qaInstall(); context.qaActive(true);
+      assert.equal(domCreates, 0, 'Measurement must not create a layout sentinel');
+      assert.equal(resizeObservers, 0, 'Measurement must not request per-refresh resize entries');
+    },
+    presenter(images) {
+      let index = 0;
+      const present = () => {
+        for (let n = 0; n < images[index]; ++n) f.submit();
+        ++index;
+        callbacks.push(present);
+      };
+      // Both buffered/copy presenters register their persistent callback before QA.
+      callbacks.push(present);
+    },
   };
+  return f;
 }
 
 for (const kind of ['copy', 'surface']) {
@@ -77,5 +98,26 @@ for (const kind of ['copy', 'surface']) {
     f.queue.fail = false; f.queue.submit([]);
   }
   assert.equal(qa.id, before, 'Unrelated or failed output cannot count as a successful presentation');
+}
+
+for (const kind of ['copy', 'surface']) {
+  const f = fixture(kind);
+  f.presenter([1, 1, 0, 2, 1]);
+  f.begin();
+  for (let i = 0; i < 5; ++i) {
+    const stamp = 1000 + i * 1000 / 60;
+    f.at(stamp + (i === 3 ? 13 : 0));
+    f.refresh(stamp);
+  }
+  assert.equal(f.context.qa.total.intervals, 4);
+  assert.equal(f.context.qa.total.withoutImage, 1, kind + ': a skipped refresh fails QA');
+  assert.equal(f.context.qa.total.overwritten, 1, kind + ': two images in one refresh fail QA');
+  assert(f.context.qa.wall.longGaps > 0, kind + ': nominal stamps cannot hide a late callback');
+}
+
+{
+  const f = fixture('copy');
+  delete f.context.Module.blitFrames;
+  assert.throws(() => f.context.qaInstall(), /Initialize the buffered or copy presenter/);
 }
 console.log('Frame metrics: copy/GPU delayed delivery, lifecycle boundaries, failed output and bounded diagnostics passed');

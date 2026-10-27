@@ -35,8 +35,11 @@
   }
   const add=(s,dt,n,freshGap)=>{++s.intervals;s.elapsedMs+=dt;s.maxRafGapMs=Math.max(s.maxRafGapMs,dt);s.maxFreshGapMs=Math.max(s.maxFreshGapMs,freshGap);if(dt>25)++s.longRafGaps;if(n===0)++s.withoutImage;else s.overwritten+=Math.max(0,n-1)};
   window.qaInstall=()=>{
-   const sentinel=document.createElement('div');sentinel.style.cssText='position:fixed;left:-100px;top:-100px;width:1px;height:1px;contain:strict;visibility:hidden';document.body.append(sentinel);
-   new ResizeObserver(()=>{
+   // Install after the persistent presenter has registered its RAF callback.
+   // Their callback order remains presenter first, sampler second each refresh.
+   if(!Module.surfaceFrames&&!Module.blitFrames)throw new Error('Initialize the buffered or copy presenter before frame metrics');
+   qa.sampler='after-presenter-raf';
+   const observe=()=>{
     if(!qa.active||!qa.id||!Module.running||Module.failed||Module.paused){qa.lastTime=qa.lastFresh=0;return}
     const t=qa.stamp,n=qa.id-qa.lastId,frame=Module._ps2web_frames(),offset=(qa.ringIndex++%32)*7;
     qa.ring[offset]=t;qa.ring[offset+1]=performance.now();qa.ring[offset+2]=qa.id;qa.ring[offset+3]=frame;qa.ring[offset+4]=Module.shownPending?1:0;qa.ring[offset+5]=Module.yieldWaiters?.length||0;qa.ring[offset+6]=Module.audioQueuedMs();
@@ -47,7 +50,7 @@
     }
     if(n||!qa.lastFresh)qa.lastFresh=t;
     qa.lastTime=t;qa.lastId=qa.id;
-   }).observe(sentinel);
-   const tick=t=>{if(qa.active){qa.stamp=t;qa.flip=!qa.flip;sentinel.style.width=qa.flip?'1px':'2px'}requestAnimationFrame(tick)};requestAnimationFrame(tick);
+   };
+   const tick=t=>{if(qa.active){qa.stamp=t;observe()}requestAnimationFrame(tick)};requestAnimationFrame(tick);
    try{new PerformanceObserver(list=>{for(const e of list.getEntries())if(qa.active&&qa.longTasks.length<200)qa.longTasks.push({start:e.startTime,duration:e.duration,name:e.name})}).observe({type:'longtask',buffered:false})}catch{}
   };})(SSX3_DISABLE_JSPI);
