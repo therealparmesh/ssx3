@@ -1,4 +1,18 @@
 addToLibrary({
+  $ps2webSubmitCommand: function(queue, command) {
+    // Web IDL consumes the sequence during submit(). Borrow its array only
+    // for that call; a reentrant submission receives a separate array.
+    var commands = Module.singleCommandSubmission || [null];
+    Module.singleCommandSubmission = null;
+    try {
+      commands[0] = command;
+      queue.submit(commands);
+    } finally {
+      // An idle argument array must not retain a submitted GPU command buffer.
+      commands[0] = null;
+      if (!Module.singleCommandSubmission) Module.singleCommandSubmission = commands;
+    }
+  },
   $ps2webFrameClock: function() {
     var period = 1000 / 60;
     var next = 0, lastRefresh = 0, refreshPeriod = 0;

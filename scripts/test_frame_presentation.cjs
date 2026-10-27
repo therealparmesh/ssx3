@@ -46,6 +46,7 @@ function makePresenter(kind) {
     addToLibrary: entries => Object.assign(library, entries), requestAnimationFrame: callback => callbacks.push(callback) });
   vm.runInContext(fs.readFileSync(path.join(root, 'web/frame-presentation.js'), 'utf8'), context);
   context.ps2webFrameClock = library.$ps2webFrameClock;
+  context.ps2webSubmitCommand = library.$ps2webSubmitCommand;
   const args = gpu ? 'device_ptr,queue_ptr,pipeline_ptr,pixels_ptr,width,height,current,previous,blend,wide' : 'rgba,width,height,wide';
   const send = vm.runInContext('(function(' + args + '){' + body + '})', context);
   const ready = () => gpu ? Module.surfaceFrames : Module.blitFrames;

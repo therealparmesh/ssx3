@@ -24,7 +24,11 @@
 #ifdef __EMSCRIPTEN__
 EM_JS_DEPS(ps2_webgpu_futures, "$WebGPU");
 EM_JS_DEPS(ps2_webgpu_frame_clock, "$ps2webFrameClock");
+EM_JS_DEPS(ps2_webgpu_submission, "$ps2webSubmitCommand");
 EM_JS_DEPS(ps2_webgpu_upload_buffers, "$ps2webUploadBuffers");
+EM_JS(void, ps2_webgpu_submit, (WGPUQueue queue, WGPUCommandBuffer command), {
+    ps2webSubmitCommand(WebGPU.getJsObject(queue), WebGPU.getJsObject(command));
+});
 EM_JS(int, ps2_webgpu_stage_uploads, (WGPUDevice device, WGPUCommandEncoder encoder, WGPUBuffer data_target, WGPUBuffer params_target,
                                     const void *data, std::uint32_t data_bytes, const void *params, std::uint32_t params_bytes), {
     if (!Module.stagedUploads) return 0;
@@ -109,7 +113,7 @@ EM_JS(void, ps2_webgpu_queue_frame,
                         pass.setViewport((canvas.width - w) / 2, (canvas.height - h) / 2, w, h, 0, 1);
                         pass.draw(3);
                         pass.end();
-                        queue.submit([encoder.finish()]);
+                        ps2webSubmitCommand(queue, encoder.finish());
                         Module.surfacePresentedAt = performance.now();
                         if (Module.onPresent) Module.onPresent();
                     } catch (error) {
@@ -315,6 +319,14 @@ std::uint32_t bits_per_pixel(std::uint32_t psm) {
     case PSMT4: case PSMT4HL: case PSMT4HH: return 4;
     default: return 32;
     }
+}
+
+void submit_command(WGPUCommandBuffer command) {
+#ifdef __EMSCRIPTEN__
+    ps2_webgpu_submit(g_queue, command);
+#else
+    wgpuQueueSubmit(g_queue, 1, &command);
+#endif
 }
 
 void page_size(std::uint32_t psm, std::uint32_t &pw, std::uint32_t &ph) {
@@ -954,7 +966,7 @@ void profile_submit() {
         wgpuCommandEncoderCopyBufferToBuffer(enc, g_profile_resolve, 0, g_profile_read, 0, n * 16);
     }
     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
-    wgpuQueueSubmit(g_queue, 1, &cmd);
+    submit_command(cmd);
     wgpuCommandBufferRelease(cmd);
     wgpuCommandEncoderRelease(enc);
     if (n) {
@@ -1071,7 +1083,7 @@ void submit(WGPUTextureView present_view = nullptr) {
         wgpuRenderPassEncoderRelease(rp);
     }
     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
-    wgpuQueueSubmit(g_queue, 1, &cmd);
+    submit_command(cmd);
 #ifdef __EMSCRIPTEN__
     if (upload) ps2_webgpu_uploads_submitted(upload);
 #endif
@@ -1105,7 +1117,7 @@ bool read_back(WGPUBuffer source, std::uint64_t bytes, void *out, std::uint64_t 
     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
     wgpuCommandEncoderCopyBufferToBuffer(enc, source, offset, g_readback, 0, bytes);
     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
-    wgpuQueueSubmit(g_queue, 1, &cmd);
+    submit_command(cmd);
     wgpuCommandBufferRelease(cmd);
     wgpuCommandEncoderRelease(enc);
     bool done = false;
@@ -1999,7 +2011,7 @@ bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, s
         WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_device, nullptr);
         wgpuCommandEncoderCopyBufferToBuffer(enc, g_scratch, 0, slot->buffer, 0, bytes);
         WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
-        wgpuQueueSubmit(g_queue, 1, &cmd);
+        submit_command(cmd);
         wgpuCommandBufferRelease(cmd);
         wgpuCommandEncoderRelease(enc);
         slot->busy = true;
