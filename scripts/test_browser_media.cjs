@@ -18,6 +18,7 @@ let browser, monitor;
   let frameMetrics=fs.readFileSync(path.join(__dirname,'browser_frame_metrics.js'),'utf8').replace('SSX3_DISABLE_JSPI','true');
   frameMetrics=frameMetrics.replace('try{new PerformanceObserver',"try{if(PerformanceObserver.supportedEntryTypes.includes('longtask'))new PerformanceObserver");
   await page.evaluateOnNewDocument('if(typeof GPUBuffer!=="undefined"){'+frameMetrics+'}');
+  await page.evaluateOnNewDocument(fs.readFileSync(__dirname+'/browser_audio_metrics.js','utf8'));
   await page.evaluateOnNewDocument(() => {
     if (typeof AudioWorkletNode === 'undefined' || typeof AudioWorklet === 'undefined') return;
     window.qaAV = {buffer:new SharedArrayBuffer(256),states:[],processorInstrumented:false};
@@ -32,30 +33,7 @@ let browser, monitor;
     AudioWorklet.prototype.addModule = async function(url, options) {
       let source = await (await fetch(url)).text();
       if (!source.includes("registerProcessor('ps2-output'")) return addModule.call(this,url,options);
-      source = source.replace('this.left = 0;', 'this.qa = new Int32Array(options.processorOptions.qaBuffer,0,16); this.stats = new Float64Array(options.processorOptions.qaBuffer,128,8); this.left = 0;');
-      source = source.replace("registerProcessor('ps2-output', Output);", `
-        const original = Output.prototype.process;
-        Output.prototype.process = function(inputs,outputs) {
-          const enabled = Atomics.load(this.qa,0) === 1;
-          const available = (Atomics.load(this.ring,0) - Atomics.load(this.ring,1)) >>> 0;
-          const result = original.call(this,inputs,outputs);
-          if (enabled) {
-            const left=outputs[0][0],right=outputs[0][1],missing=Math.max(0,left.length-available);
-            this.qa[1]++; this.qa[2]+=left.length; this.qa[3]+=missing;
-            if (missing) this.qa[4]++;
-            this.qa[8]=Math.min(this.qa[8],available); this.qa[9]=Math.max(this.qa[9],available);
-            for(let i=0;i<left.length;i++) {
-              const l=left[i],r=right[i];
-              this.qa[5]=Math.max(this.qa[5],Math.round(Math.max(Math.abs(l),Math.abs(r))*32768));
-              if(l===0 && r===0) this.qa[6]++;
-              if(l<=-1 || l>=32767/32768 || r<=-1 || r>=32767/32768) this.qa[7]++;
-              if(l!==r) this.qa[10]++;
-              this.stats[0]+=l*l; this.stats[1]+=r*r;
-            }
-          }
-          return result;
-        };
-        registerProcessor('ps2-output', Output);`);
+      source = ssx3InstrumentAudioWorklet(source);
       const instrumented = URL.createObjectURL(new Blob([source],{type:'application/javascript'}));
       try {await addModule.call(this,instrumented,options); qaAV.processorInstrumented=true;}
       finally {URL.revokeObjectURL(instrumented);}
@@ -105,13 +83,14 @@ let browser, monitor;
   const result=await page.evaluate(()=>{
     const q=qaAV.ints,s=new Float64Array(qaAV.buffer,128,8);
     return {browser:navigator.userAgent,instrumented:qaAV.processorInstrumented,start:qaAV.start,end:qaAV.end,
-      audio:{quanta:q[1],frames:q[2],underrunFrames:q[3],underrunQuanta:q[4],peak:q[5]/32768,zeroFrames:q[6],fullScaleFrames:q[7],minimumQueuedFrames:q[8],maximumQueuedFrames:q[9],stereoDifferentFrames:q[10],rmsLeft:Math.sqrt(s[0]/q[2]),rmsRight:Math.sqrt(s[1]/q[2])},
+      audio:{quanta:q[1],frames:q[2],underrunFrames:q[3],underrunQuanta:q[4],metricMethod:"actual read-counter delta",estimatedUnderrunFrames:q[11],nativeFramesConsumed:q[12],refillRaceQuanta:q[13],peak:q[5]/32768,zeroFrames:q[6],fullScaleFrames:q[7],minimumQueuedFrames:q[8],maximumQueuedFrames:q[9],stereoDifferentFrames:q[10],rmsLeft:Math.sqrt(s[0]/q[2]),rmsRight:Math.sqrt(s[1]/q[2])},
       presentation:{...qa.total,actualSubmissions:qa.wall,freshSubmissionsPerSecond:qa.total.intervals*1000/qa.total.elapsedMs},states:qaAV.states,failed:!!Module.failed,bufferedSurface:Module.bufferedSurface,checks:['actual 48 kHz stereo worklet output','actual presentation submission intervals','pause freezes simulation and audio clock','explicit resume restores audio and simulation','simulated audio suspension pauses game and resumes']};
   });
   result.audioVsFrameElapsedDifferenceMs=1000*((result.end.audioTime-result.start.audioTime)-(result.end.frame-result.start.frame)/60);
   result.errors=errors;
   fs.writeFileSync(output+'/result.json',JSON.stringify(result,null,2));
   console.log(JSON.stringify(result));
+  assert.equal(result.audio.nativeFramesConsumed+result.audio.underrunFrames,result.audio.frames);
   assert.deepEqual(errors,[]); assert.equal(result.failed,false); assert(result.audio.frames>=48000*28);
   assert(Math.abs(result.audioVsFrameElapsedDifferenceMs)<50, "Audio and emulated frame clocks diverged");
   assert.equal(result.presentation.longRafGaps,0);assert.equal(result.presentation.overwritten,0);
