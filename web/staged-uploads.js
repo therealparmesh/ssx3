@@ -10,15 +10,6 @@ addToLibrary({
       for (var record of records) if (record) record.buffer.destroy();
     };
     var fail = function() { if (!closed) { ++stats.failures; dispose(); } };
-    var mapped = function(record) {
-      return function() {
-        if (closed) return;
-        // A record cannot be staged again until this completion makes it ready.
-        // Keep one handler per buffer instead of allocating one per remap.
-        try { ++stats.maps; ready.push(record); }
-        catch (_) { fail(); }
-      };
-    };
     device.lost.then(dispose, dispose);
     return {
       stats: stats,
@@ -63,7 +54,6 @@ addToLibrary({
           try {
             var buffer = device.createBuffer({ size: capacity, usage: GPUBufferUsage.MAP_WRITE | GPUBufferUsage.COPY_SRC, mappedAtCreation: true });
             record = { buffer: buffer, capacity: capacity, token: slot + 1 };
-            record.onMapped = mapped(record);
           } catch (_) {
             if (buffer) buffer.destroy();
             fail();
@@ -99,7 +89,11 @@ addToLibrary({
         // Mapping starts after queue.submit: pending mappings cannot be used
         // by a command buffer. Reuse only after the GPU has finished its copy.
         try {
-          record.buffer.mapAsync(GPUMapMode.WRITE).then(record.onMapped, fail);
+          record.buffer.mapAsync(GPUMapMode.WRITE).then(function() {
+            if (closed) return;
+            ++stats.maps;
+            ready.push(record);
+          }).catch(fail);
         } catch (_) { fail(); }
       },
     };

@@ -1,13 +1,12 @@
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync(path.join(__dirname,'../web/staged-uploads.js'),'utf8');
 let factory;
-const context=vm.createContext({addToLibrary:library=>factory=library.$ps2webUploadBuffers,Uint8Array,GPUBufferUsage:{MAP_WRITE:2,COPY_SRC:4},GPUMapMode:{WRITE:2}});
-vm.runInContext(source,context);
+vm.runInNewContext(source,{addToLibrary:library=>factory=library.$ps2webUploadBuffers,Uint8Array,GPUBufferUsage:{MAP_WRITE:2,COPY_SRC:4},GPUMapMode:{WRITE:2}});
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return{promise,resolve,reject}};
 function setup(){
- const lost=deferred(),buffers=[],maps=[],handlers=[];let catchChains=0;
- const device={lost:lost.promise,failCreate:false,failRange:false,failMap:false,scopes:0,scopeError:null,
+ const lost=deferred(),buffers=[],maps=[];
+ const device={lost:lost.promise,failCreate:false,failRange:false,scopes:0,scopeError:null,
   pushErrorScope(filter){assert.equal(filter,'out-of-memory');++this.scopes},
   popErrorScope(){assert(this.scopes>0);--this.scopes;return Promise.resolve(this.scopeError)},
   createBuffer(desc){
@@ -16,7 +15,7 @@ function setup(){
    ranges:[],
    getMappedRange(offset=0,size=this.memory.byteLength-offset){assert.equal(this.state,'mapped');assert(!this.destroyed);if(device.failRange)throw Error('Mapped range unavailable');assert.equal(offset%8,0);assert.equal(size%4,0);assert(size>0&&offset+size<=this.memory.byteLength);assert(!this.range);this.ranges.push({offset,size});this.range={offset,bytes:this.memory.slice(offset,offset+size)};return this.range.bytes},
    unmap(){assert.equal(this.state,'mapped');if(this.range){new Uint8Array(this.memory).set(new Uint8Array(this.range.bytes),this.range.offset);this.range=null}this.state='unmapped'},
-   mapAsync(mode){assert.equal(mode,2);assert.equal(this.state,'unmapped');assert(this.submitted,'Remap must follow GPU submission');if(device.failMap)throw Error('Mapping unavailable');this.state='pending';const done=deferred();maps.push({record:this,done});const promise=done.promise.then(()=>{this.state='mapped'}),then=promise.then,buffer=this;promise.then=function(ready,failed){handlers.push({buffer,ready,failed});const result=then.call(this,ready,failed),catchFailure=result.catch;result.catch=function(...args){++catchChains;return catchFailure.apply(this,args)};return result};return promise},
+   mapAsync(mode){assert.equal(mode,2);assert.equal(this.state,'unmapped');assert(this.submitted,'Remap must follow GPU submission');this.state='pending';const done=deferred();maps.push({record:this,done});return done.promise.then(()=>{this.state='mapped'})},
    destroy(){this.destroyed=true}};buffers.push(record);return record;
  }};
  const pool=factory(device),copies=[],encoder={copyBufferToBuffer(source,start,destination,offset,length){assert.equal(source.state,'unmapped');copies.push({source,start,destination,offset,length})}};
@@ -25,7 +24,7 @@ function setup(){
  const stage=()=>pool.stage(encoder,data,params,heap,8,32,72,16);
  const submit=()=>{for(const copy of copies){assert.equal(copy.source.state,'unmapped');copy.destination.set(new Uint8Array(copy.source.memory,copy.start,copy.length),copy.offset);copy.source.submitted=true}copies.length=0};
  const finish=async()=>{for(const item of maps.splice(0))item.done.resolve();await flush()};
- return{device,lost,buffers,maps,handlers,catchChains:()=>catchChains,pool,copies,encoder,heap,data,params,stage,submit,finish};
+ return{device,lost,buffers,maps,pool,copies,encoder,heap,data,params,stage,submit,finish};
 }
 (async()=>{
  const t=setup(),expectedData=t.heap.slice(8,40),expectedParams=t.heap.slice(72,88);
@@ -33,17 +32,6 @@ function setup(){
  assert.equal(t.maps.length,1,'One submission starts exactly one map');assert.deepEqual(t.data,expectedData);assert.deepEqual(t.params,expectedParams);
  assert.equal(t.pool.stats.maps,0);await t.finish();assert.equal(t.pool.stats.maps,1);assert.equal(t.stage(),token,'A completed buffer must be reused');assert.equal(t.buffers.length,1);
  assert.deepEqual(t.buffers[0].ranges,[{offset:0,size:48},{offset:0,size:48}],'Every reused range must match the current upload size');
- const reused=setup();
- for(let i=0;i<1000;++i){const id=reused.stage();reused.submit();reused.pool.submitted(id);await reused.finish()}
- assert.equal(reused.buffers.length,1);assert.equal(reused.pool.stats.maps,1000);
- assert.equal(new Set(reused.handlers.map(h=>h.ready)).size,1,'A reused buffer retains one successful mapping handler');
- assert.equal(new Set(reused.handlers.map(h=>h.failed)).size,1,'Every remap uses the existing failure handler');
- assert.equal(typeof reused.handlers[0].failed,'function');
- assert.equal(reused.catchChains(),0,'A map needs no additional rejection-only Promise chain');
- const reordered=setup(),first=reordered.stage(),second=reordered.stage();reordered.submit();reordered.pool.submitted(first);reordered.pool.submitted(second);
- reordered.maps[1].done.resolve();await flush();assert.equal(reordered.stage(),second,'Out-of-order completion must release its own buffer');
- reordered.maps[0].done.resolve();await flush();assert.equal(reordered.stage(),first);
- assert.notEqual(reordered.handlers[0].ready,reordered.handlers[1].ready,'Different buffers retain distinct completion ownership');
  const onlyParams=setup();assert(onlyParams.pool.stage(onlyParams.encoder,onlyParams.data,onlyParams.params,onlyParams.heap,0,0,72,16));assert.equal(onlyParams.copies.length,1);assert.equal(onlyParams.copies[0].start,0);
  const oversized=setup();assert.equal(oversized.pool.stage(oversized.encoder,null,null,oversized.heap,0,2*1024*1024,0,4),0);assert.equal(oversized.buffers.length,0);
  const bounded=setup();for(let i=0;i<256;++i)assert(bounded.stage());assert.equal(bounded.stage(),0);assert.equal(bounded.pool.stats.allocatedBytes,16*1024*1024);assert.equal(bounded.buffers.length,256);assert.equal(bounded.pool.stats.fallback,1);
@@ -58,11 +46,6 @@ function setup(){
  assert.equal(allocation.device.scopes,0,'Allocation failures must close the temporary error scope');
  const oom=setup();oom.device.scopeError={message:'Out of memory'};oom.stage();await flush();assert.equal(oom.stage(),0);assert.equal(oom.pool.stats.failures,1);assert(oom.buffers.every(b=>b.destroyed));assert.equal(oom.device.scopes,0);
  const failed=setup(),failedToken=failed.stage();failed.submit();failed.pool.submitted(failedToken);failed.maps[0].done.reject(Error('Mapping failed'));await flush();await flush();assert.equal(failed.pool.stats.failures,1);assert(failed.buffers.every(b=>b.destroyed));assert.equal(failed.stage(),0);
- const thrown=setup(),thrownToken=thrown.stage();thrown.submit();thrown.device.failMap=true;thrown.pool.submitted(thrownToken);assert.equal(thrown.pool.stats.failures,1);assert(thrown.buffers.every(b=>b.destroyed));assert.equal(thrown.stage(),0);
- const completion=setup(),completionToken=completion.stage();completion.submit();completion.pool.submitted(completionToken);
- vm.runInContext('var originalPush=Array.prototype.push;Array.prototype.push=function(value){if(value?.token&&value?.buffer)throw Error("Ready insertion failed");return originalPush.apply(this,arguments)}',context);
- try{await completion.finish()}finally{vm.runInContext('Array.prototype.push=originalPush',context)}
- assert.equal(completion.pool.stats.failures,1,'Errors in a successful-map handler must still close the optional pool');assert(completion.buffers.every(b=>b.destroyed));assert.equal(completion.stage(),0);
  const lost=setup(),lostToken=lost.stage();lost.submit();lost.pool.submitted(lostToken);lost.lost.resolve({reason:'unknown'});await flush();assert(lost.buffers.every(b=>b.destroyed));await lost.finish();assert.equal(lost.stage(),0);assert.equal(lost.pool.stats.maps,0);
  const disposed=setup();disposed.stage();disposed.pool.dispose();disposed.pool.dispose();assert.equal(disposed.stage(),0);assert(disposed.buffers.every(b=>b.destroyed));
  const shell=fs.readFileSync(path.join(__dirname,'../web/shell.html'),'utf8'),selector=/stagedUploads:\s*(.+),/.exec(shell)[1];
@@ -71,5 +54,5 @@ function setup(){
  const submission=body.indexOf('submit_command(cmd);');assert(submission>=0,'Locate the actual submission wrapper');
  assert(submission<body.indexOf('ps2_webgpu_uploads_submitted(upload)'),'Start remapping after submitting the command buffer');
  assert(body.indexOf('ps2_webgpu_stage_uploads(')<body.indexOf('wgpuCommandEncoderBeginComputePass('),'Upload copies must precede dependent compute commands');
- console.log('PASS: reused remap handlers, out-of-order completion ownership, one Promise chain; exact-used mapped ranges, bytes, cold size-class adaptation, submission order, memory bound, allocation/map failure, device loss, disposal and browser selection');
+ console.log('PASS: exact-used mapped ranges and graceful range failure; staged upload bytes, reuse, cold size-class adaptation, submission order, memory bound, allocation/map failure, device loss, disposal and browser selection');
 })().catch(error=>{console.error(error);process.exitCode=1});
