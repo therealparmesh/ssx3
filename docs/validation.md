@@ -23,6 +23,16 @@ After the candidate race, actual Escape resumed 44 native frames with running au
 
 Both canonical builds were subsequently rebuilt. Their Wasm and game-data files stayed byte-identical to the prior build; their generated JavaScript changed. Visible Firefox compatibility and Chromium primary/compatibility each passed normal startup and blank-snapshot fallback against those compiled files using the existing local no-card startup fixture. Those short checks establish compiled startup, presentation, fallback and pause behavior, not a compiled full-course performance result. The final hosted version-51 baseline below remains separate evidence.
 
+## Final hosted version-52 Firefox repeat
+
+The deployed compiled compatibility release subsequently completed a separate ordinary Snow Jam race in visible Firefox 158, using the same 60-Hz desktop, 1280×800 CSS viewport/DPR 1 and existing QA card. The 270.150-second window averaged 60.000018 fresh submissions/second, with zero missing/overwritten images, presentation-pool underflows/replacements, missing/full-scale audio frames or application errors. Its worklet produced 12,968,448 stereo frames with at least 67.33 ms queued; the heap held at 307.25 MiB. Zoe finished fifth in 3:48 without a new top-five record.
+
+The maximum stamped interval was 17.54 ms, while the maximum actual submission interval remained **29.74 ms**, with **two actual gaps over 25 ms**. The strict timing gate therefore still failed. This full-course repeat verifies the actual compiled hosted files, but does not demonstrate elimination of the previous Firefox outliers. No profiler, native/GPU timing wrappers, build or upload ran during measurement; the software-submission and worklet recorders remained active. Four hundred cumulative hosting cookie-domain warnings were kept separately. These are warmed-profile/cache and virtual-controller results, not physical scanout or real-device qualification.
+
+Actual Escape resumed 44 native frames with running audio, paused again, and an acknowledged pause froze frames for 350 ms. The saved card retained the same SHA-256 `9a319a89c7a3392b7f0142f8e1ec9c09db1ac9ba4c19e016098075d7e423b8af`, with no pending writes.
+
+An initial full-page `load` navigation wait timed out after 120 seconds before the recorder reached startup, and that attempt was excluded. Its browser session ended. The retry waited for DOM readiness followed by actual Play readiness, verified the persisted card, and passed the initial startup cancellation/retry check before following normal game menus. The reason for the first navigation-event timeout was not established; changing that wait is not proof of a runtime startup fix.
+
 ## Hosted version-51 baseline
 
 The private hosted version 51 baseline remained **experimental**. Its runtime source is `5df6ab72a75ec20369ba56c139d50b53dcb9a379`. The primary JSPI build prepares the existing copy queue before refresh waits; Asyncify retains its previous wait policy. The final deployed asset sets, rather than an earlier candidate, were checked through ordinary Single Event menus and default rules:
