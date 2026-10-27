@@ -85,5 +85,30 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     const task = f.wait(0); assert.equal(f.Module.surfaceYield, undefined); assert.equal(f.Module.shownWaiters.length, 1);
     f.Module.shownWaiters.shift()(); await task;
   }
-  console.log(`Display capacity: ${cases.length} selection gates, ${reserveGates} reserve gates and 9 wait/recovery scenarios passed`);
+  for (const count of [0, 1, 2, 3]) {
+    const f = fixture(); f.Module.bufferedSurface = false; f.Module.prepareCopyFrames = true; f.Module.shownPending = true;
+    // A retired surface queue must not govern a copy presenter's capacity.
+    f.Module.blitFrames = Array.from({ length: count }, () => ({}));
+    let finished = false; const task = f.wait(0).then(() => { finished = true; });
+    await flush();
+    assert.equal(finished, count < 2, 'Prepare available copy slots before waiting for a refresh');
+    assert.equal(f.Module.shownWaiters.length, count < 2 ? 0 : 1);
+    assert.equal(f.Module.surfaceYield, undefined, 'Copying must not enter the GPU-surface capacity wait');
+    if (count >= 2) { f.Module.blitFrames.shift(); f.Module.shownWaiters.shift()(); }
+    await task;
+  }
+  {
+    const f = fixture(); f.Module.bufferedSurface = false; f.Module.shownPending = true;
+    f.Module.surfaceFrames = undefined; f.Module.blitFrames = [{}];
+    const task = f.wait(0);
+    assert.equal(f.Module.shownWaiters.length, 1, 'Compatibility retains its prior refresh wait with a partial copy queue');
+    f.Module.shownWaiters.shift()(); await task;
+  }
+  {
+    const f = fixture(); f.Module.bufferedSurface = false; f.Module.prepareCopyFrames = true; f.Module.shownPending = true;
+    const task = f.wait(0);
+    assert.equal(f.Module.shownWaiters.length, 1, 'An uninitialized or direct presenter retains its refresh wait');
+    f.Module.shownWaiters.shift()(); await task;
+  }
+  console.log(`Display capacity: ${cases.length} selection gates, ${reserveGates} reserve gates and 15 wait/recovery scenarios passed`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

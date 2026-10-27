@@ -148,9 +148,11 @@ EM_ASYNC_JS(void, ps2web_wait_shown, (int capacity_only), {
                  Module.surfaceFrames.length === 3 && Module.audioQueuedMs() >= (capacity_only ? 20 : 40));
         return;
     }
-    // Fill a bounded GPU presentation queue before waiting for consumption.
-    // This preserves a prepared image when command preparation straddles a refresh.
-    if (Module.shownPending && (!Module.surfaceFrames || Module.surfaceFrames.length >= 2))
+    // Prepare the copy queue as well as the GPU queue before waiting. An
+    // early refresh wait otherwise leaves an existing copy slot unused when
+    // the following readback straddles more than one display refresh.
+    const frames = Module.bufferedSurface || !Module.prepareCopyFrames ? Module.surfaceFrames : Module.blitFrames;
+    if (Module.shownPending && (!frames || frames.length >= 2))
         await new Promise((resolve) => Module.shownWaiters.push(resolve));
 });
 EM_JS(void, ps2web_blit, (const std::uint32_t *rgba, int width, int height, int wide), {

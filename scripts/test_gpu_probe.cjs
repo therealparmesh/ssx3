@@ -29,6 +29,12 @@ for (const [mode, userAgent, query, expected] of [
   }), expected, 'Select the qualified presentation path while preserving the explicit copy request');
 }
 console.log('Presentation selection: 14 browser/build/explicit-request cases passed');
+const copyPreparation = shell.match(/prepareCopyFrames:\s*([^,\n]+)/)?.[1];
+assert(copyPreparation, 'The browser build must declare its copy preparation policy');
+for (const mode of ['jspi', 'asyncify']) {
+  assert.equal(vm.runInNewContext(copyPreparation.replaceAll('@PS2_WEB_ASYNC@', mode)), mode === 'jspi',
+    'Only the qualified primary build enables prepared copy frames');
+}
 const first = shell.indexOf('async function canPresent(');
 const last = shell.indexOf('\nfunction webgpuHelp', first);
 assert(first >= 0 && last > first);

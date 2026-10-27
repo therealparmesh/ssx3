@@ -1153,6 +1153,7 @@ var Module = {
   noSurface: params.has('nosurface'),
   noCard: params.has('nocard'),
   presentCopy: preferFrameCopy(),
+  prepareCopyFrames: '@PS2_WEB_ASYNC@' === 'jspi',
   fullEffects: effects === 'original',
   fastBoot: bootMode === 'quick',
   onHalt: (reason) => {

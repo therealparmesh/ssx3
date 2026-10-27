@@ -22,8 +22,8 @@ let browser;
       window.qaReadback = { armed: false, injection: null, frames: [] };
       const map = GPUBuffer.prototype.mapAsync;
       GPUBuffer.prototype.mapAsync = function (...args) {
-        if (!qaReadback.armed || qaReadback.injection || !(args[2] > 16)) return map.apply(this, args);
-        const injection = qaReadback.injection = { frame: Module._ps2web_frames(), start: performance.now(), settled: false };
+        if (!qaReadback.armed || qaReadback.injection || args[0] !== GPUMapMode.READ || !(args[2] > 16)) return map.apply(this, args);
+        const injection = qaReadback.injection = { frame: Module._ps2web_frames(), start: performance.now(), settled: false, mode: args[0] };
         // A 22 ms readback arrives after the next renderer check but normally
         // before the following refresh. Reject without mapping the real buffer
         // in the error case, so it remains legal to reuse for another copy.
@@ -96,6 +96,7 @@ let browser;
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
     assert.equal(result.failed, false);
     assert.equal(errors.length, 0);
+    assert.equal(result.injection.mode, 1, 'The injected operation must map a GPU readback, not an upload buffer');
     assert.equal(result.injection.trackedBeforeSettlement, true, 'Pending GPU operations must remain waitable');
     if (process.env.SSX3_TEST_EXPECT_READBACK_SKIP !== '1') {
       assert(result.gpuFutures <= 8, 'Completed GPU operations must not accumulate in the future table');
