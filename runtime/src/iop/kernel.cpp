@@ -589,6 +589,9 @@ void call_hle(Cpu &c, std::uint32_t id) {
 void reset() {
     hw::reset();
     kernel::boot();
+    // The DAC and capture rings run even before the first guest register
+    // access. Schedule only after boot, which clears the kernel queues.
+    spu2::start_clock();
 }
 
 std::uint64_t cycles() { return kernel::g_now; }

@@ -140,6 +140,30 @@ void interrupt_clock() {
     ps2::iop::kernel::interrupt_state(false); alarms = 0; output.clear(); run(96);
     expect(output == expected && alarms == 1, "Interrupt masking changed hardware PCM samples");
 }
+void startup_clock() {
+    // An attached DAC still needs hardware silence before the first MMIO.
+    ps2::iop::spu2::set_sink({});
+    ps2::iop::reset(); output.clear();
+    ps2::iop::spu2::set_sink([](const std::int16_t *samples, std::size_t frames) {
+        output.insert(output.end(), samples, samples + frames * 2);
+    });
+    ps2::state::Writer saved; saved.set_version(6); ps2::iop::state(saved);
+    run(32);
+    expect(output.size() == 64, "SPU2 output waited for the first register access");
+    expect(std::all_of(output.begin(), output.end(), [](auto x) { return x == 0; }),
+           "Reset hardware produced non-silent PCM");
+    const auto first_batch = output;
+    ps2::state::Reader restored(saved.out.data(), saved.out.size()); restored.set_version(6); ps2::iop::state(restored);
+    output.clear(); run(32);
+    expect(output == first_batch, "Pre-MMIO state restore lost or duplicated the sample clock");
+    ps2::iop::reset(); output.clear(); run(64);
+    expect(output.size() == 128, "IOP reset left an attached audio output without a clock");
+    // The sample clock and capture rings are hardware state, independent of
+    // whether the host is listening. Slot 32 is written by the first batch.
+    ps2::iop::spu2::set_sink({}); ps2::iop::reset();
+    ps2::iop::spu2::ram()[32] = 1234; run(32);
+    expect(ps2::iop::spu2::ram()[32] == 0, "No host sink stopped the hardware capture rings");
+}
 void deadline_clock() {
     reset(); output.clear(); run(32);
     expect(output.size() == 32 * 2, "A due SPU2 tick remained pending at the elapsed-time boundary");
@@ -154,9 +178,11 @@ void event_order() {
         ps2::iop::reset(); order.clear();
         ps2::iop::spu2::set_sink([](const auto *, auto) { order.push_back(1); });
         ps2::iop::kernel::register_job(ps2::iop::kernel::kJobAlarm, [](const auto &) { order.push_back(2); });
-        const auto alarm = [] { ps2::iop::kernel::schedule(32 * 768, ps2::iop::kernel::Job{ps2::iop::kernel::kJobAlarm}); };
+        // Schedule on either side of the first tick's enqueue of the second
+        // tick, preserving both equal-time insertion orders with a running DAC.
+        const auto alarm = [] { ps2::iop::kernel::schedule(64 * 768, ps2::iop::kernel::Job{ps2::iop::kernel::kJobAlarm}); };
         if (alarm_first) alarm();
-        ps2::iop::spu2::read(0x1F900760, 2); // Schedule the first 32-frame tick.
+        run(32); order.clear();
         if (!alarm_first) alarm();
         run(32);
         expect(order == (alarm_first ? std::vector<int>{2, 1} : std::vector<int>{1, 2}),
@@ -166,7 +192,7 @@ void event_order() {
 }
 int main() {
     try {
-        routing(); reverb(); state_roundtrip(); deadline_clock(); interrupt_clock(); event_order(); ps2::iop::spu2::set_sink({});
+        routing(); reverb(); state_roundtrip(); startup_clock(); deadline_clock(); interrupt_clock(); event_order(); ps2::iop::spu2::set_sink({});
         std::puts("PASS: SPU2 stereo routing, effects, mute, interrupt-independent clock, deferred callbacks, event order and state continuity");
     } catch (const std::exception &error) { std::fprintf(stderr, "FAIL: %s\n", error.what()); return 1; }
 }
