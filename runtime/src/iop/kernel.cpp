@@ -71,7 +71,8 @@ bool g_switch = false;
 std::map<std::uint32_t, std::uint32_t> g_used;
 std::uint32_t g_kernel_top = kKernelBase;
 
-std::priority_queue<Event, std::vector<Event>, std::greater<Event>> g_events;
+using EventQueue = std::priority_queue<Event, std::vector<Event>, std::greater<Event>>;
+EventQueue g_events, g_spu_events;
 std::uint64_t g_event_seq = 0;
 std::uint64_t g_now = 0;
 std::uint64_t g_target = 0;
@@ -84,6 +85,12 @@ bool g_nested_done = false;
 std::uint32_t g_return_stub = 0;
 std::uint32_t g_exit_stub = 0;
 std::set<std::pair<std::string, std::uint32_t>> g_missing_reported;
+
+EventQueue *next_events(bool guest_events) {
+    if (g_spu_events.empty()) return guest_events && !g_events.empty() ? &g_events : nullptr;
+    if (!guest_events || g_events.empty()) return &g_spu_events;
+    return g_spu_events.top() > g_events.top() ? &g_events : &g_spu_events;
+}
 
 Thread *best_ready() {
     Thread *best = nullptr;
@@ -279,7 +286,10 @@ JobHandler g_jobs[kJobCount] = {};
 void register_job(std::uint32_t kind, JobHandler handler) { g_jobs[kind] = handler; }
 
 void schedule(std::uint64_t at, const Job &job) {
-    g_events.push(Event{at, ++g_event_seq, job, nullptr});
+    // Mixing is driven by the hardware clock, independently of the guest's
+    // interrupt mask. Keep guest callbacks in their ordinary deferred queue.
+    auto &events = job.kind == kJobSpuTick ? g_spu_events : g_events;
+    events.push(Event{at, ++g_event_seq, job, nullptr});
 }
 
 Thread *current() {
@@ -527,6 +537,7 @@ void boot() {
     g_threads.clear();
     g_used.clear();
     while (!g_events.empty()) g_events.pop();
+    while (!g_spu_events.empty()) g_spu_events.pop();
     g_current = 0;
     g_next_thread = g_next_module = 1;
     g_kernel_top = kKernelBase;
@@ -587,27 +598,34 @@ void run(std::uint64_t ee_cycles) {
     g_ee_remainder += ee_cycles;
     g_target += g_ee_remainder / kClockDivider;
     g_ee_remainder %= kClockDivider;
-    while (g_now < g_target) {
+    for (;;) {
         const Thread *running = current();
-        // A thread inside CpuSuspendIntr cannot be preempted: interrupt-side events wait for CpuResumeIntr.
-        if (!g_suspended || !running || running->status != kRun) {
-            while (!g_events.empty() && g_events.top().at <= g_now) {
-                const Event event = g_events.top();
-                g_events.pop();
-                if (event.job.kind) g_jobs[event.job.kind](event.job);
-                else event.action();
-            }
+        const bool guest_events = !g_suspended || !running || running->status != kRun;
+        // Hardware audio keeps ticking inside CpuSuspendIntr. Guest events,
+        // interrupt delivery and thread switches still wait for CpuResumeIntr.
+        while (auto *pending = next_events(guest_events)) {
+            if (pending->top().at > g_now) break;
+            const Event event = pending->top();
+            pending->pop();
+            if (event.job.kind) g_jobs[event.job.kind](event.job);
+            else event.action();
+        }
+        if (guest_events) {
             deliver_interrupts();
             if (g_switch) do_switch();
         }
+        // Synchronize events at the endpoint too, before the EE can pause
+        // for presentation with the final hardware audio batch still due.
+        if (g_now >= g_target) break;
         if (!current()) {
-            const std::uint64_t next = g_events.empty() ? g_target : std::min(g_target, g_events.top().at);
+            const auto *pending = next_events(true);
+            const std::uint64_t next = pending ? std::min(g_target, pending->top().at) : g_target;
             g_now = std::max(g_now, next);
             continue;
         }
         std::int64_t budget = static_cast<std::int64_t>(std::min<std::uint64_t>(kSlice, g_target - g_now));
-        if (!g_events.empty() && g_events.top().at > g_now)
-            budget = std::min<std::int64_t>(budget, static_cast<std::int64_t>(g_events.top().at - g_now));
+        if (const auto *pending = next_events(guest_events); pending && pending->top().at > g_now)
+            budget = std::min<std::int64_t>(budget, static_cast<std::int64_t>(pending->top().at - g_now));
         if (budget <= 0) budget = 1;
         const std::int64_t given = budget;
         execute(g_cpu, budget);
@@ -615,7 +633,7 @@ void run(std::uint64_t ee_cycles) {
     }
 }
 
-bool idle() { return !kernel::current() && kernel::g_events.empty(); }
+bool idle() { return !kernel::current() && kernel::g_events.empty() && kernel::g_spu_events.empty(); }
 
 void dump() {
     using namespace kernel;
@@ -762,6 +780,8 @@ void state(ps2::state::Stream &s) {
     std::vector<Event> events;
     if (s.saving()) {
         auto pending = g_events;
+        auto spu = g_spu_events;
+        for (; !spu.empty(); spu.pop()) pending.push(spu.top());
         for (; !pending.empty(); pending.pop()) {
             if (!pending.top().job.kind) throw std::runtime_error("an IOP event cannot be saved");
             events.push_back(pending.top());
@@ -774,7 +794,8 @@ void state(ps2::state::Stream &s) {
     });
     if (s.loading()) {
         while (!g_events.empty()) g_events.pop();
-        for (const Event &e : events) g_events.push(e);
+        while (!g_spu_events.empty()) g_spu_events.pop();
+        for (const Event &e : events) (e.job.kind == kJobSpuTick ? g_spu_events : g_events).push(e);
     }
     s.pod(g_current);
     s.pod(g_next_thread);
