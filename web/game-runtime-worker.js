@@ -53,6 +53,7 @@ self.addEventListener('message', async function initialize(event) {
     pad(...args) { Module._ps2web_pad(...args); },
     connected(...args) { Module._ps2web_pad_connected(...args); },
     pressure(...args) { Module._ps2web_pressure(...args); },
+    presentationFailed(message) { failure(new Error(String(message))); },
     resize(width, height) {
       if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384)
         throw new Error('Invalid display size');
@@ -88,7 +89,7 @@ self.addEventListener('message', async function initialize(event) {
     try {
       importScripts('./pixel-producer.js', './readback-progress.js');
       readbackProgress = ps2ReadbackProgress.install(self, failure);
-      producer = ps2PixelProducer.create({ canvas: config.canvas,
+      producer = ps2PixelProducer.create({ canvas: config.canvas, port: config.presenterPort,
         url: new URL('pixel-presenter-worker.js', config.runtimeUrl), lowPower: config.lowPower,
         onFailure: failure, onPresent: () => Module.onPresent(),
         onCapacity: () => { const wake = Module.surfaceYield; Module.surfaceYield = undefined; if (wake) wake(); } });

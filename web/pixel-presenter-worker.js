@@ -4,18 +4,31 @@
 importScripts('./frame-clock.js');
 (function(scope) {
   const VERSION = 1, FREE = 0, READY = 1, READING = 2, COUNT = 3;
-  let initialized = false, running = false, stopped = false, paused = false;
+  let initialized = false, running = false, stopped = false, paused = false, failed = false;
+  let transport = scope;
+  const send = message => transport.postMessage(message);
   let device, context, pipeline, sampler, texture, bundle, canvas, state, buffers, clock;
   let format, textureWidth = 0, textureHeight = 0, primed = false, shown = 0;
   const frames = [], uploadViews = new Array(COUNT), commands = [null], bundles = [null];
   function failure(error) {
     if (stopped) return;
-    stopped = true; running = false;
-    scope.postMessage({ type: 'failure', error: String(error?.message || error) });
+    stopped = failed = true; running = false;
+    send({ type: 'failure', error: String(error?.message || error) });
   }
   scope.addEventListener('unhandledrejection', event => { event.preventDefault(); failure(event.reason); });
-  scope.onmessage = async ({ data: message }) => {
+  scope.onmessage = event => {
+    if (event.data?.type !== 'connect') return receive(event);
     try {
+      if (initialized || transport !== scope || !(event.data.port instanceof MessagePort))
+        throw new Error('Invalid presenter connection.');
+      transport = event.data.port;
+      transport.onmessage = receive;
+      transport.start();
+    } catch (error) { failure(error); }
+  };
+  async function receive({ data: message }) {
+    try {
+      if (stopped) return;
       if (message?.type === 'init') {
         if (initialized) throw new Error('Presenter already initialized.');
         initialized = true;
@@ -50,7 +63,7 @@ importScripts('./frame-clock.js');
           fragment: { module: shader, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
         sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
         running = true; requestAnimationFrame(present);
-        scope.postMessage({ type: 'ready', version: VERSION });
+        send({ type: 'ready', version: VERSION });
       } else if (message?.type === 'frame' && !stopped) {
         if (!Number.isInteger(message.id) || message.id < 0 || message.id >= COUNT ||
             !Number.isInteger(message.sequence) || message.sequence < 0 || message.sequence > 0xFFFFFFFF ||
@@ -74,9 +87,14 @@ importScripts('./frame-clock.js');
         if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384)
           throw new Error('Invalid presentation size.');
         canvas.width = width; canvas.height = height;
+      } else if (message?.type === 'stop') {
+        stopped = true; running = false; paused = true;
+        frames.length = 0;
+        texture?.destroy(); device?.destroy(); context?.unconfigure();
+        if (transport !== scope) transport.close();
       }
     } catch (error) { failure(error); }
-  };
+  }
   function present(stamp) {
     if (stopped) return;
     try {
@@ -100,7 +118,7 @@ importScripts('./frame-clock.js');
             draw(frame);
             ++shown; clock.presented(stamp);
             Atomics.store(state, frame.id * 2, FREE);
-            scope.postMessage({ type: 'release', id: frame.id, sequence: frame.sequence,
+            send({ type: 'release', id: frame.id, sequence: frame.sequence,
               shown, refresh: clock.refreshInterval() });
           }
         }
@@ -137,7 +155,7 @@ importScripts('./frame-clock.js');
   // only the narrow init/frame/pause/resize protocol above.
   scope.ps2PixelPresenter = {
     get canvas() { return canvas; }, get paused() { return paused; },
-    get running() { return running && !stopped; }, get failed() { return stopped; },
+    get running() { return running && !stopped; }, get failed() { return failed; },
     get pendingFrames() { return frames; }, get shown() { return shown; },
     get freeSlotCount() { let count = 0; if (state) for (let id = 0; id < COUNT; ++id) if (Atomics.load(state, id * 2) === FREE) ++count; return count; },
   };

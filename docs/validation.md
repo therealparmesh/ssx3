@@ -1,5 +1,15 @@
 # Validation scope
 
+## Page-created presenter candidate
+
+The window now creates both the game and display workers and transfers a MessagePort between them. Pixel buffers still use the same three-slot ownership protocol; frame traffic bypasses the window. Creating the presenter in the window fixes the previously observed Chromium nested-worker animation error. The optional worker build selects this isolated presenter by default; `?presenter=direct` retains the preceding path for diagnostics. The native game and runtime binaries are unchanged.
+
+Both Chromium 156 and Firefox 158 passed real-game lifecycle checks with this topology: active audio and images, pause acknowledgement with frozen emulation, resize/resume, keyboard input, two simulated controller ports with stable player-two assignment after disconnect, background pause/foreground resume, exact saved-card restoration and release of every owned worker before navigation. GPU-device destruction, uncaught presenter exceptions and failure during startup also passed in both browsers: active failures acknowledged pause and kept the exact stored card readable for recovery; startup failure closed the bridge promptly and reloaded the stored card. Real GPU pixel fixtures passed colors/orientation, paused output, shared-buffer growth, resizing and loss forwarding over the port. Asset-free tests cover port and legacy worker transports, slot races and clean shutdown, including constructor/canvas/metadata/early-error startup cleanup.
+
+Separate ordinary 270-second Snow Jam runs after cold startup and normal menus passed the local no-drop gate. Chromium averaged 60.002353 fresh GPU submissions/second with a 24.335-ms maximum actual interval; Firefox averaged 60.000015 with a 24.18-ms maximum. Neither run missed or overwrote an image or lost an audio frame; the worklets consumed all 12,994,560 and 13,004,800 requested stereo frames respectively. These results do not replace hosted or physical-device qualification. The preceding hosted release remains restored while this candidate is checked.
+
+The browser QA observer now records queued-image and free-slot counts alongside anomalous refreshes. The earlier missed-refresh record lacked this state, so it could not distinguish queue starvation from a clock decision. A bounded hosted diagnostic of the earlier topology completed without reproducing the miss; it is diagnostic evidence, not a release performance pass.
+
 ## Dedicated-worker renderer qualification
 
 **Release held:** the subsequent private HTTPS run failed the no-drop gate, so the preceding hosted player was restored. The worker renderer remains an opt-in source candidate.

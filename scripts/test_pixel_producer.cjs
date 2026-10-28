@@ -46,5 +46,16 @@ class Worker {
   p.close(); p.close(); assert.equal(worker.terminated, 1); assert.equal(worker.listeners.size, 0);
   const early = create({ Worker, url: 'presenter.js', canvas: {}, slotBytes: 4 }); early.close();
   await assert.rejects(early.ready, { name: 'AbortError' });
+  class Port extends Worker {
+    start() { this.started = (this.started || 0) + 1; }
+    close() { this.closed = (this.closed || 0) + 1; }
+  }
+  const port = new Port(), connected = create({ port, canvas: {}, slotBytes: 4 });
+  assert.equal(port.started, 1); port.emit({ type: 'ready', version: VERSION }); await connected.ready;
+  connected.publish(new Uint8Array([1, 2, 3, 255]), 1, 1, false);
+  assert.equal(port.messages.at(-1).type, 'frame');
+  connected.close(); connected.close();
+  assert.equal(port.messages.at(-1).type, 'stop'); assert.equal(port.closed, 1); assert.equal(port.terminated, 0);
+  assert.equal(port.listeners.size, 0);
   console.log('PASS: pixel pool pinning, bounded replacement, growth, stale releases, wrap and teardown');
 })().catch(error => { console.error(error); process.exitCode = 1; });

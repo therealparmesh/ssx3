@@ -46,7 +46,7 @@
     if(qa.lastTime){
      const dt=t-qa.lastTime,freshGap=n&&qa.lastFresh?t-qa.lastFresh:0;
      add(qa.total,dt,n,freshGap);add(qa.phases[qa.phase],dt,n,freshGap);
-     if((n===0||dt>25)&&qa.events.length<200)qa.events.push({phase:qa.phase,t,dt,n,frame,ringIndex:qa.ringIndex,ring:qa.ring.slice()});
+     if((n===0||dt>25)&&qa.events.length<200)qa.events.push({phase:qa.phase,t,dt,n,frame,queuedImages:(Module.presentCopy?Module.blitFrames:(Module.surfaceFrames||Module.blitFrames))?.length??null,freeSlots:(Module.presentCopy?Module.blitFree:(Module.surfaceFree||Module.blitFree))?.length??null,ringIndex:qa.ringIndex,ring:qa.ring.slice()});
     }
     if(n||!qa.lastFresh)qa.lastFresh=t;
     qa.lastTime=t;qa.lastId=qa.id;

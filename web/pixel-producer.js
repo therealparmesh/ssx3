@@ -4,7 +4,7 @@
   'use strict';
   const VERSION = 1, FREE = 0, READY = 1, READING = 2, WRITING = 3, COUNT = 3;
   function create(options) {
-    const worker = new (options.Worker || Worker)(options.url, { name: 'ssx3-presenter' });
+    const worker = options.port || new (options.Worker || Worker)(options.url, { name: 'ssx3-presenter' });
     const state = new Int32Array(new SharedArrayBuffer(COUNT * 2 * 4));
     const slots = Array.from({ length: COUNT }, (_, id) => ({ id,
       bytes: new Uint8Array(new SharedArrayBuffer(options.slotBytes || 4 * 1024 * 1024)), sequence: 0 }));
@@ -48,6 +48,7 @@
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onError);
     worker.addEventListener('messageerror', onMessageError);
+    worker.start?.();
     worker.postMessage({ type: 'init', version: VERSION, canvas: options.canvas,
       buffers: slots.map(slot => slot.bytes.buffer), slotState: state.buffer, lowPower: !!options.lowPower }, [options.canvas]);
     return {
@@ -98,7 +99,8 @@
         worker.removeEventListener('message', onMessage);
         worker.removeEventListener('error', onError);
         worker.removeEventListener('messageerror', onMessageError);
-        worker.terminate();
+        if (options.port) { worker.postMessage({ type: 'stop' }); worker.close(); }
+        else worker.terminate();
         frames.length = free.length = slots.length = 0;
       },
     };

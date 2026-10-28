@@ -115,6 +115,20 @@ for (const kind of ['copy', 'surface']) {
   assert(f.context.qa.wall.longGaps > 0, kind + ': nominal stamps cannot hide a late callback');
 }
 
+for (const kind of ['copy', 'surface']) {
+  const f = fixture(kind), module = f.context.Module;
+  module.presentCopy = kind === 'copy';
+  const frames = module.presentCopy ? module.blitFrames : module.surfaceFrames;
+  const free = module.presentCopy ? (module.blitFree = [{}]) : (module.surfaceFree = [{}]);
+  frames.push({}, {}); f.presenter([1, 0, 0]); f.begin();
+  f.at(1000); f.refresh(1000); f.at(1016.667); f.refresh(1016.667);
+  assert.equal(f.context.qa.events[0].queuedImages, 2, 'A skipped image with queued frames must remain distinguishable');
+  assert.equal(f.context.qa.events[0].freeSlots, 1);
+  frames.length = 0; free.push({}, {}); f.at(1033.334); f.refresh(1033.334);
+  assert.equal(f.context.qa.events[1].queuedImages, 0, 'An empty producer queue must be recorded directly');
+  assert.equal(f.context.qa.events[1].freeSlots, 3);
+}
+
 {
   const f = fixture('copy');
   delete f.context.Module.blitFrames;
