@@ -30,6 +30,7 @@ header = r'''
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #define MAIN_THREAD_ASYNC_EM_ASM(...) ((void)0)
 namespace ps2 {
 void wake_render_thread() {}
@@ -138,6 +139,22 @@ int main() {
         bytes[0] != 200 || bytes[1] != 201 || fetch_waits != before) {
         std::fputs("FAIL: copying the first chunk evicted a later ready chunk in the same read\n", stderr);
         ++failures;
+    }
+    // A direct read larger than the cache must recycle already-copied chunks.
+    fill_cache(kReady);
+    g_last_chunk = ~0ull;
+    g_run = 0;
+    std::vector<std::uint8_t> large((kSlots + 1ull) * kChunk);
+    if (read_disc(0, large.data(), large.size()) != large.size()) {
+        std::fputs("FAIL: a read larger than the cache did not complete\n", stderr);
+        ++failures;
+    }
+    for (unsigned i = 0; i <= kSlots; ++i) {
+        if (large[i * kChunk] != static_cast<unsigned char>(i)) {
+            std::fputs("FAIL: large streamed read returned incorrect bytes\n", stderr);
+            ++failures;
+            break;
+        }
     }
     for (auto &slot : g_slots) delete[] slot.data;
     if (failures) return 1;

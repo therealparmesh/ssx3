@@ -388,13 +388,13 @@ bool disc_ready(std::uint64_t offset, std::size_t size) {
 
 std::size_t read_disc(std::uint64_t offset, void *out, std::size_t size) {
     if (!size || offset >= g_disc_size) return 0;
-    const std::uint64_t first = offset / kChunk;
     const std::uint64_t last = (offset + std::min<std::uint64_t>(size, g_disc_size - offset) - 1) / kChunk;
     std::size_t done = 0;
     auto *to = static_cast<std::uint8_t *>(out);
     while (done < size && offset + done < g_disc_size) {
         const std::uint64_t at = offset + done;
-        const Slot *c = chunk(at / kChunk, first, last);
+        // Copied chunks can be reused; only the unread range remains reserved.
+        const Slot *c = chunk(at / kChunk, at / kChunk, last);
         if (!c) break;
         const std::size_t within = static_cast<std::size_t>(at % kChunk);
         const std::size_t take = std::min<std::size_t>(size - done, c->size - within);
