@@ -1,6 +1,8 @@
 // Adapt the established DOM shell to a worker-owned game. Only read-only
 // telemetry is cached; pause completion is tied to the page's latest request.
 async function startWorkerPlayer(runtimeUrl) {
+  const splitPresenter = params.get('presenter') === 'pixels' ||
+    (params.get('presenter') !== 'direct' && /Firefox\//.test(navigator.userAgent));
   Module.ENV = {};
   Module.presentCopy = false;
   Module.bufferedSurface = true;
@@ -8,11 +10,17 @@ async function startWorkerPlayer(runtimeUrl) {
   if (Module.failed) return;
   if (Module.presentCopy || Module.noSurface) throw new Error('This experimental renderer requires direct WebGPU presentation.');
   Module.discSize = bytes; Module.gpuInfo = gpu;
+  Module.presentCopy = splitPresenter; Module.bufferedSurface = !splitPresenter;
   fitCanvas();
   const worker = new Worker(new URL('game-runtime-worker.js', runtimeUrl), { name: 'ssx3-runtime' });
   let pauseSequence = 0, audioRing = 0, cardPendingAddress = 0, handledCardGeneration = 0;
   const bridge = Module.workerRuntime = ps2WorkerRuntime.createBridge(worker, {
-    onFatal: error => failPlayer('The game worker stopped. Reload to continue.', error),
+    onFatal: error => {
+      // A terminated worker has lost its filesystem. Keep the stored card and
+      // allow recovery instead of waiting forever for an unavailable writer.
+      cardPersistenceBlocked = true;
+      failPlayer('The game worker stopped. Reload to return to your last stored save.', error);
+    },
     onEvent(name, value) {
       if (name === 'card-saved') {
         handledCardGeneration = value.generation;
@@ -27,7 +35,8 @@ async function startWorkerPlayer(runtimeUrl) {
   Module._ps2web_pause = value => bridge.notify('pause', [value, ++pauseSequence]);
   Module._ps2web_pause_ready = () => bridge.status('pauseSequence') === pauseSequence && bridge.status('pauseReady');
   Module._ps2web_card_pending = () => {
-    const pending = bridge.phase === 'ready' && cardPendingAddress
+    if (bridge.phase !== 'ready') return false;
+    const pending = cardPendingAddress
       ? Atomics.load(bridge.heap(), cardPendingAddress) : bridge.status('cardPending');
     return !!pending || bridge.cardGeneration() !== handledCardGeneration;
   };
@@ -60,6 +69,7 @@ async function startWorkerPlayer(runtimeUrl) {
   Module.offscreenTransferred = true;
   Module.workerCanvasWidth = canvas.width; Module.workerCanvasHeight = canvas.height;
   bridge.start({ canvas: offscreen, runtimeUrl: runtimeUrl.href,
+    splitPresenter,
     assetBase: new URL(globalThis.SSX3_ASSET_BASE || '.', runtimeUrl).href,
     arguments: Module.arguments, discUrl: new URL(Module.discUrl, document.baseURI).href,
     discSize: bytes, stateUrl: Module.stateUrl ? new URL(Module.stateUrl, document.baseURI).href : null,

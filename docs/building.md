@@ -47,6 +47,21 @@ The local server serves the selected directory directly. It does not choose betw
 
 The browser host passes the selected startup/effects mode to the runtime. The native runner accepts `--fast-boot` and `--full-effects` to enable the corresponding paths.
 
+### Dedicated game worker
+
+After generating the compatibility translation above, build the optional worker player with:
+
+```sh
+PS2_WEB_ASYNC=asyncify PS2_WEB_WORKER=ON bash scripts/build_web.sh ssx3
+python3 scripts/serve.py build/web-ssx3-asyncify-worker games/ssx3/disc.iso 8681
+```
+
+This variant requires worker WebGPU and transferable OffscreenCanvas in addition to the shared-memory requirements. The page owns user gestures, controls and audio; the game worker owns the runtime and saved-card filesystem. Firefox uses a separate lightweight presentation worker with three shared pixel slots, keeping its refresh callback separate from the larger Wasm realm. Other browsers use the game worker's direct GPU surface. Both use the same frame-pacing clock.
+
+Keep all seven helper scripts listed in `ps2web-worker-assets.json` beside `ps2web.js`, `.wasm` and `.data`. The build checks their JavaScript and generates compressed copies. A deployment must include these helpers in its release identity and supply their JavaScript MIME types and isolation headers. Private QA wrappers, generated game translations and memory cards are not distributable source assets.
+
+The split presenter submits empty GPU work only while a readback mapping is pending, to advance completion on Firefox implementations with slow completion polling. Pause, failure and shutdown cancel that progress loop. Desktop checks do not qualify phone GPUs or physical controllers/audio devices; see [validation](validation.md).
+
 Normal browser play disables GPU timestamp queries; `?debug` enables them when supported. Native runs retain timing collection by default. `PS2_GPU_TIMESTAMPS=0` disables native timing collection, while an explicit `PS2_GPU_PROFILE` still requests the timestamps needed for its profile. Native environment variables are not arbitrary URL options.
 
 ## GPU readback regression without game assets

@@ -4,10 +4,15 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const os = require('node:os'), { execFileSync } = require('node:child_process');
 const root = path.join(__dirname, '..');
+const clockTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'ssx3-frame-clock-'));
+process.on('exit', () => fs.rmSync(clockTemp, { recursive: true, force: true }));
+execFileSync('python3', [path.join(root, 'scripts/export_frame_clock.py'), path.join(root, 'web/frame-presentation.js'), clockTemp + '/clock.js']);
+const exportedClock = fs.readFileSync(clockTemp + '/clock.js', 'utf8');
 
 function makePresenter(kind) {
-  const gpu = kind === 'surface';
+  const gpu = kind !== 'copy';
   const source = fs.readFileSync(path.join(root, gpu ? 'runtime/src/gs/gpu/gpu.cpp' : 'host/web.cpp'), 'utf8');
   const marker = gpu ? 'EM_JS(void, ps2_webgpu_queue_frame,' : 'EM_JS(void, ps2web_blit,';
   const declaration = source.indexOf(marker);
@@ -46,6 +51,7 @@ function makePresenter(kind) {
     addToLibrary: entries => Object.assign(library, entries), requestAnimationFrame: callback => callbacks.push(callback) });
   vm.runInContext(fs.readFileSync(path.join(root, 'web/frame-presentation.js'), 'utf8'), context);
   context.ps2webFrameClock = library.$ps2webFrameClock;
+  if (kind === 'worker-clock') vm.runInContext(exportedClock, context);
   context.ps2webSubmitCommand = library.$ps2webSubmitCommand;
   const args = gpu ? 'device_ptr,queue_ptr,pipeline_ptr,pixels_ptr,width,height,current,previous,blend,wide' : 'rgba,width,height,wide';
   const send = vm.runInContext('(function(' + args + '){' + body + '})', context);
@@ -69,7 +75,7 @@ function makePresenter(kind) {
   };
 }
 
-for (const kind of ['copy', 'surface']) {
+for (const kind of ['copy', 'surface', 'worker-clock']) {
   const p = makePresenter(kind), step = 1000 / 60;
   let tick = 0;
   const refresh = () => p.refresh(tick++ * step);

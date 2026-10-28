@@ -1,11 +1,11 @@
 const assert = require('node:assert/strict'), fs = require('node:fs'), vm = require('node:vm'), path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../web/game-runtime-client.js'), 'utf8');
-(async () => {
+async function exercise(userAgent, query, expectedSplit) {
   const calls = [], status = { pauseSequence: 0, pauseReady: 0 }, heap = new Uint8Array(new SharedArrayBuffer(256));
   const ring = new Int32Array(heap.buffer, 32, 4); ring[0] = 4800; ring[1] = 2400;
-  let resolveReady, transferred = 0, initialized = 0, cardGeneration = 0, onEvent, savedEvents = 0;
+  let resolveReady, transferred = 0, initialized = 0, cardGeneration = 0, onEvent, onFatal, savedEvents = 0, failures = 0;
   const ready = new Promise(resolve => { resolveReady = resolve; });
-  const bridge = { phase: 'ready', ready, cardGeneration: () => cardGeneration, heap: () => heap, status: name => status[name] || 0,
+  const bridge = { phase: 'ready', ready, cardGeneration: () => bridge.phase === 'ready' ? cardGeneration : 0, heap: () => heap, status: name => status[name] || 0,
     start(config, transfer) { calls.push(['init', config, transfer]); resolveReady({ audioRing: 32, cardPendingAddress: 64 }); },
     notify(method, args) { calls.push([method, ...args]); return true; },
     request(method, args = []) { calls.push([method, ...args]); return Promise.resolve(method === 'cardExists' ? true : undefined); },
@@ -14,10 +14,10 @@ const source = fs.readFileSync(path.join(__dirname, '../web/game-runtime-client.
     onRuntimeInitialized() { ++initialized; }, print() {}, setStatus() {}, onPresent() {}, onFrame() {}, ps2CardSaved() { ++savedEvents; }, ps2CardSaveFailed() {} };
   const canvas = { width: 1280, height: 760, transferControlToOffscreen() { ++transferred; return { offscreen: true }; } };
   const context = vm.createContext({ Module, canvas, URL, Uint8Array, Int32Array, Atomics,
-    Worker: class {}, ps2WorkerRuntime: { createBridge: (worker, options) => { onEvent = options.onEvent; return bridge; } },
-    document: { baseURI: 'http://localhost/game/' },
+    Worker: class {}, ps2WorkerRuntime: { createBridge: (worker, options) => { onEvent = options.onEvent; onFatal = options.onFatal; return bridge; } },
+    navigator: { userAgent }, document: { baseURI: 'http://localhost/game/' },
     discSize: async () => 4096, chooseGpu: async () => 'GPU test', acquireCardStorage: async () => {},
-    cardStorageOwned: true, fitCanvas() {}, scale: '1', params: new URLSearchParams(), statusEl: {}, failPlayer() {} });
+    cardStorageOwned: true, cardPersistenceBlocked: false, fitCanvas() {}, scale: '1', params: new URLSearchParams(query), statusEl: {}, failPlayer() { ++failures; } });
   vm.runInContext(source, context);
   await vm.runInContext("startWorkerPlayer(new URL('http://localhost/game/ps2web.js'))", context);
   assert.equal(transferred, 1); assert.equal(initialized, 1);
@@ -46,7 +46,15 @@ const source = fs.readFileSync(path.join(__dirname, '../web/game-runtime-client.
   assert.deepEqual(calls.filter(c => ['pad', 'pause'].includes(c[0])).map(c => c[0]), ['pause','pad','pause','pause']);
   assert.equal((await Module.cardFS.analyzePath()).exists, true);
   let syncResult = 'unset'; await Module.cardFS.syncfs(false, error => { syncResult = error; }); assert.equal(syncResult, null);
+  bridge.phase = 'failed'; onFatal(new Error('Worker crashed'));
+  assert.equal(context.cardPersistenceBlocked, true, 'A lost worker filesystem must allow reload from the stored card');
+  assert.equal(Module._ps2web_card_pending(), false, 'A cleared bridge cannot leave a phantom save pending');
+  assert.equal(failures, 1);
   bridge.phase = 'closed'; assert.equal(Module._ps2web_audio_queued_ms(), 0);
-  const config = calls[0][1]; assert.equal(config.discUrl, 'http://localhost/game/disc.iso'); assert.equal(config.cardStorageOwned, true);
-  console.log('PASS: game-worker client pause generations, input ordering, shared audio counters and card dispatch');
+  const config = calls[0][1]; assert.equal(config.splitPresenter, expectedSplit); assert.equal(config.discUrl, 'http://localhost/game/disc.iso'); assert.equal(config.cardStorageOwned, true);
+}
+(async () => {
+  for (const [userAgent, query, split] of [['Firefox/158', '', true], ['Chrome/156', '', false], ['Firefox/158', 'presenter=direct', false], ['Chrome/156', 'presenter=pixels', true]])
+    await exercise(userAgent, query, split);
+  console.log('PASS: renderer selection, worker-crash recovery, pause generations, input ordering, shared audio counters and card dispatch');
 })().catch(error => { console.error(error); process.exitCode = 1; });

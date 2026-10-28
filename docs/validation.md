@@ -1,6 +1,14 @@
 # Validation scope
 
-## Dedicated rendering-runtime experiment
+## Dedicated-worker renderer qualification
+
+The optional Asyncify worker build separates the Wasm runtime from DOM controls and audio. Firefox additionally presents from a small worker using three shared pixel buffers. A slot is pinned during its GPU upload; version checks before and after acquiring ownership prevent an older frame description from reading replacement pixels. Asset-free regressions exercise that publication race, buffer growth, unsigned sequence rollover, delayed releases, pause, resizing, GPU loss and teardown. Removing the second version check makes the coupled producer/consumer test fail. The generated presentation clock runs the existing pacing regressions from 50–240 Hz.
+
+On Linux Firefox 158.0.1 with WebGPU enabled, the integrated source build completed a 270.928-second ordinary Snow Jam run after cold startup, card import and normal menu navigation. An independent observer measured 59.999969 successful fresh GPU submissions per second, no missed or overwritten images, a 24.66-ms maximum actual submission interval and no intervals over 25 ms. The AudioWorklet requested and consumed all 13,004,800 stereo frames, with no shortages; native-frame/audio-clock difference was 16.67 ms. No application errors or warning/error logs occurred. This is one desktop run, not a guarantee about every course, device or future run.
+
+Separate real-GPU pixel fixtures passed in Firefox and Chromium: expected quadrant colors and orientation, unchanged paused output, larger shared buffers and resized output. Their checks use the source producer and presenter directly, without game fixtures. Physical scanout, controllers, Bluetooth output and real iPhone/Android gameplay remain unqualified. The browser port remains experimental until broader release qualification is complete.
+
+## Earlier dedicated rendering-runtime experiment
 
 This branch includes an opt-in dedicated-worker game runtime (`PS2_WEB_WORKER=ON`, currently Asyncify only). It is not enabled by default and has not been deployed. The preceding normal Firefox run still failed actual delivery timing despite zero image/audio losses. A minimal main-thread WebGPU canvas reproduced a 27.36-ms interval with its callback arriving 10.28 ms late. A worker-owned WebGPU control stayed below 25 ms for 150 seconds during 146 injected 40-ms main-thread stalls. Worker-clock messages alone retained a 26.42-ms main-thread gap; GPU snapshots for bitmap transfer averaged 11.2 ms and missed presentations. Neither alternative was selected.
 

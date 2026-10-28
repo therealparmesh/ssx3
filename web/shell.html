@@ -293,7 +293,7 @@ function waitForCard() {
   });
 }
 async function reloadPlayer(url = location.href, beforeReload = () => {}) {
-  if (cardPersistenceBlocked) { await stopPlayerForReload(); location.href = url; return; }
+  if (cardPersistenceBlocked) { beforeReload(); await stopPlayerForReload(); location.href = url; return; }
   try {
     await waitForPause();
     await waitForCard();

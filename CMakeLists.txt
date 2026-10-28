@@ -181,13 +181,23 @@ if(PS2_GENERATED)
                 message(FATAL_ERROR "PS2_WEB_WORKER currently requires PS2_WEB_ASYNC=asyncify")
             endif()
             set(PS2_WEB_WORKER_ENABLED true)
+            find_package(Python3 REQUIRED COMPONENTS Interpreter)
+            execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/export_frame_clock.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js" "${CMAKE_CURRENT_BINARY_DIR}/frame-clock.js"
+                COMMAND_ERROR_IS_FATAL ANY)
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/export_frame_clock.py")
             # Retain the SDK's incoming Module hooks plus the explicit compiled
             # script URL used to start nested EE/VU pthread workers.
             target_link_options(ps2web PRIVATE -sENVIRONMENT=web,worker -sOFFSCREENCANVAS_SUPPORT=1
                 -sINCOMING_MODULE_JS_API=ENVIRONMENT,arguments,canvas,dynamicLibraries,elementPointerLock,instantiateWasm,locateFile,monitorRunDependencies,noExitRuntime,noInitialRun,onAbort,onExit,onRuntimeInitialized,postRun,preInit,preRun,print,printErr,setStatus,statusMessage,stderr,stdin,stdout,thisProgram,wasm,websocket,mainScriptUrlOrBlob)
-            foreach(worker_asset worker-runtime-bridge.js game-runtime-worker.js game-runtime-client.js)
+            foreach(worker_asset worker-runtime-bridge.js game-runtime-worker.js game-runtime-client.js pixel-producer.js pixel-presenter-worker.js readback-progress.js)
                 configure_file("web/${worker_asset}" "${CMAKE_CURRENT_BINARY_DIR}/${worker_asset}" COPYONLY)
             endforeach()
+            file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ps2web-worker-assets.json"
+                "{\"version\":1,\"files\":[\"worker-runtime-bridge.js\",\"game-runtime-worker.js\",\"game-runtime-client.js\",\"pixel-producer.js\",\"pixel-presenter-worker.js\",\"readback-progress.js\",\"frame-clock.js\"]}\n")
+        else()
+            file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/ps2web-worker-assets.json")
         endif()
         configure_file(web/shell.html "${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html" @ONLY)
         target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/jspi-lifecycle.js\"")

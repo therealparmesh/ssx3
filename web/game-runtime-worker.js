@@ -8,6 +8,8 @@ self.addEventListener('message', async function initialize(event) {
   if (message?.type !== 'init' || initialized) return;
   initialized = true;
   const core = ps2WorkerRuntime, config = message.config;
+  self.Module = {};
+  let producer, readbackProgress;
   const status = core.makeStatus(), values = new Float64Array(core.fields.length);
   let ready = false, started = false, shown = 0, pauseSequence = 0, statusTimer;
   const card = '/memcard/Mcd001.ps2';
@@ -29,6 +31,7 @@ self.addEventListener('message', async function initialize(event) {
   function failure(error) {
     if (Module.failed || Module.stoppedForReload) return;
     Module.failed = true; Module.paused = true;
+    producer?.pause(true); readbackProgress?.close();
     if (ready && started) Module._ps2web_pause(1);
     if (ready) { publish(); host.event('runtime-failed', String(error?.message || error)); }
     else host.fatal(error instanceof Error ? error : new Error(String(error)));
@@ -43,6 +46,7 @@ self.addEventListener('message', async function initialize(event) {
     },
     pause(value, sequence) {
       Module.paused = !!value;
+      producer?.pause(value);
       Module._ps2web_pause(value ? 1 : 0);
       pauseSequence = sequence; publish();
     },
@@ -52,7 +56,8 @@ self.addEventListener('message', async function initialize(event) {
     resize(width, height) {
       if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384)
         throw new Error('Invalid display size');
-      if (started) Module._ps2web_resize(width, height);
+      if (producer) producer.resize(width, height);
+      else if (started) Module._ps2web_resize(width, height);
       else { Module.canvas.width = width; Module.canvas.height = height; }
     },
     cardExists() { return FS.analyzePath(card).exists; },
@@ -74,17 +79,29 @@ self.addEventListener('message', async function initialize(event) {
     stop() {
       Module.stoppedForReload = true; Module.paused = true; Module.running = false;
       clearInterval(statusTimer);
+      readbackProgress?.close(); producer?.close();
       PThread.terminateAllThreads();
     },
   }, { onNotifyError: failure });
   self.addEventListener('unhandledrejection', event => { event.preventDefault(); failure(event.reason); });
+  if (config.splitPresenter) {
+    try {
+      importScripts('./pixel-producer.js', './readback-progress.js');
+      readbackProgress = ps2ReadbackProgress.install(self, failure);
+      producer = ps2PixelProducer.create({ canvas: config.canvas,
+        url: new URL('pixel-presenter-worker.js', config.runtimeUrl), lowPower: config.lowPower,
+        onFailure: failure, onPresent: () => Module.onPresent(),
+        onCapacity: () => { const wake = Module.surfaceYield; Module.surfaceYield = undefined; if (wake) wake(); } });
+    } catch (error) { failure(error); return; }
+  }
   self.Module = {
-    canvas: config.canvas, noInitialRun: true,
+    canvas: producer ? new OffscreenCanvas(1, 1) : config.canvas, noInitialRun: true,
     mainScriptUrlOrBlob: config.runtimeUrl,
     locateFile: file => new URL(file, config.assetBase).href,
     arguments: config.arguments, discUrl: config.discUrl, discSize: config.discSize,
     stateUrl: config.stateUrl, fastBoot: config.fastBoot, fullEffects: config.fullEffects,
-    noCard: config.noCard, noSurface: false, presentCopy: false, bufferedSurface: true,
+    noCard: config.noCard, noSurface: false, presentCopy: !!producer, bufferedSurface: !producer,
+    prepareCopyFrames: !!producer,
     yieldForBufferedFrames: true, stagedUploads: config.stagedUploads,
     print: text => host.event('log', text), printErr: text => host.event('log', text),
     setStatus: text => host.event('status', text),
@@ -115,13 +132,23 @@ self.addEventListener('message', async function initialize(event) {
         } catch (error) { failure(error); Module.removeRunDependency('card'); }
       }
     }],
-    onRuntimeInitialized() {
+    async onRuntimeInitialized() {
       if (Module.failed) return;
-      GL.offscreenCanvases.canvas = Module.canvas;
+      if (producer) await producer.ready;
+      else GL.offscreenCanvases.canvas = Module.canvas;
+      if (Module.failed) return;
       ready = true; publish();
       host.ready({ memory: wasmMemory, status, audioRing: Module._ps2web_audio_ring(), cardPendingAddress: Module._ps2web_card_pending_address(), cardExists: FS.analyzePath(card).exists });
       statusTimer = setInterval(publish, 16);
     },
   };
+  if (producer) {
+    Module.blitFrames = producer.frames; Module.blitFree = producer.free; Module.blitClock = producer.clock;
+    Module.pixelProducer = producer;
+    Module.transferFrame = (pointer, width, height, wide) => {
+      if (!Module.paused && !Module.failed && !Module.stoppedForReload)
+        producer.publish(new Uint8Array(wasmMemory.buffer, pointer, width * height * 4), width, height, wide);
+    };
+  }
   try { importScripts(config.runtimeUrl); } catch (error) { failure(error); }
 });

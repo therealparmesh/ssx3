@@ -105,6 +105,7 @@ EM_JS(double, ps2web_url_read, (const char *url, std::uint8_t *out, double size)
 });
 EM_JS(char *, ps2web_disc_url, (), { return stringToNewUTF8(new URL(Module.discUrl, location.href).href); });
 EM_JS(void, ps2web_frame_done, (int displayed), {
+    if (Module.transferFrame) { if (Module.onFrame) Module.onFrame(!!displayed); return; }
     if (!Module.finishShown) {
         Module.shownWaiters = [];
         Module.finishShown = () => {
@@ -179,6 +180,7 @@ EM_JS(void, ps2web_release_presenter, (), {
     }
 });
 EM_JS(void, ps2web_blit, (const std::uint32_t *rgba, int width, int height, int wide), {
+    if (Module.transferFrame) { Module.transferFrame(rgba, width, height, wide); return; }
     const canvas = Module.canvas;
     if (!Module.blitContext) Module.blitContext = canvas.getContext('2d');
     if (!Module.blitFrames) {
