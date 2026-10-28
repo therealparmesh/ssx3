@@ -1,5 +1,17 @@
 # Validation scope
 
+## Post-RAF upload prototype held after Chromium image and audio loss
+
+A source-owned native candidate at `2d3c833` includes the VU counter correction below. With the existing presenter, its normal Firefox race completed 301.054 seconds at 60.000182 successful submissions/second, with no image or consumed-audio loss, but exceeded the strict 25-ms submission gate once (25.34 ms, including a 9.28-ms upload). This native candidate was not deployed.
+
+A subsequent private presenter prototype prepares the next texture in a separate timer task after the display callback returns. It retains the prepared image's shared slot in READING state until its actual draw and release. It uses direct texture uploads, preserving queue ordering, filtering, aspect ratio and source pixels. Coupled tests passed ownership, sequence races, pause/resume, preparation failure, stop and initialization cancellation. Real WebGPU checks in both browsers passed eight independent pixel comparisons, including an uploaded but undisplayed image of different dimensions. A premature-draw mutant failed that comparison with a 254.64-level RGB error.
+
+The prototype's normal local Firefox race passed: 301.031 seconds, 60.000149 submissions/second, a 24.28-ms maximum actual interval, no missing/overwritten images, no missing consumed audio and no application errors. All 18,062 measured uploads were prepared outside the display callback. Chromium failed: 300.805 seconds, 59.959215 submissions/second, 13 missing images, a 37.51-ms maximum actual interval and 7,889 missing stereo audio frames (164.35 ms across 75 worklet quanta). Chromium had no overwritten images, producer drops or application errors; 18,035 uploads were prepared and one used the synchronous fallback. The slow submission intervals contained short texture uploads (0.24–0.81 ms), which does not establish the cause of the producer shortage. The prototype remains private and is not adopted into this source or hosted.
+
+A separate bounded owner/display trace used the byte-identical prototype helper and native Wasm, plus one-Hz Linux thread scheduling counters for the owned test browser. It completed 600.419 seconds at 60.002407 submissions/second, with a 23.51-ms maximum interval and no missing images/audio or application errors. No anomaly was captured. This instrumented baseline does not replace the failed normal qualification or identify a root cause. Scheduling collection took a median 8.77 ms per sample; thread IDs remain unlabeled, and raw runqueue counters are not used to rule out scheduling delays. The observer regression rejects callback-end-only delays and triggers on actual submission anomalies. All owned browsers, recorders and servers were stopped afterward.
+
+The native/presenter timing gates remain open. Saved version 56 remains the hosted rollback; physical phones, controllers, physical A/V, Bluetooth output and full normal progression remain unqualified.
+
 ## Keep VU diagnostic counters out of ordinary interpretation
 
 The decoded VU interpreter previously incremented one shared, non-atomic instruction total on every iteration, including when `PS2_VU_COUNT` was disabled. VU0 and VU1 can interpret on separate threads. A controlled concurrent fixture lost calls/totals in all five baseline trials; it retained the expected terminal registers. Counting is now conditional, and enabled counters use relaxed atomics. The original loop-increment placement and single-thread diagnostic output are preserved.
