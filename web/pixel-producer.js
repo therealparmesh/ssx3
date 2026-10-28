@@ -1,5 +1,5 @@
 // Three owned pixel slots bridge the Wasm readback producer and the lightweight
-// presenter. A slot remains pinned until writeTexture has copied its contents.
+// presenter. A slot remains pinned until the upload call has copied its contents.
 (function(root) {
   'use strict';
   const VERSION = 1, FREE = 0, READY = 1, READING = 2, WRITING = 3, COUNT = 3;

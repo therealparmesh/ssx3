@@ -36,6 +36,16 @@
     const start=performance.now(),result=write.call(this,destination,data,layout,size);
     uploadStart=start;uploadMs=performance.now()-start;return result;
    };
+   const bufferWrite=GPUQueue.prototype.writeBuffer;
+   if(typeof bufferWrite==='function')GPUQueue.prototype.writeBuffer=function(buffer,offset,data,dataOffset,size){
+    // Match the texture-upload observer without allocating argument arrays.
+    const start=qa.active?performance.now():undefined;
+    let result;
+    if(arguments.length===3)result=bufferWrite.call(this,buffer,offset,data);
+    else if(arguments.length===4)result=bufferWrite.call(this,buffer,offset,data,dataOffset);
+    else result=bufferWrite.call(this,buffer,offset,data,dataOffset,size);
+    if(start!==undefined){uploadStart=start;uploadMs=performance.now()-start}return result;
+   };
    GPUCanvasContext.prototype.getCurrentTexture=function(){
     const start=qa.active?performance.now():0,result=texture.call(this);
     if(this.canvas.id==='canvas'){pending=true;acquireEnd=qa.active?performance.now():undefined;acquireMs=acquireEnd===undefined?undefined:acquireEnd-start}return result;

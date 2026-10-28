@@ -84,6 +84,19 @@ SSX3_TEST_BROWSER=chrome node scripts/test_gpu_copy_readback.cjs
 
 Set `PUPPETEER_MODULE` to its installed directory when it is outside the project. `SSX3_TEST_URL` selects another fixture URL and `SSX3_TEST_OUTPUT` selects the result directory. Optional `SSX3_GPU_TEST_PROFILE=1` also requires timestamp-query support and exercises the profiling submission path. The fixture verifies all pixels from 64 ordered asynchronous frames, varying dimensions, doubled scale, staged uploads, synchronous display and a nonzero-offset VRAM readback. It needs a real WebGPU browser and does not qualify game performance or physical devices.
 
+## Pixel presenter regression without game assets
+
+The worker presenter also has a standalone real-browser check that serves its own isolated local fixture. It needs Node, Python 3, Puppeteer Core and an installed browser with WebGPU; no game build or disc is loaded:
+
+```sh
+node scripts/test_pixel_presenter_browser.cjs firefox
+node scripts/test_pixel_presenter_browser.cjs chrome
+```
+
+Set `PUPPETEER_MODULE` when the module is outside the project, `SSX3_BROWSER_EXECUTABLE` for another browser executable and `SSX3_TEST_OUTPUT` to retain results at a chosen path. `SSX3_TEST_PRESENTER` selects another presenter file for isolated candidate/mutant checks. `SSX3_TEST_HEADLESS=1` selects headless correctness testing. Firefox explicitly enables `dom.webgpu.enabled` for this check; it does not establish stock-browser availability on every platform.
+
+The fixture checks aligned buffer uploads, unaligned texture-upload fallback, exact first-frame updates, shared-storage growth, pause/resume, both aspect ratios, viewport resize and actual device-loss forwarding. Screenshots are compared against an independent bilinear reference, including alpha-zero source pixels and opaque output. A two-pixel viewport-edge margin excludes rasterizer coverage differences; interior RGB error is limited to two levels. Reports include source hashes and API counts so an all-fallback run cannot qualify the buffer path. This checks rendering correctness and lifecycle, not game performance or physical devices.
+
 ## Prepared-copy pause and recovery regression
 
 After building and serving the primary JSPI player, Chromium with JSPI and WebGPU can exercise a full copy queue while animation callbacks are held:

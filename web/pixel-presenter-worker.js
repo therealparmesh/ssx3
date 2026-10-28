@@ -8,6 +8,9 @@ importScripts('./frame-clock.js');
   let transport = scope;
   const send = message => transport.postMessage(message);
   let device, context, pipeline, sampler, texture, bundle, canvas, state, buffers, clock;
+  let uploadBuffer, uploadDestination, uploadLayout, uploadSize, uploadSource;
+  const attachment = { view: null, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] };
+  const passDescriptor = { colorAttachments: [attachment] };
   let format, textureWidth = 0, textureHeight = 0, primed = false, shown = 0;
   const frames = [], uploadViews = new Array(COUNT), commands = [null], bundles = [null];
   function failure(error) {
@@ -90,7 +93,7 @@ importScripts('./frame-clock.js');
       } else if (message?.type === 'stop') {
         stopped = true; running = false; paused = true;
         frames.length = 0;
-        texture?.destroy(); device?.destroy(); context?.unconfigure();
+        uploadBuffer?.destroy(); texture?.destroy(); device?.destroy(); context?.unconfigure();
         if (transport !== scope) transport.close();
       }
     } catch (error) { failure(error); }
@@ -128,9 +131,20 @@ importScripts('./frame-clock.js');
   }
   function draw(frame) {
     if (textureWidth !== frame.width || textureHeight !== frame.height) {
+      uploadBuffer?.destroy(); uploadBuffer = undefined;
       texture?.destroy(); textureWidth = frame.width; textureHeight = frame.height;
       texture = device.createTexture({ size: [textureWidth, textureHeight], format: 'rgba8unorm',
         usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING });
+      uploadDestination = { texture };
+      uploadLayout = { bytesPerRow: textureWidth * 4, rowsPerImage: textureHeight };
+      uploadSize = { width: textureWidth, height: textureHeight, depthOrArrayLayers: 1 };
+      // Buffer-to-texture copies require aligned rows. Other widths retain
+      // the ordinary texture upload, with the same pixels and filtering.
+      if ((textureWidth * 4) % 256 === 0) {
+        uploadBuffer = device.createBuffer({ size: textureWidth * textureHeight * 4,
+          usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+        uploadSource = { buffer: uploadBuffer, bytesPerRow: textureWidth * 4, rowsPerImage: textureHeight };
+      }
       const group = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
         { binding: 0, resource: texture.createView() }, { binding: 1, resource: sampler }] });
       const encoder = device.createRenderBundleEncoder({ colorFormats: [format] });
@@ -140,10 +154,15 @@ importScripts('./frame-clock.js');
     const bytes = textureWidth * textureHeight * 4;
     if (!uploadViews[frame.id] || uploadViews[frame.id].byteLength !== bytes)
       uploadViews[frame.id] = buffers[frame.id].subarray(0, bytes);
-    device.queue.writeTexture({ texture }, uploadViews[frame.id],
-      { bytesPerRow: textureWidth * 4, rowsPerImage: textureHeight }, { width: textureWidth, height: textureHeight });
-    const encoder = device.createCommandEncoder(), pass = encoder.beginRenderPass({ colorAttachments: [
-      { view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] });
+    // Both upload calls snapshot the pinned shared pixels before returning.
+    // Queue ordering lets the same upload buffer serve the following frame.
+    if (uploadBuffer) device.queue.writeBuffer(uploadBuffer, 0, uploadViews[frame.id], 0, bytes);
+    else device.queue.writeTexture(uploadDestination, uploadViews[frame.id], uploadLayout, uploadSize);
+    const encoder = device.createCommandEncoder();
+    if (uploadBuffer) encoder.copyBufferToTexture(uploadSource, uploadDestination, uploadSize);
+    attachment.view = context.getCurrentTexture().createView();
+    let pass;
+    try { pass = encoder.beginRenderPass(passDescriptor); } finally { attachment.view = null; }
     const across = frame.wide ? 16 : 4, down = frame.wide ? 9 : 3;
     const scale = Math.min(canvas.width / across, canvas.height / down), width = scale * across, height = scale * down;
     pass.setViewport((canvas.width - width) / 2, (canvas.height - height) / 2, width, height, 0, 1);

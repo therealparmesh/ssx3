@@ -1,5 +1,15 @@
 # Validation scope
 
+## Reusable presenter upload buffer
+
+Aligned pixel rows now upload through one reusable COPY_DST/COPY_SRC buffer and a buffer-to-texture copy encoded before the existing render pass. Rows without the required 256-byte alignment retain direct texture uploads. The shader, texture filtering, aspect calculation, three-slot ownership protocol and source pixels are unchanged. Upload and pass descriptors are cached, the current texture view is cleared from its cached descriptor immediately after encoding, and dimension changes/stop destroy the prior upload buffer.
+
+A private prototype completed normal cold-start/card-import/default-menu 300-second races in both visible browsers. Firefox averaged 60.000328 fresh submissions/second with a 21.56-ms maximum actual interval; Chromium averaged 60.002482 with a 19.585-ms maximum. Neither window missed/overwrote an image or lost an audio frame, and neither reported an application error. Native binaries were unchanged from the final disc-cache build. These local passing windows do not replace hosted qualification or establish that earlier intermittent producer starvation is resolved.
+
+The integrated helper passes coupled worker/port ownership and upload-order tests, including aligned buffer reuse/growth, transition back to unaligned rows, cached-view cleanup and stop with a live upload buffer. An asset-free real-browser fixture verifies aligned and fallback output against an independent bilinear reference, including alpha-zero input, pause/resume, shared-storage growth, viewport changes and actual device loss. The QA observer also records buffer-upload duration without argument arrays and preserves all optional native call forms. A legal-command mutant copied the new pixels only after rendering; the browser fixture rejected its first resumed frame with a 254-level RGB error, while the normal helper passed.
+
+Earlier Canvas 2D prototypes passed five-minute throughput windows but failed the Firefox gradient comparison: its scaling differed by up to 24 RGB levels in that fixture. Moving scaling to the compositor did not resolve the mismatch. Those prototypes remain private and are not the selected implementation. The buffer path's separate GPU-reference comparisons had zero channel differences in both browsers and aspect ratios.
+
 ## Readback-only device progress polling
 
 The optional worker runtime's completion helper now polls only READ mappings. It previously added a timer, repeated empty submissions and a finalization Promise to every upload mapping as well, even while ordinary compute submissions were progressing. Upload mappings now retain their original Promise and completion path; final frame readbacks still receive the existing bounded 1-ms/4-ms progress polling. Tests cover upload promise identity, zero upload timers/submissions, concurrent upload/readback completion, rejection, cancellation and reentrant shutdown. The preceding helper fails the new upload regression.

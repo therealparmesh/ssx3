@@ -18,7 +18,7 @@ function fixture(kind) {
     constructor(id) { this.canvas = { id }; }
     getCurrentTexture() { this.onAcquire?.(); return {}; }
   }
-  class GPUQueue { writeTexture() { this.onWrite?.(); } submit() { this.onSubmit?.(); if (this.fail) throw new Error('submit failed'); return 9; } }
+  class GPUQueue { writeBuffer(...args) { this.bufferArgs=args; if(this.failWrite)throw new Error('buffer write failed'); this.onBufferWrite?.(); } writeTexture() { this.onWrite?.(); } submit() { this.onSubmit?.(); if (this.fail) throw new Error('submit failed'); return 9; } }
   class GPUBuffer { mapAsync() {} }
   const context = vm.createContext({ performance: { now: () => now }, CanvasRenderingContext2D,
     GPUCanvasContext, GPUQueue, GPUBuffer,
@@ -147,4 +147,21 @@ for (const kind of ['copy', 'surface']) {
   delete f.context.Module.blitFrames;
   assert.throws(() => f.context.qaInstall(), /Initialize the buffered or copy presenter/);
 }
-console.log('Frame metrics: copy/GPU delayed delivery, lifecycle boundaries, failed output and bounded diagnostics passed');
+
+// Buffer-backed uploads must receive the same timing coverage and preserve
+// every optional-argument form of the native API.
+{
+  const f=fixture('surface');f.begin();f.at(0);f.submit();f.at(16);
+  f.queue.onBufferWrite=()=>f.at(28);f.canvas.onAcquire=()=>f.at(31);f.queue.onSubmit=()=>f.at(34);
+  const buffer={},data=new Uint8Array(128);
+  f.queue.writeBuffer(buffer,0,data,0,data.length);f.submit();
+  const event=f.context.qa.wall.events[0];
+  assert.equal(event.gapMs,34);assert.equal(event.uploadMs,12);assert.equal(event.canvasAcquireMs,3);
+  assert.equal(event.submitMs,3);assert.equal(event.uploadAgeMs,18);
+  f.context.qaActive(false);f.queue.onBufferWrite=undefined;
+  for(const args of [[buffer,2,data],[buffer,2,data,3],[buffer,2,data,3,4]]){
+    f.queue.writeBuffer(...args);assert.deepEqual(f.queue.bufferArgs,args);
+  }
+  f.queue.failWrite=true;assert.throws(()=>f.queue.writeBuffer(buffer,0,data),/buffer write failed/);
+}
+console.log('Frame metrics: texture/buffer timing, native call forms, delayed output, lifecycle and bounded diagnostics passed');
