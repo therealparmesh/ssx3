@@ -1,5 +1,15 @@
 # Validation scope
 
+## Dedicated rendering-runtime experiment
+
+This branch starts a dedicated-worker runtime integration. The game UI is not yet connected to it, and no worker runtime has been deployed. The preceding normal Firefox run still failed actual delivery timing despite zero image/audio losses. A minimal main-thread WebGPU canvas reproduced a 27.36-ms interval with its callback arriving 10.28 ms late. A worker-owned WebGPU control stayed below 25 ms for 150 seconds during 146 injected 40-ms main-thread stalls. Worker-clock messages alone retained a 26.42-ms main-thread gap; GPU snapshots for bitmap transfer averaged 11.2 ms and missed presentations. Neither alternative was selected.
+
+The actual Wasm GS renderer then passed six worker readback cases on Firefox and Chromium across normal, staged-upload and 2x-scale modes, including asynchronous/synchronous pixel checks and nonzero-offset VRAM reads. Buffered presentation also passed in both browsers. Further lifecycle cases checked 720 displayed-frame center colors, pause/resume, resize, device-loss forwarding and zero outstanding futures after awaiting device destruction. These are asset-free graphics fixtures, not gameplay or release performance results.
+
+The new UI/worker bridge preserves request ownership, transfer semantics and shared-memory status publication. Its tests cover memory growth, coherent status snapshots, card/state buffer transfer, startup failure, request timeout, late replies and worker teardown. A timed-out stateful request explicitly has an unknown outcome. GPU failure events leave recovery requests available; transport failure settles pending calls. Readiness retains metadata rather than the shared heap. Real-browser bridge fixtures also exported an intact 8,650,752-byte synthetic card after device loss in both browsers. Actual career data, IDBFS persistence and the game's input/audio lifecycle still require integration testing.
+
+The render queue now selects an asynchronous wait on the main runtime thread, including when it lives in a dedicated worker. EE/VU pthreads retain native futex waits. Real browser controls showed that the preceding implementation blocked its worker event loop during an approximately 80-ms wait, while the new path allowed a scheduled callback to run and preserved the posted command. Node/Wasm checks cover both browser-thread selections, and the preceding implementation fails the worker-role negative control. The existing three queue-wake policy cases still pass.
+
 ## Coefficient look-ahead reuse candidate
 
 A fresh named profile of the preceding optimized runtime captured a 33.38-ms image gap after about 386 seconds. In the surrounding 85-ms sampling window, the emulation worker used 62.58 ms of CPU, including 36.63 ms inside IPU decoding; the VU worker used about 2.33 ms and mostly waited. The diagnostic had no native recorder probes and left production files unchanged. It also failed the existing audio/frame-clock comparison by 76.7 ms despite consuming all requested audio, so it is not release qualification. The captured stacks still included repeated JavaScript exception bridges in decoding.

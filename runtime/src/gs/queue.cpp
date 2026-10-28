@@ -198,7 +198,10 @@ void Ring::wait_for_work(int timeout_ms) {
         return;
     }
 #ifdef __EMSCRIPTEN__
-    if (emscripten_is_main_browser_thread()) {
+    // The rendering runtime can own an OffscreenCanvas in a dedicated worker.
+    // Its event loop must remain available for presentation and GPU promises.
+    // Synchronous EE/VU pthreads keep their native futex wait below.
+    if (emscripten_is_main_runtime_thread()) {
 #ifdef PS2_RENDER_PROXY_WAKE
         if (g_render_proxy_policy.load(std::memory_order_relaxed) < 0)
             g_render_proxy_policy.store(ps2_render_proxy_enabled(), std::memory_order_release);
