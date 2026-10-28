@@ -60,7 +60,7 @@ This variant requires worker WebGPU and transferable OffscreenCanvas in addition
 
 Keep all seven helper scripts listed in `ps2web-worker-assets.json` beside `ps2web.js`, `.wasm` and `.data`. The build checks their JavaScript and generates compressed copies. A deployment must include these helpers in its release identity and supply their JavaScript MIME types and isolation headers. Private QA wrappers, generated game translations and memory cards are not distributable source assets.
 
-The split presenter submits empty GPU work only while a readback mapping is pending, to advance completion on Firefox implementations with slow completion polling. Pause, failure and shutdown cancel that progress loop. Desktop checks do not qualify phone GPUs or physical controllers/audio devices; see [validation](validation.md).
+The split presenter submits empty GPU work only while a readback mapping is pending, to advance completion on Firefox implementations with slow completion polling. Map completion, failure and shutdown cancel pending progress polls. Desktop checks do not qualify phone GPUs or physical controllers/audio devices; see [validation](validation.md).
 
 Normal browser play disables GPU timestamp queries; `?debug` enables them when supported. Native runs retain timing collection by default. `PS2_GPU_TIMESTAMPS=0` disables native timing collection, while an explicit `PS2_GPU_PROFILE` still requests the timestamps needed for its profile. Native environment variables are not arbitrary URL options.
 

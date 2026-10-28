@@ -45,6 +45,7 @@ jobs:
           node scripts/test_sync_game_workers.cjs
           node scripts/test_worker_runtime_bridge.cjs
           node scripts/test_game_worker_client.cjs
+          node scripts/test_worker_shutdown.cjs
           node scripts/test_pixel_producer.cjs
           node scripts/test_pixel_presenter.cjs
           node scripts/test_readback_progress.cjs

@@ -413,7 +413,12 @@ function stopPlayerForReload() {
     stopCompiler();
     if (Module.workerRuntime) {
       Module.stoppedForReload = true; Module.paused = true; Module.running = false;
-      try { await Module.workerRuntime.request('stop'); }
+      try {
+        if (Module.workerRuntime.phase === 'ready') await Module.workerRuntime.request('stop');
+      } catch (error) {
+        // Graceful shutdown can race a crash or time out. The card has already
+        // settled; close() below still terminates the owned worker hierarchy.
+      }
       finally {
         Module.workerRuntime.close();
         if (node) { node.disconnect(); node = null; }
