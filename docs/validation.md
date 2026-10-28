@@ -1,5 +1,15 @@
 # Validation scope
 
+## Keep VU diagnostic counters out of ordinary interpretation
+
+The decoded VU interpreter previously incremented one shared, non-atomic instruction total on every iteration, including when `PS2_VU_COUNT` was disabled. VU0 and VU1 can interpret on separate threads. A controlled concurrent fixture lost calls/totals in all five baseline trials; it retained the expected terminal registers. Counting is now conditional, and enabled counters use relaxed atomics. The original loop-increment placement and single-thread diagnostic output are preserved.
+
+The new asset-free regression executes 10,000 programs on each VU concurrently, then another 20,000 after joining. It checks full terminal register state, quiet disabled diagnostics, unique call samples and the exact final instruction total. The preceding implementation fails this regression. All fourteen native suites pass with the correction.
+
+A separate rotating-order benchmark used seven repetitions of NOP, arithmetic, integer-loop and flag-observing programs on both units. Baseline/candidate register and memory hashes matched in native and pthread Wasm builds, with main-thread suspension forbidden in the measured worker. Scalar-reference checks additionally covered NOP, integer-loop and flag-observing arithmetic; unobserved arithmetic used the existing optimized interpreter as its reference. Enabled single-thread diagnostic output remained identical. The selected conditional form showed 1.003–1.025 times baseline throughput across the eight Node/Wasm cases. Native timings were mixed, including a roughly 3.2% slower integer-loop case. Alternative loop specializations had larger but mixed gains/regressions and were not adopted.
+
+These are small interpreter microbenchmarks, not a full-game FPS qualification or an attribution of the intermittent producer-starvation burst. The change removes unnecessary shared writes and a confirmed diagnostic-counter race. Browser gameplay, hosted timing and physical-device release gates remain open.
+
 ## Cancel presenter initialization after stop
 
 A controlled asynchronous regression reproduced device creation after the presenter had already processed a stop request. Initialization now rechecks cancellation after adapter acquisition and after device creation. A device returned after stop is destroyed before any canvas configuration, animation callback or ready message. The regression covers stopping at either await; the preceding helper fails the adapter case. Existing worker/port ownership, pixel uploads, pause, resize and device-loss checks remain applicable. This lifecycle correction does not change the upload algorithm or resolve the outstanding timing qualification.

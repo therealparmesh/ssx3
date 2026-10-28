@@ -242,6 +242,12 @@ if(PS2_RUNTIME_TESTS AND NOT EMSCRIPTEN)
         --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME ssx3-startup COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_ssx3_startup.py" --cxx "${CMAKE_CXX_COMPILER}")
+    find_package(Threads REQUIRED)
+    add_executable(ps2vu_counter_tests tests/vu_counters.cpp)
+    target_include_directories(ps2vu_counter_tests PRIVATE runtime/src)
+    target_link_libraries(ps2vu_counter_tests PRIVATE ps2runtime Threads::Threads)
+    add_test(NAME vu-instruction-counters COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_vu_counters.py" "$<TARGET_FILE:ps2vu_counter_tests>")
     add_executable(ps2runtime_tests tests/runtime.cpp)
     target_include_directories(ps2runtime_tests PRIVATE runtime/src)
     target_link_libraries(ps2runtime_tests PRIVATE ps2runtime)
