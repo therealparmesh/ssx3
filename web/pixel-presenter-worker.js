@@ -45,8 +45,11 @@ importScripts('./frame-clock.js');
         });
         clock = ps2webFrameClock();
         const adapter = await navigator.gpu.requestAdapter({ powerPreference: message.lowPower ? 'low-power' : 'high-performance' });
+        if (stopped) return;
         if (!adapter) throw new Error('No graphics adapter is available for presentation.');
-        device = await adapter.requestDevice();
+        const requestedDevice = await adapter.requestDevice();
+        if (stopped) { requestedDevice.destroy(); return; }
+        device = requestedDevice;
         device.lost.then(info => failure(new Error('The graphics connection was lost. ' + info.message)));
         device.addEventListener('uncapturederror', event => failure(event.error));
         context = canvas.getContext('webgpu'); format = navigator.gpu.getPreferredCanvasFormat();

@@ -61,7 +61,25 @@ async function exercise(usePort){
  producer.resize(80,60);producer.pause(false);await deliver();tick();assert.equal(uploads.at(-1).first,23);assert.deepEqual(viewports.at(-1).slice(0,4),[0,0,80,60]);assert.equal(bufferDestroyed,2,'Returning to an unaligned width must destroy the old upload buffer');
  lose({message:'QA device loss'});await Promise.resolve();await Promise.resolve();assert.equal(failures.length,1);const before=uploads.length;tick();assert.equal(uploads.length,before);producer.close();assert.equal(worker.terminated,1);
 }
+async function exerciseInitializationStop(phase){
+ let adapterResolve,deviceResolve,deviceCalls=0,destroyed=0,configured=0,rafs=0,closed=0;const messages=[];
+ const device={destroy(){++destroyed},lost:new Promise(()=>{}),addEventListener(){}};
+ const devicePromise=new Promise(r=>deviceResolve=r),adapterPromise=new Promise(r=>adapterResolve=r);
+ const adapter={requestDevice(){++deviceCalls;return phase==='device'?devicePromise:Promise.resolve(device)}};
+ class Port{start(){}close(){++closed}postMessage(m){messages.push(m)}}
+ const scope={SharedArrayBuffer,Uint8Array,Int32Array,MessagePort:Port,navigator:{gpu:{requestAdapter:()=>adapterPromise,getPreferredCanvasFormat:()=> 'bgra8unorm'}},requestAnimationFrame(){++rafs},postMessage(m){messages.push(m)},addEventListener(){},importScripts(){scope.ps2webFrameClock=()=>({reset(){}})}};scope.self=scope;
+ const context=vm.createContext(scope);vm.runInContext(fs.readFileSync(path.join(root,'web/pixel-presenter-worker.js'),'utf8'),context);const port=new Port();await scope.onmessage({data:{type:'connect',port}});
+ const initializing=port.onmessage({data:{type:'init',version:1,canvas:{getContext(){return{configure(){++configured;throw Error('Initialization continued after stop')}}}},buffers:Array.from({length:3},()=>new SharedArrayBuffer(4)),slotState:new SharedArrayBuffer(24)}});
+ if(phase==='device'){adapterResolve(adapter);await new Promise(setImmediate);assert.equal(deviceCalls,1)}
+ await port.onmessage({data:{type:'stop'}});
+ if(phase==='adapter')adapterResolve(adapter);else deviceResolve(device);
+ await initializing;
+ assert.equal(deviceCalls,phase==='device'?1:0,'Cancelled adapter request must not create a device');
+ assert.equal(destroyed,phase==='device'?1:0,'Device returned after stop must be destroyed');
+ assert.equal(configured,0);assert.equal(rafs,0);assert.equal(closed,1);assert.deepEqual(messages,[]);assert.equal(scope.ps2PixelPresenter.running,false);assert.equal(scope.ps2PixelPresenter.failed,false);
+}
 (async()=>{
+ for(const phase of ['adapter','device'])await exerciseInitializationStop(phase);
  for(const mode of [false,true,'stop','stop-active'])await exercise(mode);
- console.log('PASS: worker/port transport, pixel ownership, upload order, resource cleanup, pause, resize and device loss');
+ console.log('PASS: worker/port transport, pixel ownership, upload order, resource cleanup, initialization cancellation, pause, resize and device loss');
 })().catch(error=>{console.error(error);process.exitCode=1}).finally(()=>fs.rmSync(temp,{recursive:true,force:true}));

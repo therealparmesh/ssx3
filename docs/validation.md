@@ -1,5 +1,9 @@
 # Validation scope
 
+## Cancel presenter initialization after stop
+
+A controlled asynchronous regression reproduced device creation after the presenter had already processed a stop request. Initialization now rechecks cancellation after adapter acquisition and after device creation. A device returned after stop is destroyed before any canvas configuration, animation callback or ready message. The regression covers stopping at either await; the preceding helper fails the adapter case. Existing worker/port ownership, pixel uploads, pause, resize and device-loss checks remain applicable. This lifecycle correction does not change the upload algorithm or resolve the outstanding timing qualification.
+
 ## Latest hosted desktop qualification
 
 The reusable-buffer candidate at runtime source `1936a37` passed staged private-HTTPS races in both visible desktop browsers. Firefox completed 301.101 seconds at 60.000082 fresh submissions/second with a 24.22-ms maximum actual interval; Chromium completed 300.720 seconds at 60.002416 with a 23.685-ms maximum. Both had zero missed/overwritten images, zero missing consumed audio and no application errors. These staged tests selected only the document in the test browser; assets and disc came from the immutable HTTPS release. Authentication interception attached the private header only to the site's own HTTPS origin, and retained header-only interception during gameplay.
