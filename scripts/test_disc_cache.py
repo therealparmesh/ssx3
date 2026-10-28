@@ -39,7 +39,9 @@ void usleep(unsigned) {}
 void emscripten_futex_wait(void *, unsigned, double);
 '''
 tests = r'''
+unsigned fetch_waits = 0;
 void emscripten_futex_wait(void *address, unsigned, double) {
+    ++fetch_waits;
     for (auto &slot : g_slots) if (&slot.state == address) {
         if (!slot.data) slot.data = new std::uint8_t[kChunk];
         std::memset(slot.data, static_cast<unsigned char>(slot.index), slot.size);
@@ -89,9 +91,51 @@ int main() {
             ++failures;
         }
     }
+    // Readiness is a promise that an immediate read will not wait for HTTP.
+    // With a full cache, speculative prefetch must not evict that promise.
+    for (const auto state : {kReady, kLoading}) {
+        fill_cache(state);
+        const auto before = fetch_waits;
+        if (!disc_ready(200ull * kChunk + 17, 1) || !find_slot(200) ||
+            find_slot(200)->state.load() != kReady) {
+            std::fputs("FAIL: readiness prefetch evicted requested disc data\n", stderr);
+            ++failures;
+        }
+        std::uint8_t byte = 0;
+        if (read_disc(200ull * kChunk + 17, &byte, 1) != 1 || byte != 200 || fetch_waits != before) {
+            std::fputs("FAIL: a ready read unexpectedly waited for a network fetch\n", stderr);
+            ++failures;
+        }
+        fill_cache(state);
+        auto &second = g_slots[1];
+        second.index = 201;
+        second.state.store(kReady);
+        if (!second.data) second.data = new std::uint8_t[kChunk];
+        std::memset(second.data, 201, kChunk);
+        // Make the next chunk the oldest eviction candidate during the first copy.
+        second.used = 0;
+        if (!disc_ready(201ull * kChunk - 1, 2) || !find_slot(200) || !find_slot(201) ||
+            find_slot(200)->state.load() != kReady || find_slot(201)->state.load() != kReady) {
+            std::fputs("FAIL: readiness did not preserve the complete requested range\n", stderr);
+            ++failures;
+        }
+    }
+    fill_cache(kReady);
+    auto &second = g_slots[1];
+    second.index = 201;
+    second.used = 0;
+    if (!second.data) second.data = new std::uint8_t[kChunk];
+    std::memset(second.data, 201, kChunk);
+    std::uint8_t bytes[2] = {};
+    const auto before = fetch_waits;
+    if (read_disc(201ull * kChunk - 1, bytes, 2) != 2 ||
+        bytes[0] != 200 || bytes[1] != 201 || fetch_waits != before) {
+        std::fputs("FAIL: copying the first chunk evicted a later ready chunk in the same read\n", stderr);
+        ++failures;
+    }
     for (auto &slot : g_slots) delete[] slot.data;
     if (failures) return 1;
-    std::puts("PASS: ready disc data survives read-ahead with a full cache and with every other slot loading");
+    std::puts("PASS: demand reads and readiness preserve disc data across full-cache prefetch without network waits");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='ssx3-disc-cache-') as folder:

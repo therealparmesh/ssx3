@@ -292,7 +292,8 @@ Slot *find_slot(std::uint64_t index) {
     return nullptr;
 }
 
-Slot *want(std::uint64_t index, const Slot *keep = nullptr) {
+Slot *want(std::uint64_t index, const Slot *keep = nullptr,
+           std::uint64_t keep_first = 1, std::uint64_t keep_last = 0) {
     if (index * kChunk >= g_disc_size) return nullptr;
     if (Slot *s = find_slot(index)) return s;
     Slot *victim = nullptr;
@@ -303,6 +304,7 @@ Slot *want(std::uint64_t index, const Slot *keep = nullptr) {
             victim = &s;
             break;
         }
+        if (s.index >= keep_first && s.index <= keep_last) continue;
         if ((state == kReady || state == kFailed) && (!victim || s.used < victim->used)) victim = &s;
     }
     if (!victim) return nullptr;
@@ -323,8 +325,10 @@ void advance(std::uint64_t index) {
     g_last_chunk = index;
 }
 
-void read_ahead(std::uint64_t index, const Slot *keep = nullptr) {
-    for (std::uint64_t k = 1; k <= std::min(g_run * 2, kReadAhead); ++k) want(index + k, keep);
+void read_ahead(std::uint64_t index, const Slot *keep = nullptr,
+                std::uint64_t keep_first = 1, std::uint64_t keep_last = 0) {
+    for (std::uint64_t k = 1; k <= std::min(g_run * 2, kReadAhead); ++k)
+        want(index + k, keep, keep_first, keep_last);
 }
 
 void fail(const char *reason) {
@@ -334,12 +338,12 @@ void fail(const char *reason) {
     }, reason);
 }
 
-const Slot *chunk(std::uint64_t index) {
-    Slot *s = want(index);
+const Slot *chunk(std::uint64_t index, std::uint64_t keep_first, std::uint64_t keep_last) {
+    Slot *s = want(index, nullptr, keep_first, keep_last);
     advance(index);
     // A cache hit may be the oldest ready slot. Keep it reserved while
     // prefetch allocates other slots, until read_disc has copied its bytes.
-    read_ahead(std::max(index, g_last_chunk), s);
+    read_ahead(std::max(index, g_last_chunk), s, keep_first, keep_last);
     while (s) {
         for (std::uint32_t state = s->state.load(); state != kReady && state != kFailed; state = s->state.load())
             emscripten_futex_wait(&s->state, state, INFINITY);
@@ -359,10 +363,13 @@ const Slot *chunk(std::uint64_t index) {
 
 bool disc_ready(std::uint64_t offset, std::size_t size) {
     if (!size) return true;
+    const std::uint64_t first = offset / kChunk;
     const std::uint64_t last = (offset + size - 1) / kChunk;
     bool ready = true;
-    for (std::uint64_t index = offset / kChunk; index <= last; ++index) {
-        Slot *s = want(index);
+    // Preserve every requested chunk while allocating demand and speculative
+    // reads. Returning true must not leave the immediate read waiting for HTTP.
+    for (std::uint64_t index = first; index <= last; ++index) {
+        Slot *s = want(index, nullptr, first, last);
         if (s && s->state.load(std::memory_order_acquire) == kFailed) {
             if (s->attempts >= 4) {
                 fail("Could not read the game disc. Check your connection and reload.");
@@ -375,16 +382,19 @@ bool disc_ready(std::uint64_t offset, std::size_t size) {
         ready = ready && s && s->state.load(std::memory_order_acquire) == kReady;
         advance(index);
     }
-    read_ahead(std::max(last, g_last_chunk));
+    read_ahead(std::max(last, g_last_chunk), nullptr, first, last);
     return ready;
 }
 
 std::size_t read_disc(std::uint64_t offset, void *out, std::size_t size) {
+    if (!size || offset >= g_disc_size) return 0;
+    const std::uint64_t first = offset / kChunk;
+    const std::uint64_t last = (offset + std::min<std::uint64_t>(size, g_disc_size - offset) - 1) / kChunk;
     std::size_t done = 0;
     auto *to = static_cast<std::uint8_t *>(out);
     while (done < size && offset + done < g_disc_size) {
         const std::uint64_t at = offset + done;
-        const Slot *c = chunk(at / kChunk);
+        const Slot *c = chunk(at / kChunk, first, last);
         if (!c) break;
         const std::size_t within = static_cast<std::size_t>(at % kChunk);
         const std::size_t take = std::min<std::size_t>(size - done, c->size - within);
