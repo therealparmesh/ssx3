@@ -3,7 +3,7 @@
 // a broken worker or transport closes the bridge and settles every request.
 (function (root) {
   'use strict';
-  const VERSION = 1;
+  const VERSION = 2;
   const fields = Object.freeze([
     'frames', 'primitives', 'gpuMs', 'eeIdleMs', 'renderIdleMs', 'vuIdleMs',
     'vuInterpreted', 'pauseReady', 'cardPending', 'rumble0', 'rumble1',
@@ -30,6 +30,11 @@
     const buffer = new SharedArrayBuffer(statusBytes);
     Atomics.store(new Int32Array(buffer, 0, 4), 0, VERSION);
     return buffer;
+  }
+  // This counter is independent of the telemetry seqlock. A pagehide handler
+  // must see a finished native write even while its DOM event is still queued.
+  function markCardSaved(buffer) {
+    return (Atomics.add(new Int32Array(buffer, 0, 4), 2, 1) + 1) >>> 0;
   }
   function publishStatus(buffer, values) {
     if (values.length !== fields.length)
@@ -174,6 +179,7 @@
         }
         return snapshot[index];
       },
+      cardGeneration() { return header ? Atomics.load(header, 2) >>> 0 : 0; },
       heap() {
         if (!memory) throw new Error('Worker runtime is not ready');
         if (heap.byteLength !== memory.buffer.byteLength) heap = new Uint8Array(memory.buffer);
@@ -218,7 +224,7 @@
   }
 
   function transferResult(value, transfer) { return { [transferTag]: true, value, transfer }; }
-  const api = { VERSION, fields, makeStatus, publishStatus, createBridge, installHost, transferResult };
+  const api = { VERSION, fields, makeStatus, markCardSaved, publishStatus, createBridge, installHost, transferResult };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ps2WorkerRuntime = api;
 })(globalThis);

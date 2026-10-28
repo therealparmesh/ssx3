@@ -59,6 +59,8 @@ void memory_card_retries_failed_writes() {
     command({0x81, 0x22, 0, 0, 0, 0});
     command({0x81, 0x42, 3, 1, 2, 3});
     expect(ps2::memory_card_pending(), "Pending card writes were invisible before the quiet interval");
+    const auto *pending_flag = ps2::memory_card_pending_flag();
+    expect(pending_flag->load(), "Shared card status missed a native write");
     fs::rename(directory, hidden);
     for (int i = 0; i < 50; ++i) ps2::iop::sio2::flush_cards();
     expect(saved == 0, "Failed card save reported success");
@@ -68,6 +70,7 @@ void memory_card_retries_failed_writes() {
     for (int i = 0; i < 50; ++i) ps2::iop::sio2::flush_cards();
     expect(saved == 1, "Card write failure discarded the pending save instead of retrying");
     expect(!ps2::memory_card_pending(), "Completed card write stayed pending");
+    expect(pending_flag == ps2::memory_card_pending_flag() && !pending_flag->load(), "Shared card status did not retain its identity or settle");
     std::vector<std::uint8_t> contents(original.size());
     { std::ifstream in(file, std::ios::binary); in.read(reinterpret_cast<char *>(contents.data()), contents.size()); expect(in.good(), "Retried card save was truncated"); }
     auto expected = original;

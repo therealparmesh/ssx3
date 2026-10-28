@@ -519,6 +519,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE int ps2web_pause_ready() {
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int ps2web_card_pending() { return ps2::memory_card_pending(); }
+extern "C" EMSCRIPTEN_KEEPALIVE const void *ps2web_card_pending_address() {
+    // The page uses Atomics.load on this byte in the shared Wasm heap, without
+    // waiting for a worker telemetry tick or notification before pagehide.
+    static_assert(sizeof(std::atomic<bool>) == 1 && std::atomic<bool>::is_always_lock_free);
+    return ps2::memory_card_pending_flag();
+}
 
 extern "C" EMSCRIPTEN_KEEPALIVE void ps2web_resize(int width, int height) {
     ps2::resize_window(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));

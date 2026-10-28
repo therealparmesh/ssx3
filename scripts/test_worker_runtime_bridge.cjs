@@ -52,8 +52,13 @@ async function connected(handlers = {}, options = {}) {
 
   const values = api.fields.map((_, i) => i + 10);
   api.publishStatus(c.status, values); assert.equal(c.bridge.status('frames'), 10);
+  assert.equal(c.bridge.cardGeneration(), 0);
+  assert.equal(api.markCardSaved(c.status), 1);
+  assert.equal(c.bridge.cardGeneration(), 1);
   const header = new Int32Array(c.status, 0, 4), data = new Float64Array(c.status, 16, api.fields.length);
   Atomics.add(header, 1, 1); data[0] = 999;
+  api.markCardSaved(c.status);
+  assert.equal(c.bridge.cardGeneration(), 2, 'Save completion must remain visible during an unfinished telemetry publication');
   assert.equal(c.bridge.status('frames'), 10, 'An unfinished publication must retain the last complete snapshot');
   Atomics.add(header, 1, 1); assert.equal(c.bridge.status('frames'), 999);
   assert.throws(() => c.bridge.status('__proto__'), /Unknown runtime status/);

@@ -3,18 +3,18 @@ const source = fs.readFileSync(path.join(__dirname, '../web/game-runtime-client.
 (async () => {
   const calls = [], status = { pauseSequence: 0, pauseReady: 0 }, heap = new Uint8Array(new SharedArrayBuffer(256));
   const ring = new Int32Array(heap.buffer, 32, 4); ring[0] = 4800; ring[1] = 2400;
-  let resolveReady, transferred = 0, initialized = 0;
+  let resolveReady, transferred = 0, initialized = 0, cardGeneration = 0, onEvent, savedEvents = 0;
   const ready = new Promise(resolve => { resolveReady = resolve; });
-  const bridge = { phase: 'ready', ready, heap: () => heap, status: name => status[name] || 0,
-    start(config, transfer) { calls.push(['init', config, transfer]); resolveReady({ audioRing: 32 }); },
+  const bridge = { phase: 'ready', ready, cardGeneration: () => cardGeneration, heap: () => heap, status: name => status[name] || 0,
+    start(config, transfer) { calls.push(['init', config, transfer]); resolveReady({ audioRing: 32, cardPendingAddress: 64 }); },
     notify(method, args) { calls.push([method, ...args]); return true; },
     request(method, args = []) { calls.push([method, ...args]); return Promise.resolve(method === 'cardExists' ? true : undefined); },
   };
   const Module = { arguments: ['/game/core.elf'], discUrl: 'disc.iso', noCard: false,
-    onRuntimeInitialized() { ++initialized; }, print() {}, setStatus() {}, onPresent() {}, onFrame() {}, ps2CardSaved() {}, ps2CardSaveFailed() {} };
+    onRuntimeInitialized() { ++initialized; }, print() {}, setStatus() {}, onPresent() {}, onFrame() {}, ps2CardSaved() { ++savedEvents; }, ps2CardSaveFailed() {} };
   const canvas = { width: 1280, height: 760, transferControlToOffscreen() { ++transferred; return { offscreen: true }; } };
   const context = vm.createContext({ Module, canvas, URL, Uint8Array, Int32Array, Atomics,
-    Worker: class {}, ps2WorkerRuntime: { createBridge: () => bridge },
+    Worker: class {}, ps2WorkerRuntime: { createBridge: (worker, options) => { onEvent = options.onEvent; return bridge; } },
     document: { baseURI: 'http://localhost/game/' },
     discSize: async () => 4096, chooseGpu: async () => 'GPU test', acquireCardStorage: async () => {},
     cardStorageOwned: true, fitCanvas() {}, scale: '1', params: new URLSearchParams(), statusEl: {}, failPlayer() {} });
@@ -23,6 +23,17 @@ const source = fs.readFileSync(path.join(__dirname, '../web/game-runtime-client.
   assert.equal(transferred, 1); assert.equal(initialized, 1);
   assert.equal(Module.HEAPU8, heap);
   assert.equal(Module._ps2web_audio_queued_ms(), 50);
+  assert.equal(!!Module._ps2web_card_pending(), false);
+  Atomics.store(heap, 64, 1);
+  assert.equal(Module._ps2web_card_pending(), true, 'A native write must be visible before the next telemetry tick');
+  Atomics.store(heap, 64, 0);
+  cardGeneration = 2;
+  assert.equal(!!Module._ps2web_card_pending(), true, 'Queued native save notifications must prevent an unguarded unload');
+  onEvent('card-saved', { generation: 1 });
+  assert.equal(!!Module._ps2web_card_pending(), true, 'Handling one save must not conceal a later queued save');
+  onEvent('card-saved', { generation: 2 });
+  assert.equal(!!Module._ps2web_card_pending(), false);
+  assert.equal(savedEvents, 2);
   ring[0] = 32; ring[1] = -16; assert.equal(Module._ps2web_audio_queued_ms(), 1, 'Audio counters retain uint32 wrap semantics');
   Module._ps2web_pause(1); status.pauseSequence = 1; status.pauseReady = 1;
   assert.equal(Module._ps2web_pause_ready(), 1);

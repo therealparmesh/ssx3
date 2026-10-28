@@ -10,11 +10,14 @@ async function startWorkerPlayer(runtimeUrl) {
   Module.discSize = bytes; Module.gpuInfo = gpu;
   fitCanvas();
   const worker = new Worker(new URL('game-runtime-worker.js', runtimeUrl), { name: 'ssx3-runtime' });
-  let pauseSequence = 0, audioRing = 0;
+  let pauseSequence = 0, audioRing = 0, cardPendingAddress = 0, handledCardGeneration = 0;
   const bridge = Module.workerRuntime = ps2WorkerRuntime.createBridge(worker, {
     onFatal: error => failPlayer('The game worker stopped. Reload to continue.', error),
     onEvent(name, value) {
-      if (name === 'card-saved') Module.ps2CardSaved();
+      if (name === 'card-saved') {
+        handledCardGeneration = value.generation;
+        Module.ps2CardSaved();
+      }
       else if (name === 'card-save-failed') Module.ps2CardSaveFailed();
       else if (name === 'runtime-failed') failPlayer('The player could not continue. Export your memory card, then reload.', value);
       else if (name === 'status') Module.setStatus(value);
@@ -23,7 +26,11 @@ async function startWorkerPlayer(runtimeUrl) {
   });
   Module._ps2web_pause = value => bridge.notify('pause', [value, ++pauseSequence]);
   Module._ps2web_pause_ready = () => bridge.status('pauseSequence') === pauseSequence && bridge.status('pauseReady');
-  Module._ps2web_card_pending = () => bridge.status('cardPending');
+  Module._ps2web_card_pending = () => {
+    const pending = bridge.phase === 'ready' && cardPendingAddress
+      ? Atomics.load(bridge.heap(), cardPendingAddress) : bridge.status('cardPending');
+    return !!pending || bridge.cardGeneration() !== handledCardGeneration;
+  };
   Module._ps2web_pad = (...args) => bridge.notify('pad', args);
   Module._ps2web_pad_connected = (...args) => bridge.notify('connected', args);
   Module._ps2web_pressure = (...args) => bridge.notify('pressure', args);
@@ -62,6 +69,9 @@ async function startWorkerPlayer(runtimeUrl) {
   }, [offscreen]);
   const metadata = await bridge.ready;
   audioRing = metadata.audioRing;
+  cardPendingAddress = metadata.cardPendingAddress;
+  if (!Number.isInteger(cardPendingAddress) || cardPendingAddress <= 0 || cardPendingAddress >= bridge.heap().byteLength)
+    throw new Error('The game worker returned an invalid memory-card status address.');
   // A resize posted during startup may precede the ready handshake. Apply the
   // latest dimensions once the owner can accept commands.
   Module._ps2web_resize(Module.workerCanvasWidth, Module.workerCanvasHeight);

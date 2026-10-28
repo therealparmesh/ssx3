@@ -90,7 +90,10 @@ self.addEventListener('message', async function initialize(event) {
     setStatus: text => host.event('status', text),
     onAbort: failure, onHalt: failure,
     audioQueuedMs: () => Module._ps2web_audio_queued_ms(),
-    ps2CardSaved() { publish(); host.event('card-saved'); },
+    ps2CardSaved() {
+      const generation = core.markCardSaved(status);
+      publish(); host.event('card-saved', { generation });
+    },
     ps2CardSaveFailed() { publish(); host.event('card-save-failed'); },
     // The page samples telemetry on its existing animation callback. Avoid
     // scheduling two DOM messages for every frame rendered in this worker.
@@ -116,7 +119,7 @@ self.addEventListener('message', async function initialize(event) {
       if (Module.failed) return;
       GL.offscreenCanvases.canvas = Module.canvas;
       ready = true; publish();
-      host.ready({ memory: wasmMemory, status, audioRing: Module._ps2web_audio_ring(), cardExists: FS.analyzePath(card).exists });
+      host.ready({ memory: wasmMemory, status, audioRing: Module._ps2web_audio_ring(), cardPendingAddress: Module._ps2web_card_pending_address(), cardExists: FS.analyzePath(card).exists });
       statusTimer = setInterval(publish, 16);
     },
   };

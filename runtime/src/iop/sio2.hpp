@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 namespace ps2::state {
@@ -21,5 +22,6 @@ void set_connected(int pad, bool connected);
 std::uint16_t rumble(int pad);
 void flush_cards();
 bool card_pending();
+const std::atomic<bool> *card_pending_flag();
 
 }
