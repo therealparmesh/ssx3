@@ -1,5 +1,13 @@
 # Validation scope
 
+## Exact SIMD inverse movie transform candidate
+
+A named worker profile captured a 34.58-ms actual image gap. In the surrounding 85-ms sampling window, the emulation worker used about 60 ms of CPU with IPU movie decoding dominant; the VU worker used about 2.4 ms and mostly waited for input. Earlier queue-state captures also found empty renderer and VU input queues rather than queued work awaiting notification. Sampling and native recorder overhead make these diagnostic captures unsuitable as release performance results; they motivate reducing decoder CPU work rather than another notification change.
+
+The inverse DCT now stores its basis by frequency and transforms two independent output samples per Wasm SIMD pair. It preserves the multiplication and addition order for each active row, the final floor-after-half rounding and signed sample clamp. All-zero coefficient rows produce zero and can be omitted without changing rounded output samples. Dense blocks retain the fixed eight-row accumulation. The native scalar path uses the transposed basis with the original arithmetic. Queue capacity, audio reserve, native frame lead and pacing are unchanged.
+
+The asset-free native and real-Wasm fixture compares 64,934 transforms / 4,155,776 samples against the preceding scalar implementation, including every legal DC value, isolated coefficients, every active-row mask, dense/sparse inputs, saturation, unaligned basis/output and memory sentinels. A deliberately shifted coefficient lane fails at case 4,106. All twelve native suites and the real-Wasm FIFO, state-resume, malformed-input and streamed-macroblock regression pass. In a separate Node/Wasm microbenchmark consuming all outputs, five repeated 200,000-transform batches give median speedups of 1.17× for mixed coefficients, 2.09× for DC-heavy blocks and 1.16× for dense blocks. These are isolated transform results; rebuilt-browser qualification remains pending and no hosting update has been made.
+
 ## Compatibility-only producer-wake selection
 
 The preceding all-build notification candidate passed the Firefox normal-menu race over 270.68058 seconds at 59.999944 fresh submissions/second, with all 12,993,024 requested stereo frames consumed, no image/pool losses or errors, and a 23.28-ms worst actual submission interval. Card integrity, Escape resume and pause freeze passed. Its primary Chromium race failed: 16,928 missing stereo frames out of 13,002,752 requested, 21 long animation intervals and a 34.57-ms worst actual interval over 270.88274 seconds. Audio reserve had already fallen near zero during course loading. No hosting update was made. The passing compatibility results do not clear this primary failure.
