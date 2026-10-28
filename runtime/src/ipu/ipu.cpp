@@ -215,9 +215,23 @@ int read_dc_diff(int channel) {
     return v < (1 << (size - 1)) ? v + 1 - (1 << size) : v;
 }
 
-bool read_coefficient(const DctLookup &l, int &run, int &level) {
+bool read_coefficient(const DctLookup &l, int &run, int &level, unsigned eob_bits) {
     std::size_t avail;
-    const DctEntry &e = l.entries[peek_soft(l.bits, avail)];
+    std::uint32_t window;
+    if (eob_bits) {
+        if (!have(eob_bits)) throw NeedData{};
+        avail = available();
+        window = bits_at(g_bit, l.bits);
+        if ((window >> (l.bits - eob_bits)) == (eob_bits == 4 ? 6u : 2u)) {
+            g_bit += eob_bits;
+            return false;
+        }
+        // Preserve the original refill before looking up a non-EOB code.
+        if (avail < l.bits) window = peek_soft(l.bits, avail);
+    } else {
+        window = peek_soft(l.bits, avail);
+    }
+    const DctEntry &e = l.entries[window];
     if (!e.length) {
         if (avail < l.bits) throw NeedData{};
         throw BadCode{};
@@ -239,7 +253,15 @@ bool read_coefficient(const DctLookup &l, int &run, int &level) {
         return true;
     }
     run = e.run;
-    level = get(1) ? -e.level : e.level;
+    // The lookup already read this sign bit for shorter codes. Keep the
+    // original reader for a code at the look-ahead limit or a partial FIFO.
+    if (e.length < l.bits && e.length < avail) {
+        const bool negative = (window >> (l.bits - e.length - 1)) & 1u;
+        ++g_bit;
+        level = negative ? -e.level : e.level;
+    } else {
+        level = get(1) ? -e.level : e.level;
+    }
     return true;
 }
 
@@ -261,14 +283,8 @@ void decode_coefficients(int *coef, int channel, bool intra) {
         index = 1;
     }
     for (;;) {
-        if (index) {
-            if (table_one ? peek(4) == 6u : peek(2) == 2u) {
-                skip(table_one ? 4 : 2);
-                break;
-            }
-        }
         int run = 0, level = 0;
-        read_coefficient(table, run, level);
+        if (!read_coefficient(table, run, level, index ? (table_one ? 4u : 2u) : 0u)) break;
         index += run;
         if (index >= 64) throw BadCode{};
         coef[index++] = level;
