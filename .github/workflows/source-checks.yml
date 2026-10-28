@@ -44,6 +44,7 @@ jobs:
           node scripts/test_display_capacity.cjs
           node scripts/test_sync_game_workers.cjs
           node scripts/test_worker_runtime_bridge.cjs
+          node scripts/test_game_worker_client.cjs
 
   wasm-vu-jit:
     runs-on: ubuntu-24.04

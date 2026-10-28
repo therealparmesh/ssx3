@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PS2_GENERATED "" CACHE PATH "Folder with the C++ generated for a game")
 option(PS2_DEVELOPER_TOOLS "Include native profiling and named Wasm profiling functions" OFF)
 option(PS2_RUNTIME_TESTS "Build asset-free runtime and code-generation regression tests" OFF)
+option(PS2_WEB_WORKER "Experimental dedicated-worker game renderer (Asyncify only)" OFF)
 option(PS2_GPU_TESTS "Build browser WebGPU regression fixtures without game assets" OFF)
 
 # Keep every indirect game entry point registered. Let the linker remove only
@@ -171,11 +172,28 @@ if(PS2_GENERATED)
         else()
             target_link_options(ps2web PRIVATE -Wl,--strip-debug)
         endif()
+        if(NOT PS2_WEB_WORKER)
+            target_link_options(ps2web PRIVATE -sENVIRONMENT=web)
+        endif()
+        set(PS2_WEB_WORKER_ENABLED false)
+        if(PS2_WEB_WORKER)
+            if(NOT PS2_WEB_ASYNC STREQUAL "asyncify")
+                message(FATAL_ERROR "PS2_WEB_WORKER currently requires PS2_WEB_ASYNC=asyncify")
+            endif()
+            set(PS2_WEB_WORKER_ENABLED true)
+            # Retain the SDK's incoming Module hooks plus the explicit compiled
+            # script URL used to start nested EE/VU pthread workers.
+            target_link_options(ps2web PRIVATE -sENVIRONMENT=web,worker -sOFFSCREENCANVAS_SUPPORT=1
+                -sINCOMING_MODULE_JS_API=ENVIRONMENT,arguments,canvas,dynamicLibraries,elementPointerLock,instantiateWasm,locateFile,monitorRunDependencies,noExitRuntime,noInitialRun,onAbort,onExit,onRuntimeInitialized,postRun,preInit,preRun,print,printErr,setStatus,statusMessage,stderr,stdin,stdout,thisProgram,wasm,websocket,mainScriptUrlOrBlob)
+            foreach(worker_asset worker-runtime-bridge.js game-runtime-worker.js game-runtime-client.js)
+                configure_file("web/${worker_asset}" "${CMAKE_CURRENT_BINARY_DIR}/${worker_asset}" COPYONLY)
+            endforeach()
+        endif()
         configure_file(web/shell.html "${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html" @ONLY)
         target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/jspi-lifecycle.js\"")
         target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js\"")
         target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js\"")
-        target_link_options(ps2web PRIVATE ${PS2_WEB_SUSPEND_FLAGS} -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456 -sPTHREAD_POOL_SIZE=2 -sALLOW_TABLE_GROWTH=1 -lidbfs.js -sSTACK_SIZE=16777216 -sENVIRONMENT=web
+        target_link_options(ps2web PRIVATE ${PS2_WEB_SUSPEND_FLAGS} -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456 -sPTHREAD_POOL_SIZE=2 -sALLOW_TABLE_GROWTH=1 -lidbfs.js -sSTACK_SIZE=16777216
             -sEXPORTED_FUNCTIONS=_main,_ps2web_pad,_ps2web_pad_connected,_ps2web_resize,_ps2web_gpu_ms,_ps2web_frames,_ps2web_primitives,_ps2web_audio_ring,_ps2web_audio_queued_ms,_ps2web_idle_ms,_ps2web_vu_interpreted
             -sEXPORTED_RUNTIME_METHODS=callMain,addRunDependency,removeRunDependency,HEAPU8,ENV
             --shell-file ${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html --preload-file ${PS2_WEB_ELF}@/game/core.elf)

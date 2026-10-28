@@ -7,12 +7,13 @@
   const fields = Object.freeze([
     'frames', 'primitives', 'gpuMs', 'eeIdleMs', 'renderIdleMs', 'vuIdleMs',
     'vuInterpreted', 'pauseReady', 'cardPending', 'rumble0', 'rumble1',
-    'presented', 'audioQueuedMs',
+    'presented', 'audioQueuedMs', 'pauseSequence',
   ]);
   const indexes = Object.fromEntries(fields.map((name, index) => [name, index]));
   const statusBytes = 16 + fields.length * 8;
   let serial = 0;
   const transferTag = Symbol('worker-runtime-transfer');
+  const publishers = new WeakMap();
 
   function errorFrom(value, fallback = 'Worker runtime failed') {
     const error = new Error(value?.message || fallback);
@@ -35,7 +36,12 @@
       throw new TypeError('Invalid runtime status');
     for (let i = 0; i < fields.length; ++i)
       if (!Number.isFinite(values[i])) throw new TypeError('Invalid runtime status');
-    const header = new Int32Array(buffer, 0, 4), data = new Float64Array(buffer, 16, fields.length);
+    let views = publishers.get(buffer);
+    if (!views) {
+      views = { header: new Int32Array(buffer, 0, 4), data: new Float64Array(buffer, 16, fields.length) };
+      publishers.set(buffer, views);
+    }
+    const { header, data } = views;
     if (Atomics.load(header, 0) !== VERSION) throw new Error('Runtime status version mismatch');
     Atomics.add(header, 1, 1);
     for (let i = 0; i < fields.length; ++i) data[i] = values[i];
