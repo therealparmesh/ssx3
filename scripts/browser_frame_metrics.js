@@ -8,13 +8,13 @@
   window.qaActive=active=>{qa.active=active;qa.lastTime=0;qa.lastFresh=0;qa.lastSubmission=null;if(active)qa.wall=makeWall();qa.exclusions.push({active,time:performance.now()})};
   // RAF timestamps can remain evenly spaced across a delayed callback. Record
   // actual successful submissions independently so that delay cannot pass QA.
-  const submitted=()=>{
+  const submitted=(uploadMs,acquireMs,submitMs,encodeMs,uploadStart)=>{
    ++qa.id;
    if(!qa.active||!Module.running||Module.failed||Module.paused){qa.lastSubmission=null;return}
    const now=performance.now();
    if(qa.lastSubmission!==null){
     const gap=now-qa.lastSubmission;++qa.wall.intervals;qa.wall.elapsedMs+=gap;qa.wall.maxGapMs=Math.max(qa.wall.maxGapMs,gap);
-    if(gap>25){++qa.wall.longGaps;if(qa.wall.events.length<200)qa.wall.events.push({time:now,gapMs:gap,phase:qa.phase})}
+    if(gap>25){++qa.wall.longGaps;if(qa.wall.events.length<200)qa.wall.events.push({time:now,gapMs:gap,phase:qa.phase,uploadMs:uploadMs??null,canvasAcquireMs:acquireMs??null,submitMs:submitMs??null,encodeMs:encodeMs??null,uploadAgeMs:uploadStart===undefined?null:now-uploadStart})}
    }
    qa.lastSubmission=now;
   };
@@ -29,9 +29,21 @@
    if(this.canvas.id==='canvas')submitted();return result;
   };
   if(typeof GPUCanvasContext!=='undefined'&&typeof GPUQueue!=='undefined'){
-   const texture=GPUCanvasContext.prototype.getCurrentTexture,submit=GPUQueue.prototype.submit;let pending=false;
-   GPUCanvasContext.prototype.getCurrentTexture=function(){const result=texture.call(this);if(this.canvas.id==='canvas')pending=true;return result};
-   GPUQueue.prototype.submit=function(commands){const visible=pending;pending=false;const result=submit.call(this,commands);if(visible)submitted();return result};
+   const texture=GPUCanvasContext.prototype.getCurrentTexture,submit=GPUQueue.prototype.submit,write=GPUQueue.prototype.writeTexture;
+   let pending=false,uploadStart,uploadMs,acquireMs,acquireEnd;
+   if(typeof write==='function')GPUQueue.prototype.writeTexture=function(destination,data,layout,size){
+    if(!qa.active)return write.call(this,destination,data,layout,size);
+    const start=performance.now(),result=write.call(this,destination,data,layout,size);
+    uploadStart=start;uploadMs=performance.now()-start;return result;
+   };
+   GPUCanvasContext.prototype.getCurrentTexture=function(){
+    const start=qa.active?performance.now():0,result=texture.call(this);
+    if(this.canvas.id==='canvas'){pending=true;acquireEnd=qa.active?performance.now():undefined;acquireMs=acquireEnd===undefined?undefined:acquireEnd-start}return result;
+   };
+   GPUQueue.prototype.submit=function(commands){
+    const visible=pending;pending=false;const start=qa.active&&visible?performance.now():undefined,result=submit.call(this,commands);
+    if(visible)submitted(uploadMs,acquireMs,start===undefined?undefined:performance.now()-start,start===undefined||acquireEnd===undefined?undefined:start-acquireEnd,uploadStart);return result;
+   };
   }
   const add=(s,dt,n,freshGap)=>{++s.intervals;s.elapsedMs+=dt;s.maxRafGapMs=Math.max(s.maxRafGapMs,dt);s.maxFreshGapMs=Math.max(s.maxFreshGapMs,freshGap);if(dt>25)++s.longRafGaps;if(n===0)++s.withoutImage;else s.overwritten+=Math.max(0,n-1)};
   window.qaInstall=()=>{

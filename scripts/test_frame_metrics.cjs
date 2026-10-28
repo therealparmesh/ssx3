@@ -16,9 +16,9 @@ function fixture(kind) {
   }
   class GPUCanvasContext {
     constructor(id) { this.canvas = { id }; }
-    getCurrentTexture() { return {}; }
+    getCurrentTexture() { this.onAcquire?.(); return {}; }
   }
-  class GPUQueue { submit() { if (this.fail) throw new Error('submit failed'); return 9; } }
+  class GPUQueue { writeTexture() { this.onWrite?.(); } submit() { this.onSubmit?.(); if (this.fail) throw new Error('submit failed'); return 9; } }
   class GPUBuffer { mapAsync() {} }
   const context = vm.createContext({ performance: { now: () => now }, CanvasRenderingContext2D,
     GPUCanvasContext, GPUQueue, GPUBuffer,
@@ -127,6 +127,19 @@ for (const kind of ['copy', 'surface']) {
   frames.length = 0; free.push({}, {}); f.at(1033.334); f.refresh(1033.334);
   assert.equal(f.context.qa.events[1].queuedImages, 0, 'An empty producer queue must be recorded directly');
   assert.equal(f.context.qa.events[1].freeSlots, 3);
+}
+
+{
+  const f = fixture('surface'); f.begin();
+  f.at(1000); f.submit();
+  f.at(1016.667); f.queue.onWrite = () => f.at(1024);
+  f.queue.writeTexture({}, new Uint8Array(4), {}, {});
+  f.canvas.onAcquire = () => f.at(1025); f.queue.onSubmit = () => f.at(1027); f.submit();
+  const event = f.context.qa.wall.events[0];
+  assert(Math.abs(event.uploadMs - 7.333) < 0.001);
+  assert.equal(event.canvasAcquireMs, 1); assert.equal(event.submitMs, 2); assert.equal(event.encodeMs, 0);
+  assert(Math.abs(event.uploadAgeMs - 10.333) < 0.001);
+  assert.equal(event.gapMs, 27, 'Native API time must remain part of actual successful submission timing');
 }
 
 {
