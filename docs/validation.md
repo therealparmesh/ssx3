@@ -1,5 +1,17 @@
 # Validation scope
 
+## Omit Asyncify from the synchronous VU interpreter hot path
+
+Compiler advice for the source-owned `2d3c833` native candidate confirmed Asyncify instrumentation in `ps2::vu::run_fast` and its lower-instruction handler. Enabling advice produced a byte-identical Wasm binary, so this observation applies to that candidate rather than a separately ordered profiling layout. Both interpreter functions execute on the EE/VU workers, whose entry guard rejects asynchronous imports before unwinding. The renderer retains its suspension support. The shared removal list now adds only these two functions to the existing generated-code selection, and changes to that list trigger relinking.
+
+A rotating-order pthread Wasm microbenchmark compared the baseline, loop-only removal and loop-plus-handler removal across seven repetitions of eight cases. The selected two-function form achieved 1.308–1.824 times baseline throughput; loop-only removal achieved 1.193–1.425 times baseline. Full register/memory hashes, observable scalar-reference states and enabled diagnostic output matched. These measurements are interpreter microbenchmarks, not game FPS qualification.
+
+The asset-free Wasm regression compiles the real interpreter with and without the production removal list. Compiler advice checks that the targeted functions lose instrumentation. Both builds compare complete register and memory state against scalar execution for VU0/VU1 arithmetic, observed flags, integer branches and load/store programs. An XGKICK GIF sink throws a C++ exception through both affected functions; the worker catches it and executes the program again successfully. A separate attempted asynchronous worker operation is rejected before unwinding. Main-thread suspension remains exercised while waiting for the worker.
+
+A preceding diagnostic captured producer starvation after 474.169 seconds in the private post-RAF prototype: two missing images, a 33.41-ms maximum actual submission interval and no consumed-audio loss. The first missing image had no queued pixels, three free slots and a due display clock. Both instrumented native workers recorded their startup instances but no synchronous Module/Instance construction during measurement. The preceding owner history also contained no disc fetch or VU1 interpreter fallback. Worker CPU runtime increased around the burst. This excludes those observed operations from that event; it does not establish a single CPU cause or rule out other compilation, allocation or scheduling work. The constructor observer passed valid-result, exact-error, phase, bounded-ring, freeze and controlled 100-ms-delay checks. Its OS recorder sampled only the four owned workers (median 0.274 ms per one-Hz sample).
+
+Full rebuilt-game browser and hosted qualification remain pending. The private post-RAF presenter is still not adopted, and the hosted rollback remains unchanged.
+
 ## Post-RAF upload prototype held after Chromium image and audio loss
 
 A source-owned native candidate at `2d3c833` includes the VU counter correction below. With the existing presenter, its normal Firefox race completed 301.054 seconds at 60.000182 successful submissions/second, with no image or consumed-audio loss, but exceeded the strict 25-ms submission gate once (25.34 ms, including a 9.28-ms upload). This native candidate was not deployed.

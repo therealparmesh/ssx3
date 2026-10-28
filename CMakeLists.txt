@@ -149,12 +149,13 @@ if(PS2_GENERATED)
         set(PS2_WEB_PATCHES "" CACHE FILEPATH "Patch list the runtime writes into memory, preloaded as /game/patches.txt")
         add_executable(ps2web host/web.cpp)
         if(PS2_WEB_ASYNC STREQUAL "asyncify")
-            # Generated EE/VU code runs only on workers. Their disc, queue and
-            # pacing waits are synchronous futex waits; GPU suspension lives on
+            # Generated EE/VU code and the decoded VU interpreter run only on
+            # workers. Disc, queue and pacing waits are synchronous futex
+            # waits; GPU suspension lives on
             # the main thread. Enforce that invariant before entering either
             # worker, rather than silently allowing an uninstrumented unwind.
             target_compile_definitions(ps2web PRIVATE PS2_WEB_SYNC_GAME_WORKERS)
-            target_link_options(ps2web PRIVATE "-sASYNCIFY_REMOVE=[\"gen::*\"]")
+            target_link_options(ps2web PRIVATE "-sASYNCIFY_REMOVE=@${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-functions.json")
             target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-workers.js\"")
         endif()
         if(PS2_DEVELOPER_TOOLS)
@@ -209,7 +210,7 @@ if(PS2_GENERATED)
             --shell-file ${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html --preload-file ${PS2_WEB_ELF}@/game/core.elf)
         set_target_properties(ps2web PROPERTIES SUFFIX ".html" LINK_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html;${CMAKE_CURRENT_SOURCE_DIR}/web/jspi-lifecycle.js;${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js;${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js")
         if(PS2_WEB_ASYNC STREQUAL "asyncify")
-            set_property(TARGET ps2web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-workers.js")
+            set_property(TARGET ps2web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-workers.js" "${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-functions.json")
         endif()
         return()
     endif()
