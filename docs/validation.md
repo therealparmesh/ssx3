@@ -1,5 +1,15 @@
 # Validation scope
 
+## Latest hosted desktop qualification
+
+The reusable-buffer candidate at runtime source `1936a37` passed staged private-HTTPS races in both visible desktop browsers. Firefox completed 301.101 seconds at 60.000082 fresh submissions/second with a 24.22-ms maximum actual interval; Chromium completed 300.720 seconds at 60.002416 with a 23.685-ms maximum. Both had zero missed/overwritten images, zero missing consumed audio and no application errors. These staged tests selected only the document in the test browser; assets and disc came from the immutable HTTPS release. Authentication interception attached the private header only to the site's own HTTPS origin, and retained header-only interception during gameplay.
+
+The exact staged document and manifest were then packaged and deployed privately. Live routing, isolation, compatibility selection, anonymous access rejection and exact disc ranges passed. The actual live Firefox page completed 301.068 seconds at 59.999888 fresh submissions/second with no missed/overwritten images, no missing audio and no application errors. It nevertheless exceeded the strict 25-ms submission gate three times, with a 25.72-ms maximum. Those intervals contained 8.96, 9.00 and 10.22 ms in the buffer-upload call. The candidate was held and saved version 56 restored. No actual-live Chromium race followed this failed gate.
+
+A subsequent private mapped-upload prototype passed pixel/lifecycle checks in both browsers, including aligned frames without queue-write uploads. Coupled tests passed reuse, exhausted-pool fallback, active mapping rejection and stale completion after resize/stop. Its local Firefox race nevertheless failed: 301.030 seconds at 59.999330 submissions/second, no image/audio losses, but two intervals over 25 ms and a 36.94-ms maximum. This does not establish an improvement; the mapped prototype was not adopted into this source or deployed. Three earlier prototype harness startup attempts used unadapted window observers and are excluded from gameplay evidence.
+
+The hosted player remains the preceding deployment. These bounded desktop windows do not resolve historical intermittent starvation or qualify physical phones, controllers, Bluetooth output, physical scanout/audio or full normal progression. Production sign-off remains open.
+
 ## Reusable presenter upload buffer
 
 Aligned pixel rows now upload through one reusable COPY_DST/COPY_SRC buffer and a buffer-to-texture copy encoded before the existing render pass. Rows without the required 256-byte alignment retain direct texture uploads. The shader, texture filtering, aspect calculation, three-slot ownership protocol and source pixels are unchanged. Upload and pass descriptors are cached, the current texture view is cleared from its cached descriptor immediately after encoding, and dimension changes/stop destroy the prior upload buffer.
