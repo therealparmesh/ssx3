@@ -1,5 +1,11 @@
 # Validation scope
 
+## Readback-only device progress polling
+
+The optional worker runtime's completion helper now polls only READ mappings. It previously added a timer, repeated empty submissions and a finalization Promise to every upload mapping as well, even while ordinary compute submissions were progressing. Upload mappings now retain their original Promise and completion path; final frame readbacks still receive the existing bounded 1-ms/4-ms progress polling. Tests cover upload promise identity, zero upload timers/submissions, concurrent upload/readback completion, rejection, cancellation and reentrant shutdown. The preceding helper fails the new upload regression.
+
+A normal cold-start/card-import/default-menu Firefox race with the candidate completed 301.020 seconds at 60.000008 fresh submissions/second, with no missed/overwritten images, no missing audio and no application errors. The strict gate still failed one 26.8-ms submission interval, including 10.42 ms in pixel upload. A separate unprofiled bounded trace of the preceding helper had no image/audio losses but a 27.22-ms interval containing 11.96 ms in the same upload call. These isolated passing supply windows do not resolve earlier intermittent starvation or prove a worst-case timing improvement. The candidate remains held from deployment; native binaries are unchanged.
+
 ## Page-created presenter desktop release
 
 The window now creates both the game and display workers and transfers a MessagePort between them. Pixel buffers still use the same three-slot ownership protocol; frame traffic bypasses the window. Creating the presenter in the window fixes the previously observed Chromium nested-worker animation error. The optional worker build selects this isolated presenter by default; `?presenter=direct` retains the preceding path for diagnostics. The native game and runtime binaries are unchanged.

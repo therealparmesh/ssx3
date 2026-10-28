@@ -14,7 +14,10 @@
     }
     function map(...args) {
       const result = mapAsync.apply(this, args);
-      if (stopped) return result;
+      // Upload mappings progress with later command submissions and the final
+      // frame readback. Polling each upload adds timers and empty submissions
+      // while compute work is already being queued. GPUMapMode.READ is 1.
+      if (stopped || !(args[0] & 1)) return result;
       let pending = true, timer;
       const poll = () => {
         timers.delete(timer);
