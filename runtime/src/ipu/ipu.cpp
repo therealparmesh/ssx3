@@ -117,6 +117,19 @@ std::uint8_t g_intra_iq[64], g_nonintra_iq[64];
 std::uint16_t g_vqclut[16];
 std::uint16_t g_th0 = 0, g_th1 = 0;
 std::int16_t g_dc[3];
+
+// Derived work only: a partial command still exposes its original cursor/DC
+// state. Completed coefficient blocks can be reused when the FIFO is refilled.
+struct MacroblockCache {
+    bool valid = false, intra = false, field = false, dc_reset = false;
+    std::uint32_t command = 0, ctrl = 0, qsc = 0;
+    std::size_t bit = 0, resume_bit = 0;
+    unsigned cbp = 0, next = 0;
+    std::int16_t initial_dc[3]{}, resume_dc[3]{};
+    int coefficients[6][64];
+};
+MacroblockCache g_macroblock;
+
 std::uint64_t g_commands[16], g_stalls = 0, g_out_qwords = 0;
 
 bool pull() {
@@ -178,6 +191,7 @@ std::uint32_t peek_now() {
 }
 
 void commit() {
+    g_macroblock.valid = false;
     const std::size_t drop = std::min(g_bit / 128 * 16, g_in.size() / 16 * 16);
     g_in.erase(g_in.begin(), g_in.begin() + static_cast<std::ptrdiff_t>(drop));
     g_bit -= drop * 8;
@@ -290,14 +304,32 @@ void reconstruct_block(const int *coef, std::int16_t *out, bool intra, std::uint
 void decode_macroblock(std::int16_t *raw, bool intra, bool field, bool dc_reset, std::uint32_t qsc) {
     const unsigned cbp = intra ? 0x3Fu : decode(tables().cbp) & 0xFFu;
     if (dc_reset) g_dc[0] = g_dc[1] = g_dc[2] = static_cast<std::int16_t>(128 << dc_precision());
-    // A later block may still need input. Finish parsing all coefficients
-    // before doing transforms, so a FIFO retry cannot discard earlier IDCTs.
-    int coefficients[6][64];
-    for (int b = 0; b < 6; ++b)
-        if (cbp & (32u >> b)) decode_coefficients(coefficients[b], b < 4 ? 0 : b - 3, intra);
+    auto &cached = g_macroblock;
+    const bool resume = cached.valid && cached.command == g_command && cached.ctrl == g_ctrl &&
+        cached.bit == g_bit && cached.intra == intra && cached.field == field &&
+        cached.dc_reset == dc_reset && cached.qsc == qsc && cached.cbp == cbp &&
+        std::equal(g_dc, g_dc + 3, cached.initial_dc);
+    if (!resume) {
+        cached.valid = true;
+        cached.command = g_command; cached.ctrl = g_ctrl; cached.bit = g_bit;
+        cached.intra = intra; cached.field = field; cached.dc_reset = dc_reset;
+        cached.qsc = qsc; cached.cbp = cbp; cached.next = 0;
+        cached.resume_bit = g_bit;
+        std::copy(g_dc, g_dc + 3, cached.initial_dc);
+        std::copy(g_dc, g_dc + 3, cached.resume_dc);
+    } else {
+        g_bit = cached.resume_bit;
+        std::copy(cached.resume_dc, cached.resume_dc + 3, g_dc);
+    }
+    for (unsigned b = cached.next; b < 6; ++b) {
+        if (cbp & (32u >> b)) decode_coefficients(cached.coefficients[b], b < 4 ? 0 : b - 3, intra);
+        cached.next = b + 1;
+        cached.resume_bit = g_bit;
+        std::copy(g_dc, g_dc + 3, cached.resume_dc);
+    }
     std::int16_t blocks[6][64] = {};
     for (int b = 0; b < 6; ++b)
-        if (cbp & (32u >> b)) reconstruct_block(coefficients[b], blocks[b], intra, qsc);
+        if (cbp & (32u >> b)) reconstruct_block(cached.coefficients[b], blocks[b], intra, qsc);
     for (int i = 0; i < 8; ++i) {
         const int top = field ? 2 * i : i, bottom = field ? 2 * i + 1 : i + 8;
         std::memcpy(raw + top * 16, blocks[0] + i * 8, 16);
@@ -307,6 +339,7 @@ void decode_macroblock(std::int16_t *raw, bool intra, bool field, bool dc_reset,
     }
     std::memcpy(raw + 256, blocks[4], 128);
     std::memcpy(raw + 320, blocks[5], 128);
+    cached.valid = false;
 }
 
 void convert(const std::uint8_t *raw, bool rgb16) {
@@ -539,6 +572,7 @@ void step() {
             g_starved = !run_command();
             if (!g_starved) g_decoding = false;
         } catch (const BadCode &) {
+            g_macroblock.valid = false;
             std::fprintf(stderr, "[ipu] bad code in command 0x%08X\n", g_command);
             g_ctrl |= kEcd;
             g_decoding = false;
@@ -556,6 +590,7 @@ void step() {
 }
 
 void reset() {
+    g_macroblock.valid = false;
     g_in.clear();
     g_out.clear();
     g_bit = g_out_pos = 0;
@@ -604,6 +639,7 @@ void write32(std::uint32_t a, std::uint32_t v) {
     switch (a) {
     case 0x10002000u: {
     }
+        g_macroblock.valid = false;
         g_ctrl &= ~(kEcd | kScd);
         g_starved = false;
         ++g_commands[v >> 28];
@@ -625,6 +661,7 @@ void write32(std::uint32_t a, std::uint32_t v) {
         break;
     case 0x10002010u:
         if (v & kReset) {
+            g_macroblock.valid = false;
             g_starved = false;
             g_in.clear();
             g_out.clear();
@@ -675,6 +712,8 @@ void stats() {
 namespace ps2::ipu {
 
 void state(ps2::state::Stream &s) {
+    // The cache can be reconstructed from the serialized FIFO and predictors.
+    g_macroblock.valid = false;
     s.tag("ipu");
     s.vec(g_in);
     s.size(g_bit);
