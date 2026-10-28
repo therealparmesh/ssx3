@@ -120,6 +120,12 @@ int main() {
             ++failures;
         }
     }
+    fill_cache(kLoading);
+    if (disc_ready(201ull * kChunk - 1, 2) || !find_slot(200) ||
+        find_slot(200)->state.load() != kReady) {
+        std::fputs("FAIL: allocating a missing demand chunk evicted earlier ready data\n", stderr);
+        ++failures;
+    }
     fill_cache(kReady);
     auto &second = g_slots[1];
     second.index = 201;
