@@ -83,6 +83,7 @@ function fixture() {
     block() { blocked = true; },
     unblock() { blocked = false; },
     blur() { windowEvents.get('blur')(); },
+    focus() { windowEvents.get('focus')(); },
     beginResume() { return element('start').listeners.get('click')(); },
     resolveAudio(index = audioRequests.length - 1, state = 'running') { context.audio.state = state; audioRequests[index].resolve(); },
     rejectAudio(index = audioRequests.length - 1) { audioRequests[index].reject(Error('Audio interrupted')); },
@@ -335,5 +336,21 @@ async function resume(f) {
     assert.equal(f.resumes.length, 0, 'Hidden documents must not begin a resume');
     assert.equal(f.start.disabled, false);
   }
-  console.log('Input pause/resume: 28 regression scenarios passed');
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); const begin = f.calls.length; f.blur();
+    assert.equal(f.Module.paused, true, 'Focus loss must request pause before releasing held native input');
+    assert.deepEqual(f.calls.slice(begin).map(c => c.name), ['pause']);
+    f.setPauseReady(true); f.poll(); assert.equal(f.nativePads[0][0], 0);
+    f.focus(); assert.equal(f.Module.paused, true, 'Focus return cannot automatically restart the guest');
+    const state = await resume(f); assert.equal(state.pads[0][0], 0x4000);
+  }
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); f.pause();
+    const task = f.beginResume(); f.resolveAudio(); await new Promise(setImmediate); f.blur();
+    f.setPauseReady(true); await task; f.poll(); assert.equal(f.resumes.length, 0);
+    f.focus(); const state = await resume(f); assert.equal(state.pads[0][0], 0x4000);
+  }
+  console.log('Input pause/resume: 30 regression scenarios passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

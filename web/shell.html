@@ -884,7 +884,14 @@ function releaseInput() {
   if (Module.paused) { pauseInputPending = true; settlePausedInput(); }
   else clearNativeInput();
 }
-window.addEventListener('blur', () => { inputFocused = false; releaseInput(); });
+window.addEventListener('blur', () => {
+  inputFocused = false;
+  // A tab switch can blur before its visibility event. Pause first so losing
+  // focus cannot release a held jump into a still-running guest.
+  const needsRelease = !Module.running || Module.paused;
+  pausePlayer();
+  if (needsRelease) releaseInput();
+});
 window.addEventListener('focus', () => { inputFocused = true; });
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseInput(); });
 window.addEventListener('pointerdown', () => { if (audio && !Module.paused && !Module.failed && ['suspended', 'interrupted'].includes(audio.state)) audio.resume().catch(() => {}); });

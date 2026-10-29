@@ -133,8 +133,11 @@ let qaBrowser;
  await page.keyboard.down('ArrowLeft');await page.keyboard.down('KeyZ');
  await page.waitForFunction(()=>padEvents.some(x=>x[0]===0&&(x[1]&0x4080)===0x4080&&x[2]===0));
  await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
+ await page.waitForFunction(()=>Module.paused&&Module._ps2web_pause_ready()&&padEvents.filter(x=>x[0]===0).at(-1)[1]===0);
  assert.deepEqual(await page.evaluate(()=>padEvents.filter(x=>x[0]===0).at(-1)),[0,0,128,128,128,128]);
  await page.keyboard.up('ArrowLeft');await page.keyboard.up('KeyZ');await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+ assert.equal(await page.evaluate(()=>Module.paused),true);
+ await page.locator('#start').click();await page.waitForFunction(()=>!Module.paused);
  await page.keyboard.press('Enter',{delay:150});
  await page.waitForTimeout(500);
  await page.screenshot({path:artifact('desktop-pause.png')});
@@ -148,9 +151,12 @@ let qaBrowser;
  assert.deepEqual(await page.evaluate(()=>padEvents.filter(x=>x[0]===1).at(-1)),[1,8,128,128,128,128]);
  assert.equal(await page.evaluate(()=>(pressureEvents.filter(x=>x[0]===0).at(-1)[3]>>>0)&255),153);
  // Focus loss must keep a held controller released until focus returns.
- await page.evaluate(()=>window.dispatchEvent(new Event('blur')));await page.waitForTimeout(100);
+ await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
+ await page.waitForFunction(()=>Module.paused&&Module._ps2web_pause_ready()&&padEvents.filter(x=>x[0]===0).at(-1)[1]===0);
  assert.deepEqual(await page.evaluate(()=>padEvents.filter(x=>x[0]===0).at(-1)),[0,0,128,128,128,128]);
  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+ assert.equal(await page.evaluate(()=>Module.paused),true);
+ await page.locator('#start').click();await page.waitForFunction(()=>!Module.paused);
  await page.waitForFunction(()=>padEvents.filter(x=>x[0]===0).at(-1)[2]===0);
  // Controllers with two axes still steer; invalid axis values stay neutral.
  await page.evaluate(()=>{qaPads[0].axes=[1,-1];pollInput()});
