@@ -19,6 +19,12 @@ All four also had zero overwritten images, presentation-pool underflows, produce
 
 Before these windows, a historical test browser was found actively emulating another game instance and was closed. Its influence on previous timing outliers is unknown. The earlier failed runs remain recorded; these passes do not establish their cause or guarantee universal absence of stalls. Future performance checks must verify that other historical game-test instances are stopped, close their own browser in cleanup, and keep builds/profiling/capture outside measurement.
 
+## Live controller transport and tab recovery
+
+The deployed version also passed eleven native-worker input checkpoints in each of Chromium and Firefox. Actual keyboard events and simulated standard controller snapshots traversed the production page/worker bridge into the real native input exports. The observer forwarded each native call successfully before recording it. Both browsers verified analogue trigger pressure, stable player-two ownership when player one disconnects, player-one keyboard fallback, reconnecting at a different browser index/reordered snapshot, temporary controller-access denial/recovery, and both controllers disconnected. A real tab switch released native input and paused the runtime; returning required a fresh Resume action, with held buttons, sticks and pressure restored before native unpause. Guest frames advanced afterward, and final pause was acknowledged. There were no application errors.
+
+The first Firefox driver attempt rejected the keyboard API name `Space` before testing that input. Using its supported literal-space spelling corrected the driver; the clean complete run is the recorded result. This was not a player failure. The probes changed no application assets or game state and made no performance claim. Synthetic controllers do not qualify physical devices, vibration, USB/Bluetooth mappings or latency.
+
 ## Separate GPU diagnostic
 
 An opt-in Chromium diagnostic on the same application completed 180.435 seconds at 60.002658 submissions/s, with no image/audio loss or application errors. All 10,826 GPU completion requests completed; none were rejected/skipped, no RAF stamps were unknown and no clock errors occurred. At most two requests were outstanding. Maximum completion-notification lag was 16.965 ms after submit and 18.560 ms after RAF; maximum CPU submission interval was 19.470 ms. No natural late event reproduced.
