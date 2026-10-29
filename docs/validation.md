@@ -1,5 +1,13 @@
 # Validation scope
 
+## Retain Chromium native queue uploads after measured staging trial
+
+The existing staged native-upload factory was compared with ordinary Chromium queue writes in an owned real-GPU worker using shared source memory. Thirty-six trials alternated strategy order across six pairs at each of three data sizes, with a 256-byte parameter upload alongside each data upload. Each trial excluded sixteen warmups and measured 128 iterations, including synchronous encoder/submission/remap-call work. All 5,184 GPU readbacks matched every word after the source memory was mutated immediately after upload. Median paired queue/staged work ratios were 1.691 at 64 KiB, 4.964 at 512 KiB and 5.118 at 1,473,120 bytes; every pair favored staging. These are isolated transfer costs with serialized readback, not game FPS or a recreation of the full renderer's GPU workload.
+
+A private HTML-only candidate then selected that existing native mapped-upload path in Chromium while retaining byte-identical Wasm, linked JavaScript, the current Chromium pixel presenter and all seven build helpers. Real native pool counters verified the selected path. Its normal cold-start/card-import/race-results window failed: 600.421 seconds at 60.000662 submissions/s, one missing image, a 34.58-ms maximum actual interval, no consumed-audio loss and no application errors. Minimum queued audio reached 608 stereo frames (12.67 ms). During measurement the pool staged 286,585 uploads / 69,982,450,084 bytes, used 77 ordinary-write fallbacks and reported zero failures; its final allocation stayed within 16 MiB. This establishes neither a whole-game improvement nor a cause for the hosted missing image. The toggle was rejected, the production source selector is unchanged, and no assets from this experiment were deployed.
+
+A separate preceding Chromium staged timeline diagnostic of the unchanged source completed 600.382 seconds at 60.002372 submissions/s, with a 23.335-ms maximum actual interval and no image/audio loss. It did not reproduce the hosted missing image, so its bounded histories captured no event to attribute. Like the clean Firefox diagnostic below, it does not clear either failed normal hosted gate.
+
 ## Prepare Firefox pixel uploads between display callbacks
 
 The separate pixel presenter now prepares Firefox's next texture in a timer task after the display callback returns. It pins the shared slot through upload and actual presentation, counts the prepared image within the existing three-slot bound, and cancels pending preparation on pause, stop or failure. Chromium and other browsers retain reusable buffer uploads inside the display callback. The change leaves native GS staging, game code, resolution, shaders and audio reserve unchanged.
