@@ -1,20 +1,41 @@
 (disable=>{
   if(disable){Object.defineProperty(WebAssembly,'Suspending',{value:undefined});Object.defineProperty(WebAssembly,'promising',{value:undefined})}
   const make=()=>({intervals:0,withoutImage:0,overwritten:0,longRafGaps:0,maxRafGapMs:0,maxFreshGapMs:0,elapsedMs:0});
-  const makeWall=()=>({intervals:0,elapsedMs:0,maxGapMs:0,longGaps:0,events:[]});
+  const makeWall=()=>({intervals:0,elapsedMs:0,maxGapMs:0,longGaps:0,rafSamples:0,outsideRafSamples:0,negativeRafLags:0,maxRafLagMs:0,events:[]});
   window.qa={timerMaps:0,id:0,active:false,phase:'startup',phases:{},total:make(),lastTime:0,lastId:0,lastFresh:0,stamp:0,flip:false,ring:new Float64Array(32*7),ringIndex:0,events:[],longTasks:[],exclusions:[]};
   qa.wall=makeWall();qa.lastSubmission=null;
+  // Submission spacing alone cannot identify a missed compositor frame.
+  // Retain it, and separately record where a submit falls within its RAF.
+  // Reuse wrappers for recurring callbacks; the observer adds no per-frame
+  // callback allocation to a persistent presenter or sampler.
+  qa.currentRafStamp=null;
+  const nativeRaf=window.requestAnimationFrame,rafCallbacks=new WeakMap();
+  window.requestAnimationFrame=function(callback){
+   if(typeof callback!=='function')return nativeRaf.apply(this,arguments);
+   let wrapped=rafCallbacks.get(callback);
+   if(!wrapped){
+    wrapped=function(stamp){
+     const previous=qa.currentRafStamp;qa.currentRafStamp=stamp;
+     try{return callback.call(this,stamp)}finally{qa.currentRafStamp=previous}
+    };
+    rafCallbacks.set(callback,wrapped);
+   }
+   return nativeRaf.call(this,wrapped);
+  };
   window.qaPhase=name=>{qa.phase=name;if(!qa.phases[name])qa.phases[name]=make()};
   window.qaActive=active=>{qa.active=active;qa.lastTime=0;qa.lastFresh=0;qa.lastSubmission=null;if(active)qa.wall=makeWall();qa.exclusions.push({active,time:performance.now()})};
-  // RAF timestamps can remain evenly spaced across a delayed callback. Record
-  // actual successful submissions independently so that delay cannot pass QA.
+  // Preserve actual successful submission intervals independently of nominal
+  // RAF spacing. RAF-relative lag is diagnostic, not a replacement loss gate.
   const submitted=(uploadMs,acquireMs,submitMs,encodeMs,uploadStart)=>{
    ++qa.id;
    if(!qa.active||!Module.running||Module.failed||Module.paused){qa.lastSubmission=null;return}
    const now=performance.now();
+   const rafStamp=qa.currentRafStamp,rafLagMs=rafStamp===null?null:now-rafStamp;
+   if(rafLagMs===null)++qa.wall.outsideRafSamples;
+   else{++qa.wall.rafSamples;if(rafLagMs<0)++qa.wall.negativeRafLags;qa.wall.maxRafLagMs=Math.max(qa.wall.maxRafLagMs,rafLagMs)}
    if(qa.lastSubmission!==null){
     const gap=now-qa.lastSubmission;++qa.wall.intervals;qa.wall.elapsedMs+=gap;qa.wall.maxGapMs=Math.max(qa.wall.maxGapMs,gap);
-    if(gap>25){++qa.wall.longGaps;if(qa.wall.events.length<200)qa.wall.events.push({time:now,gapMs:gap,phase:qa.phase,uploadMs:uploadMs??null,canvasAcquireMs:acquireMs??null,submitMs:submitMs??null,encodeMs:encodeMs??null,uploadAgeMs:uploadStart===undefined?null:now-uploadStart})}
+    if(gap>25){++qa.wall.longGaps;if(qa.wall.events.length<200)qa.wall.events.push({time:now,gapMs:gap,phase:qa.phase,rafStamp,rafLagMs,uploadMs:uploadMs??null,canvasAcquireMs:acquireMs??null,submitMs:submitMs??null,encodeMs:encodeMs??null,uploadAgeMs:uploadStart===undefined?null:now-uploadStart})}
    }
    qa.lastSubmission=now;
   };

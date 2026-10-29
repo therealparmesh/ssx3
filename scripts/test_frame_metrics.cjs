@@ -1,9 +1,9 @@
-// A delayed presentation must fail QA even when RAF timestamps look regular.
+// Keep raw delayed submissions visible even when RAF timestamps look regular.
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const source = fs.readFileSync(path.join(__dirname, 'browser_frame_metrics.js'), 'utf8')
+const source = fs.readFileSync(process.env.SSX3_TEST_FRAME_METRICS || path.join(__dirname, 'browser_frame_metrics.js'), 'utf8')
   .replace('SSX3_DISABLE_JSPI', 'false');
 
 function fixture(kind) {
@@ -34,7 +34,7 @@ function fixture(kind) {
   const canvas = kind === 'copy' ? new CanvasRenderingContext2D('canvas') : new GPUCanvasContext('canvas');
   const queue = new GPUQueue();
   const f = {
-    context, canvas, queue,
+    context, canvas, queue, pendingCallbacks: callbacks,
     at(time) { now = time; },
     submit() { if (kind === 'copy') return canvas.drawImage({}, 0, 0); canvas.getCurrentTexture(); return queue.submit([]); },
     refresh(stamp) {
@@ -51,13 +51,67 @@ function fixture(kind) {
       const present = () => {
         for (let n = 0; n < images[index]; ++n) f.submit();
         ++index;
-        callbacks.push(present);
+        context.requestAnimationFrame(present);
       };
       // Both buffered/copy presenters register their persistent callback before QA.
-      callbacks.push(present);
+      context.requestAnimationFrame(present);
     },
   };
   return f;
+}
+
+for (const kind of ['copy', 'surface']) {
+  const f = fixture(kind), { qa } = f.context;
+  f.context.qaPhase('raf-relative'); f.context.qaActive(true);
+  const present = () => f.submit();
+  let wrapper;
+  for (const [stamp, actual] of [[1000, 1001], [1016.667, 1026.2], [1033.334, 1034]]) {
+    const id = f.context.requestAnimationFrame(present);
+    assert.equal(id, 1, 'The native scheduler return value must be preserved');
+    if (wrapper) assert.equal(f.pendingCallbacks[0], wrapper, 'Recurring callbacks reuse their wrapper');
+    else wrapper = f.pendingCallbacks[0];
+    f.at(actual); f.refresh(stamp);
+    assert.equal(qa.currentRafStamp, null, 'RAF context must end with the callback');
+  }
+  assert.equal(qa.wall.rafSamples, 3);
+  assert.equal(qa.wall.outsideRafSamples, 0);
+  assert.equal(qa.wall.longGaps, 1, 'RAF-relative diagnostics must not relax the interval gate');
+  const event = qa.wall.events[0];
+  assert.equal(event.rafStamp, 1016.667);
+  assert(Math.abs(event.rafLagMs - 9.533) < 0.001);
+  assert(Math.abs(qa.wall.maxRafLagMs - 9.533) < 0.001);
+  f.at(1070); f.submit();
+  assert.equal(qa.wall.outsideRafSamples, 1);
+  assert.equal(qa.wall.events.at(-1).rafStamp, null);
+  assert.equal(qa.wall.events.at(-1).rafLagMs, null, 'Outside-RAF output must not inherit a stale stamp');
+  f.context.requestAnimationFrame(present); f.at(1080); f.refresh(1081);
+  assert.equal(qa.wall.negativeRafLags, 1, 'Negative clock differences remain visible');
+  f.context.qaActive(false); f.context.qaActive(true);
+  assert.equal(qa.wall.rafSamples, 0); assert.equal(qa.wall.outsideRafSamples, 0);
+  assert.equal(qa.wall.negativeRafLags, 0); assert.equal(qa.wall.maxRafLagMs, 0);
+}
+
+{
+  const f = fixture('surface'), { qa } = f.context, receiver = { tag: 'native callback receiver' };
+  let seenReceiver, seenStamp;
+  function callback(stamp) { seenReceiver = this; seenStamp = stamp; assert.equal(qa.currentRafStamp, stamp); return 42; }
+  f.context.requestAnimationFrame(callback);
+  assert.equal(f.pendingCallbacks.shift().call(receiver, 123), 42);
+  assert.equal(seenReceiver, receiver); assert.equal(seenStamp, 123);
+  assert.equal(qa.currentRafStamp, null);
+  let inner, innerThrows = false;
+  f.context.requestAnimationFrame(() => { assert.equal(qa.currentRafStamp, 200); inner(201); assert.equal(qa.currentRafStamp, 200); return 12; });
+  const outer = f.pendingCallbacks.shift();
+  f.context.requestAnimationFrame(() => { assert.equal(qa.currentRafStamp, 201); if (innerThrows) throw new Error('callback failure'); return 9; });
+  inner = f.pendingCallbacks.shift();
+  assert.equal(outer(200), 12);
+  assert.equal(qa.currentRafStamp, null);
+  innerThrows = true;
+  assert.throws(() => outer(200), /callback failure/);
+  assert.equal(qa.currentRafStamp, null, 'Exceptions through nested callbacks must restore the prior scope');
+  const invalid = {};
+  assert.equal(f.context.requestAnimationFrame(invalid), 1);
+  assert.equal(f.pendingCallbacks.shift(), invalid, 'Invalid callbacks are passed to native validation');
 }
 
 for (const kind of ['copy', 'surface']) {
@@ -164,4 +218,4 @@ for (const kind of ['copy', 'surface']) {
   }
   f.queue.failWrite=true;assert.throws(()=>f.queue.writeBuffer(buffer,0,data),/buffer write failed/);
 }
-console.log('Frame metrics: texture/buffer timing, native call forms, delayed output, lifecycle and bounded diagnostics passed');
+console.log('Frame metrics: RAF-relative lag, cached callbacks, texture/buffer timing, native call forms, delayed output, lifecycle and bounded diagnostics passed');
