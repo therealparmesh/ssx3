@@ -25,6 +25,14 @@ The deployed version also passed eleven native-worker input checkpoints in each 
 
 The first Firefox driver attempt rejected the keyboard API name `Space` before testing that input. Using its supported literal-space spelling corrected the driver; the clean complete run is the recorded result. This was not a player failure. The probes changed no application assets or game state and made no performance claim. Synthetic controllers do not qualify physical devices, vibration, USB/Bluetooth mappings or latency.
 
+## Ordinary career save and cross-browser restoration
+
+The live Chromium player loaded a previously game-created `PLAYER1` career through the normal menus. An in-game acceleration purchase changed 1.0 to 1.2 and cash from $508 to $258. Before Save Game, the worker's card still matched the imported original. The game then showed Save complete, both browser-storage revisions completed, and the actual Export card download matched the worker's 8,650,752 bytes. A full page reload restored those exact bytes; loading the career again visibly restored acceleration 1.2 and cash $258. Ordinary free ride then advanced and earned additional trick cash.
+
+Firefox imported that actual Chromium export through the UI, loaded the career and showed acceleration 1.2/cash $258. A normal speed purchase changed 1.0 to 1.2, leaving $8. Save complete, the browser-storage commit, a matching real card export and byte-exact restoration after a full reload all passed. Loading the career again showed acceleration 1.2, speed 1.2 and cash $8. The byte checks were derived from the actual downloads, asynchronous worker card reads and reloaded cards; rendered screenshots supplied the separate visual value checks.
+
+Both players finished paused and their test browsers closed, with no application errors or application warnings. Firefox also emitted the known hosting `__cf_bm` cookie-domain warning, recorded separately. No application assets, native save-state fixtures, game memory or card bytes were edited by the driver; purchases and saves used ordinary in-game controls. These functional checks add career persistence and cross-browser evidence, not a new performance window, event medals/unlocks, complete progression or physical-device qualification. A final Firefox image named free-ride actually showed a lodge Save progress prompt and is excluded from free-ride evidence.
+
 ## Separate GPU diagnostic
 
 An opt-in Chromium diagnostic on the same application completed 180.435 seconds at 60.002658 submissions/s, with no image/audio loss or application errors. All 10,826 GPU completion requests completed; none were rejected/skipped, no RAF stamps were unknown and no clock errors occurred. At most two requests were outstanding. Maximum completion-notification lag was 16.965 ms after submit and 18.560 ms after RAF; maximum CPU submission interval was 19.470 ms. No natural late event reproduced.
