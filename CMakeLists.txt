@@ -231,7 +231,11 @@ endif()
 
 if(PS2_RUNTIME_TESTS AND NOT EMSCRIPTEN)
     enable_testing()
+    add_executable(ps2audio_resampler_tests tests/audio_resampler.cpp)
+    add_test(NAME audio-rate-conversion COMMAND ps2audio_resampler_tests)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME audio-producer-backpressure COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_audio_producer.py" --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME web-disc-cache COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_disc_cache.py"
         --cxx "${CMAKE_CXX_COMPILER}")

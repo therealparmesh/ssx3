@@ -1,6 +1,7 @@
 #include "ps2/disc.hpp"
 #include "ps2/system.hpp"
 #include "ps2/warmup.hpp"
+#include "audio_resampler.hpp"
 
 #include <emscripten.h>
 #include <emscripten/threading.h>
@@ -267,6 +268,11 @@ struct AudioRing {
 };
 
 AudioRing g_audio;
+ps2::audio::RateConverter g_audio_converter;
+ps2::audio::PeakLimiter g_audio_limiter;
+std::atomic<double> g_audio_rate_stats[9]{};
+std::uint64_t g_audio_source_frames = 0, g_audio_output_frames = 0, g_audio_clipped_frames = 0, g_audio_capacity_waits = 0;
+double g_audio_ratio = 1.0, g_audio_peak_deviation = 0.0;
 std::atomic<bool> g_paused{false};
 std::atomic<std::uint32_t> g_pause_request{0}, g_pause_acknowledged{0};
 Slot g_slots[kSlots];
@@ -408,15 +414,64 @@ void service_disc() {
     for (Slot &s : g_slots) dispatch_fetch(s);
 }
 
-void push_audio(const std::int16_t *samples, std::size_t frames) {
-    std::uint32_t write = g_audio.write.load(std::memory_order_relaxed);
-    const std::uint32_t read = g_audio.read.load(std::memory_order_acquire);
-    for (std::size_t i = 0; i < frames && write - read < kAudioFrames; ++i, ++write) {
-        const std::uint32_t at = (write & (kAudioFrames - 1)) * 2;
-        g_audio.samples[at] = samples[i * 2];
-        g_audio.samples[at + 1] = samples[i * 2 + 1];
+void wait_while_paused() {
+    while (g_paused.load()) {
+        g_pause_acknowledged.store(g_pause_request.load());
+        usleep(10000);
     }
-    g_audio.write.store(write, std::memory_order_release);
+    g_pause_acknowledged.store(0);
+}
+
+void push_audio(const std::int16_t *samples, std::size_t frames) {
+    // The usual SPU packet is 32 frames. Bound larger callers too, reserving
+    // enough output capacity before consuming input rather than dropping PCM.
+    for (std::size_t offset = 0; offset < frames;) {
+        const std::size_t count = std::min<std::size_t>(frames - offset, 32);
+        const auto required = ps2::audio::PeakLimiter::max_output_frames(ps2::audio::RateConverter::max_output_frames(count));
+        std::uint32_t write = g_audio.write.load(std::memory_order_relaxed);
+        std::uint32_t read = g_audio.read.load(std::memory_order_acquire);
+        bool waited = false;
+        while (kAudioFrames - (write - read) < required) {
+            if (!waited) { ++g_audio_capacity_waits; waited = true; }
+            if (g_paused.load()) wait_while_paused();
+            else usleep(1000);
+            read = g_audio.read.load(std::memory_order_acquire);
+        }
+        constexpr double target = 1920.0; // 40 ms at the output's 48 kHz clock.
+        const double error = std::clamp((target - (write - read)) / target, -1.0, 1.0);
+        const double desired = 1.0 + 0.005 * error;
+        g_audio_ratio += (desired - g_audio_ratio) * (0.02 * count / 32.0);
+        g_audio_peak_deviation = std::max(g_audio_peak_deviation, std::abs(g_audio_ratio - 1.0));
+        const auto output = [&](float left, float right) {
+            if (write - read >= kAudioFrames) std::abort(); // Reservation invariant, never silently overwrite.
+            const long l = std::lround(static_cast<double>(left) * 32768.0);
+            const long r = std::lround(static_cast<double>(right) * 32768.0);
+            if (l < -32768 || l > 32767 || r < -32768 || r > 32767) ++g_audio_clipped_frames;
+            const auto at = (write & (kAudioFrames - 1)) * 2;
+            g_audio.samples[at] = static_cast<std::int16_t>(std::clamp(l, -32768L, 32767L));
+            g_audio.samples[at + 1] = static_cast<std::int16_t>(std::clamp(r, -32768L, 32767L));
+            ++write;
+            ++g_audio_output_frames;
+        };
+        const bool valid = g_audio_converter.process(samples + offset * 2, count, g_audio_ratio, [&](float left, float right) {
+            if (!g_audio_limiter.push(left, right, output)) std::abort();
+        });
+        if (!valid) std::abort();
+        g_audio_source_frames += count;
+        g_audio.write.store(write, std::memory_order_release);
+        // Independent atomic counters are diagnostic samples, not a coherent
+        // multi-field snapshot. They add no worker messages or worklet work.
+        g_audio_rate_stats[0].store(static_cast<double>(g_audio_source_frames));
+        g_audio_rate_stats[1].store(static_cast<double>(g_audio_output_frames));
+        g_audio_rate_stats[2].store(g_audio_ratio);
+        g_audio_rate_stats[3].store(g_audio_peak_deviation);
+        g_audio_rate_stats[4].store(static_cast<double>(g_audio_clipped_frames));
+        g_audio_rate_stats[5].store(static_cast<double>(g_audio_capacity_waits));
+        g_audio_rate_stats[6].store(g_audio_limiter.minimum_gain());
+        g_audio_rate_stats[7].store(g_audio_limiter.maximum_input_peak());
+        g_audio_rate_stats[8].store(static_cast<double>(g_audio_limiter.limited_frames()));
+        offset += count;
+    }
 }
 
 double audio_queued_ms() { return static_cast<double>(g_audio.write.load() - g_audio.read.load()) / 48.0; }
@@ -427,11 +482,7 @@ std::atomic<double> g_emulation_idle{0.0}, g_render_idle{0.0};
 void pace() {
     ps2::post_present();
     if (g_paused.load()) {
-        while (g_paused.load()) {
-            g_pause_acknowledged.store(g_pause_request.load());
-            usleep(10000);
-        }
-        g_pause_acknowledged.store(0);
+        wait_while_paused();
         g_next_frame = 0.0;
     }
     if (g_audio.active.load()) {
@@ -547,6 +598,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_frames() { return static_cast<doub
 extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_primitives() { return static_cast<double>(ps2::primitives_drawn()); }
 extern "C" EMSCRIPTEN_KEEPALIVE void *ps2web_audio_ring() { return &g_audio; }
 extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_audio_queued_ms() { return audio_queued_ms(); }
+extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_audio_rate_stats(int which) {
+    return which >= 0 && which < 9 ? g_audio_rate_stats[which].load() : 0.0;
+}
 extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_vu_interpreted() { return static_cast<double>(ps2::vu1_interpreted_calls()); }
 extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_idle_ms(int which) {
     if (which == 2) return ps2::vu_thread_idle_ms();
@@ -597,6 +651,7 @@ int main(int argc, char **argv) {
         ps2::g_options.on_memcard_saved = [] { MAIN_THREAD_EM_ASM({ if (Module.ps2CardSaved) Module.ps2CardSaved(); }); };
         ps2::g_options.on_memcard_save_failed = [] { MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ps2CardSaveFailed) Module.ps2CardSaveFailed(); }); };
     }
+    ps2::audio::RateConverter::prepare();
     ps2::set_audio_sink(push_audio);
     register_generated_code();
     register_generated_vu();
