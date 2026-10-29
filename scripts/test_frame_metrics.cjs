@@ -6,6 +6,14 @@ const assert = require('node:assert/strict');
 const source = fs.readFileSync(process.env.SSX3_TEST_FRAME_METRICS || path.join(__dirname, 'browser_frame_metrics.js'), 'utf8')
   .replace('SSX3_DISABLE_JSPI', 'false');
 
+{
+  const context = vm.createContext({});
+  context.window = context;
+  vm.runInContext(source, context);
+  assert.equal(context.qa, undefined, 'A context without WebGPU must not install partial metrics');
+  assert.equal(context.qaInstall, undefined);
+}
+
 function fixture(kind) {
   let now = 0, observe;
   let domCreates = 0, resizeObservers = 0;

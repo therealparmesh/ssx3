@@ -1,4 +1,7 @@
 (disable=>{
+  // New-document observers can also run in startup or hosting frames where
+  // WebGPU is unavailable. Leave those contexts untouched.
+  if(typeof GPUBuffer==='undefined')return;
   if(disable){Object.defineProperty(WebAssembly,'Suspending',{value:undefined});Object.defineProperty(WebAssembly,'promising',{value:undefined})}
   const make=()=>({intervals:0,withoutImage:0,overwritten:0,longRafGaps:0,maxRafGapMs:0,maxFreshGapMs:0,elapsedMs:0});
   const makeWall=()=>({intervals:0,elapsedMs:0,maxGapMs:0,longGaps:0,rafSamples:0,outsideRafSamples:0,negativeRafLags:0,maxRafLagMs:0,events:[]});
