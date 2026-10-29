@@ -1,8 +1,8 @@
 # Release status
 
-As of 2026-10-29, saved version 62 is running on the owner-private hosted site. Its four normal desktop race/results windows passed the existing timing, image and audio gates. Full production sign-off remains open; phones, physical controllers/audio and full-game progression are not qualified.
+As of 2026-10-29, saved version 63 is running on the owner-private hosted site. The preserved default desktop player has four passing normal staged/live race windows. Updated standalone primary/compatibility players have three passing normal staged race windows with continuous, unclipped audio. Full production sign-off remains open; phones, physical controllers/audio and full-game progression are not qualified.
 
-The desktop player uses source `4d26bf93c414b54a7de3e1397f8c7212eb488dcd`; the hosting source is `d81c95b62bf395a2627c01da32f5f2f8aca4435b`. The immutable desktop asset release is `97ea17232a6f2831fd209bbef0a4c465569ad7285742b1910180db1769e272e6`. Version 61 remains available for rollback. Game assets and private access credentials are excluded from this repository.
+The desktop player uses source `4d26bf93c414b54a7de3e1397f8c7212eb488dcd`; the hosting source is `8ee889a9babb643f72e7f82bdc0a83b0b1730daa`. The immutable desktop asset release is `97ea17232a6f2831fd209bbef0a4c465569ad7285742b1910180db1769e272e6`. Version 62 remains available for rollback. Standalone native host source is `9a095ab3f08e1ba378112f882462e12d3016203f`. Game assets and private access credentials are excluded from this repository.
 
 ## Pause acknowledgement and focus recovery
 
@@ -90,7 +90,7 @@ The peak-controlled primary passed all 14 native interaction checkpoints and a 6
 
 See [validation scope](validation.md) for the individual fixes, controlled fault tests, earlier rejected candidates and measurement limitations. These results are bounded desktop evidence, not a bug-free or universal 60-fps guarantee.
 
-## Desktop audio and GPU pacing candidate
+## Version63 standalone audio and GPU pacing
 
 The band-limited primary completed a normal 300.771-second Chromium Snow Jam run at 60.002505 submissions/s, maximum interval 21.425 ms. No image loss, producer replacement, audio underrun, actual clipped frame, full-scale PCM sample or application error was recorded. Audio/emulation clock difference was 4.667 ms. The rendered result was Zoe in sixth at 03:54; this verifies race completion, not a win or progression unlock.
 
@@ -98,4 +98,13 @@ The first compatibility run with the same 40 ms audio target was rejected: Firef
 
 The follow-up host selects a 64 ms audio target for GPU presentation, which waits before GS acknowledgment, while retaining 40 ms for the copy presenter, which acknowledges first. Rate-controlled GPU presentation now waits for an actual free slot at supported display cadences of at least 60 Hz even when audio reserve is low. Legacy hosts keep their prior predictive audio gate. Extracted production-code tests cover 60/90/120/144/240 Hz, both yield settings, low reserve, free-slot admission and pause/failure/reload cancellation. All 22 JavaScript regression suites and the native producer/disc fixtures pass.
 
-This compatibility candidate passed all 14 native interaction checkpoints and a normal 301.062-second Firefox run at 59.999940 submissions/s, maximum interval 24.540 ms. All 18,063 presentation intervals had an image, with zero producer replacements, overwritten images, long intervals or audio underruns. There were zero actual clipped or full-scale PCM samples and no application errors/warnings. Audio/emulation clock difference was -16.667 ms. The actual results screen showed Zoe sixth at 03:59. This is desktop evidence; physical phone and physical-controller qualification remain outstanding. Chromium compatibility and the rebuilt primary still require qualification before any deployment. Live version62 remains unchanged.
+This compatibility candidate passed all 14 native interaction checkpoints and a normal 301.062-second Firefox run at 59.999940 submissions/s, maximum interval 24.540 ms. All 18,063 presentation intervals had an image, with zero producer replacements, overwritten images, long intervals or audio underruns. There were zero actual clipped or full-scale PCM samples and no application errors/warnings. Audio/emulation clock difference was -16.667 ms. The actual results screen showed Zoe sixth at 03:59. This is desktop evidence; physical phone and physical-controller qualification remain outstanding. Chromium compatibility and the rebuilt primary subsequently passed their own normal runs. All three final hosts passed 14 native input/pause checkpoints each. The exact qualified HTML/assets were deployed privately as version63; the default desktop worker release remains byte-identical. GitHub source CI passed all49 suites (16 native, 22 JavaScript, 11 Wasm).
+
+
+| Version63 standalone window | Seconds | Submissions/s | Worst interval, ms | Lost/replaced images | Missing/clipped PCM frames |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Firefox compatibility | 301.062 | 59.999940 | 24.540 | 0 | 0 |
+| Chromium compatibility | 300.775 | 60.002420 | 21.365 | 0 | 0 |
+| Chromium primary | 300.754 | 60.002418 | 21.265 | 0 | 0 |
+
+The rebuilt primary's actual result was Zoe sixth at 03:47. CPU submission timestamps and instrumented worklet sample counters establish these results; physical display scanout and audible quality on real phones are separate, unqualified measurements. Live documents for explicit primary/compatibility and both default desktop browser routes match the packaged application exactly, allowing only two exact observed Cloudflare challenge templates with matching ray parameters. The initial live verification rejected a new hosting template before gameplay; that attempt and verifier negative controls are retained. The hosting-only script change did not change the application document.
