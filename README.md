@@ -55,7 +55,7 @@ Saves use the browser's storage for the current origin. Export the `.ps2` card b
 
 ## Status and testing
 
-The current private hosted candidate passed separate five-minute Chromium and Firefox race/results checks before and after deployment: approximately 60 fresh submissions per second, no missing images or audio, and worst actual submission intervals below 21 ms. Keyboard navigation, simulated controllers and earlier save/recovery flows have been exercised. See [current release status](docs/release-status.md) for the exact build, four measurement windows and remaining sign-off, and [validation scope](docs/validation.md) for historical evidence and limitations.
+The current private hosted candidate passed separate five-minute Chromium and Firefox race/results checks before and after deployment: approximately 60 fresh submissions per second, no missing images or audio, and worst actual submission intervals below 23 ms. Keyboard navigation, simulated controllers and earlier save/recovery flows have been exercised. See [current release status](docs/release-status.md) for the exact build, four measurement windows and remaining sign-off, and [validation scope](docs/validation.md) for historical evidence and limitations.
 
 Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
 
