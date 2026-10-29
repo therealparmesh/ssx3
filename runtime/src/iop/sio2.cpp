@@ -348,6 +348,7 @@ void flush_cards() {
 }
 
 bool card_pending() { return g_card.dirty.load(); }
+const std::atomic<bool> *card_pending_flag() { return &g_card.dirty; }
 
 std::uint32_t read(std::uint32_t a) {
     if (a >= 0x1F808200u && a < 0x1F808240u) return g_send3[(a - 0x1F808200u) / 4];

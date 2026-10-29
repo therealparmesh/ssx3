@@ -649,6 +649,8 @@ void reset() {
 
 std::uint16_t *ram() { return g_ram.data(); }
 
+void start_clock() { keep_ticking(); }
+
 std::uint32_t read(std::uint32_t a, unsigned size) {
     keep_ticking();
     const std::uint32_t off = a & 0x7FEu;

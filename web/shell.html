@@ -184,6 +184,8 @@
 </div></div>
 <script>
 const statusEl = document.getElementById('status');
+const workerPlayer = '@PS2_WEB_WORKER_ENABLED@' === 'true';
+const cardFS = () => Module.cardFS || FS;
 const CARD_DIR = '/memcard', CARD_FILE = '/memcard/Mcd001.ps2', CARD_BYTES = 8650752;
 let noteTimer = 0, noteRestore = '';
 function note(text) {
@@ -213,13 +215,17 @@ function showPendingRuntimeCard() {
   document.getElementById('recovery-export').hidden = true;
   if (Module.paused) { document.getElementById('help').textContent = message; document.getElementById('help').hidden = false; }
 }
-async function waitForPause() {
-  pausePlayer();
+async function waitForNativePause(cancelled = null) {
   const deadline = performance.now() + 10000;
   while (Module.running && !Module._ps2web_pause_ready()) {
+    if (cancelled && cancelled()) return;
     if (performance.now() >= deadline) throw new Error('The game did not finish pausing.');
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+}
+async function waitForPause() {
+  pausePlayer();
+  await waitForNativePause();
 }
 function acquireCardStorage() {
   return new Promise((resolve, reject) => {
@@ -274,7 +280,7 @@ function flushCard() {
     if (!error && savedCardRevision < cardRevision) flushCard();
   };
   if (!cardStorageOwned || cardPersistenceBlocked) { finish(new Error('This tab cannot safely write the saved memory card.')); return; }
-  try { FS.syncfs(false, finish); } catch (error) { finish(error); }
+  try { cardFS().syncfs(false, finish); } catch (error) { finish(error); }
 }
 function storeCard(then) {
   ++cardRevision;
@@ -291,7 +297,7 @@ function waitForCard() {
   });
 }
 async function reloadPlayer(url = location.href, beforeReload = () => {}) {
-  if (cardPersistenceBlocked) { await stopPlayerForReload(); location.href = url; return; }
+  if (cardPersistenceBlocked) { beforeReload(); await stopPlayerForReload(); location.href = url; return; }
   try {
     await waitForPause();
     await waitForCard();
@@ -320,7 +326,7 @@ document.getElementById('export-card').addEventListener('click', async () => {
     if (hasPendingRuntimeCard()) { showPendingRuntimeCard(); note(pendingCardMessage()); return; }
   }
   let data = cardRecovery ? cardRecovery.bytes : null;
-  if (!cardRecovery) { try { data = FS.readFile(CARD_FILE); } catch (e) {} }
+  if (!cardRecovery) { try { data = await cardFS().readFile(CARD_FILE); } catch (e) {} }
   if (!data) {
     note('Nothing saved on the memory card yet');
     return;
@@ -359,9 +365,9 @@ importInput.addEventListener('change', async () => {
     if (Module.failed) throw new Error('The player stopped during the import.');
     await waitForCard();
     if (Module.failed) throw new Error('The player stopped during the import.');
-    if (FS.analyzePath(CARD_FILE).exists) previous = FS.readFile(CARD_FILE);
+    if ((await cardFS().analyzePath(CARD_FILE)).exists) previous = await cardFS().readFile(CARD_FILE);
     replacing = true;
-    FS.writeFile(CARD_FILE, data, { canOwn: true });
+    await cardFS().writeFile(CARD_FILE, data, { canOwn: true });
     await new Promise((resolve, reject) => storeCard((error) => error ? reject(error) : resolve()));
     committed = true;
     await stopPlayerForReload();
@@ -369,8 +375,8 @@ importInput.addEventListener('change', async () => {
   } catch (error) {
     if (replacing) {
       try {
-        if (previous) FS.writeFile(CARD_FILE, previous, { canOwn: true });
-        else if (FS.analyzePath(CARD_FILE).exists) FS.unlink(CARD_FILE);
+        if (previous) await cardFS().writeFile(CARD_FILE, previous, { canOwn: true });
+        else if ((await cardFS().analyzePath(CARD_FILE)).exists) await cardFS().unlink(CARD_FILE);
         // A rejected storage operation may need retrying. Retry only the
         // restored card, and keep it dirty until persistence succeeds.
         storeCard();
@@ -409,6 +415,21 @@ function stopPlayerForReload() {
   if (stopForReload) return stopForReload;
   stopForReload = (async () => {
     stopCompiler();
+    if (Module.workerRuntime) {
+      Module.stoppedForReload = true; Module.paused = true; Module.running = false;
+      try {
+        if (Module.workerRuntime.phase === 'ready') await Module.workerRuntime.request('stop');
+      } catch (error) {
+        // Graceful shutdown can race a crash or time out. The card has already
+        // settled; close() below still terminates the owned worker hierarchy.
+      }
+      finally {
+        Module.workerRuntime.close();
+        if (node) { node.disconnect(); node = null; }
+        if (audio) { const context = audio; audio = null; await context.close().catch(() => {}); }
+      }
+      return;
+    }
     // Asyncify already releases its heap on reload. Clearing its thread state
     // while a suspension resumes can instead enter a blocking main-thread wait.
     if ('@PS2_WEB_ASYNC@' === 'asyncify' || typeof PThread === 'undefined' || !Module._ps2web_frames) return;
@@ -455,11 +476,13 @@ function failPlayer(message, error) {
   start.textContent = 'Reload player';
   start.disabled = false;
   document.getElementById('pause').hidden = true;
-  try {
-    const hasCard = cardRecovery ? !!cardRecovery.bytes : FS.analyzePath(CARD_FILE).exists;
-    document.getElementById('recovery-export').hidden = hasPendingRuntimeCard() || !hasCard;
-    document.getElementById('export-card').disabled = hasPendingRuntimeCard() || !hasCard;
-  } catch (e) {}
+  (async () => {
+    try {
+      const hasCard = cardRecovery ? !!cardRecovery.bytes : (await cardFS().analyzePath(CARD_FILE)).exists;
+      document.getElementById('recovery-export').hidden = hasPendingRuntimeCard() || !hasCard;
+      document.getElementById('export-card').disabled = hasPendingRuntimeCard() || !hasCard;
+    } catch (e) {}
+  })();
   document.getElementById('import-card').disabled = true;
   if (error) console.warn('Player stopped', error);
 }
@@ -497,6 +520,8 @@ function missingFeatures() {
   if (!window.crossOriginIsolated) missing.push('cross-origin isolation (COOP and COEP headers)');
   if (typeof SharedArrayBuffer !== 'function' || typeof Atomics !== 'object') missing.push('shared memory');
   if (!navigator.gpu) missing.push('WebGPU');
+  if (workerPlayer && (typeof OffscreenCanvas !== 'function' ||
+      typeof HTMLCanvasElement.prototype.transferControlToOffscreen !== 'function')) missing.push('OffscreenCanvas');
   if (usesJspi && typeof WebAssembly.Suspending !== 'function') missing.push('WebAssembly JSPI');
   if (usesJspi && !accepts([0, 0x1F, 0x40, 0, 0x0B, 0x0B])) missing.push('WebAssembly exception handling (try_table)');
   // The runtime VU compiler still emits tail calls in both builds.
@@ -635,10 +660,19 @@ function fitCanvas() {
   // landscape controls above its actual edge instead of assuming one row.
   const toolbarHeight = document.getElementById('bar').getBoundingClientRect().height;
   document.body.style.setProperty('--toolbar-height', toolbarHeight + 'px');
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  // Stay just below WebGPU's default 8192-pixel 2D texture limit. Firefox
+  // can produce a blank canvas at the exact width boundary despite valid GPU
+  // pixels. Uniform scaling preserves the CSS size and displayed aspect.
+  const ratio = Math.min(window.devicePixelRatio || 1, 2,
+    8191 / Math.max(1, canvas.clientWidth), 8191 / Math.max(1, canvas.clientHeight));
   const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
   const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
-  if (canvas.width !== width || canvas.height !== height) {
+  if (Module.offscreenTransferred) {
+    if (Module.workerCanvasWidth !== width || Module.workerCanvasHeight !== height) {
+      Module.workerCanvasWidth = width; Module.workerCanvasHeight = height;
+      Module._ps2web_resize(width, height);
+    }
+  } else if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
     if (Module.running && Module._ps2web_resize) Module._ps2web_resize(width, height);
@@ -751,9 +785,11 @@ function pausePlayer() {
   // Invalidate that request even when there is no new native pause to send.
   cancelResume();
   if (!Module.running || Module.paused) return;
-  releaseInput();
   Module.paused = true;
   Module._ps2web_pause(1);
+  // A neutral Cross can trigger a jump. Do not expose released input to the
+  // running guest while its asynchronous pause is still being acknowledged.
+  releaseInput();
   if (audio) audio.suspend().catch(() => {});
   flushCard();
   document.getElementById('overlay').hidden = false;
@@ -827,19 +863,35 @@ document.getElementById('overlay-options').addEventListener('click', () => {
 });
 // the keyboard and touch controls are player 1 along with the first gamepad, a second gamepad is player 2
 const players = [0, 1].map(() => ({ controllerIndex: null, plugged: false, pad: -1, pressure: new Int32Array(4), values: new Uint8Array(16), strong: 0, weak: 0, rumbleAt: 0 }));
-let inputFocused = true, gamepadErrorShown = false;
+let inputFocused = true, gamepadErrorShown = false, pauseInputPending = false;
+function clearNativeInput() {
+  pauseInputPending = false;
+  for (let port = 0; port < players.length; ++port) Module._ps2web_pad(port, 0, 128, 128, 128, 128);
+}
+function settlePausedInput() {
+  if (!pauseInputPending) return;
+  if (!Module.running || Module.failed || Module.stoppedForReload || !Module.paused) { pauseInputPending = false; return; }
+  if (Module._ps2web_pause_ready()) clearNativeInput();
+}
 function releaseInput() {
   keys.clear();
   fingers.clear();
   touchPad = { buttons: 0, x: 0, y: 0, stick: false };
   knob.style.transform = '';
   touchRoot.querySelectorAll('.on').forEach((el) => el.classList.remove('on'));
-  for (const [port, player] of players.entries()) {
-    player.pad = -1;
-    if (Module.running) Module._ps2web_pad(port, 0, 128, 128, 128, 128);
-  }
+  for (const player of players) player.pad = -1;
+  if (!Module.running) { pauseInputPending = false; return; }
+  if (Module.paused) { pauseInputPending = true; settlePausedInput(); }
+  else clearNativeInput();
 }
-window.addEventListener('blur', () => { inputFocused = false; releaseInput(); });
+window.addEventListener('blur', () => {
+  inputFocused = false;
+  // A tab switch can blur before its visibility event. Pause first so losing
+  // focus cannot release a held jump into a still-running guest.
+  const needsRelease = !Module.running || Module.paused;
+  pausePlayer();
+  if (needsRelease) releaseInput();
+});
 window.addEventListener('focus', () => { inputFocused = true; });
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseInput(); });
 window.addEventListener('pointerdown', () => { if (audio && !Module.paused && !Module.failed && ['suspended', 'interrupted'].includes(audio.state)) audio.resume().catch(() => {}); });
@@ -912,7 +964,11 @@ function pollPlayer(port, gamepad, own) {
   }
 }
 function pollInput() {
-  if (document.hidden || !inputFocused || Module.paused || Module.failed) return;
+  // The existing UI refresh also retires a pending pause release; no new
+  // polling timer or recurring allocation is needed. Hidden tabs may defer
+  // this until visible, while the guest remains stopped.
+  if (Module.paused) { if (pauseInputPending) settlePausedInput(); return; }
+  if (document.hidden || !inputFocused || Module.failed) return;
   let pads = noGamepads;
   try {
     pads = navigator.getGamepads ? navigator.getGamepads() : noGamepads;
@@ -1083,11 +1139,15 @@ async function chooseGpu() {
 }
 
 let frames = 0, last = performance.now(), lastGpu = 0, lastEmuIdle = 0, lastRenderIdle = 0, lastVuIdle = 0, lastInterpreted = 0;
-let shown = 0, fresh = false;
+let shown = 0, fresh = false, lastWorkerShown = 0, lastWorkerFrame = 0;
 function resetFrameStats() {
   frames = shown = 0;
   fresh = false;
   last = performance.now();
+  if (Module.workerRuntime) {
+    lastWorkerShown = Module.workerRuntime.status('presented');
+    lastWorkerFrame = Module._ps2web_frames();
+  }
   lastGpu = Module._ps2web_gpu_ms();
   lastEmuIdle = Module._ps2web_idle_ms(0);
   lastRenderIdle = Module._ps2web_idle_ms(1);
@@ -1095,8 +1155,16 @@ function resetFrameStats() {
   lastInterpreted = Module._ps2web_vu_interpreted();
   statsEl.textContent = '';
 }
+let lastWorkerUiFrame = 0, lastWorkerUiPresent = 0;
 const countShown = () => {
-  if (Module.running) pollInput();
+  if (Module.running) {
+    pollInput();
+    if (Module.workerRuntime?.phase === 'ready') {
+      const frame = Module._ps2web_frames(), presented = Module.workerRuntime.status('presented');
+      if (frame !== lastWorkerUiFrame) { lastWorkerUiFrame = frame; Module.onFrame(false); }
+      if (presented !== lastWorkerUiPresent) { lastWorkerUiPresent = presented; Module.onPresent(); }
+    }
+  }
   if (fresh) ++shown;
   fresh = false;
   requestAnimationFrame(countShown);
@@ -1279,6 +1347,11 @@ var Module = {
     if (!Module.presentCopy && !Module.bufferedSurface) fresh = fresh || displayed;
     const now = performance.now();
     if (now - last >= 1000) {
+      if (Module.workerRuntime) {
+        const presented = Module.workerRuntime.status('presented'), nativeFrame = Module._ps2web_frames();
+        shown = presented - lastWorkerShown; frames = nativeFrame - lastWorkerFrame;
+        lastWorkerShown = presented; lastWorkerFrame = nativeFrame;
+      }
       const gpu = Module._ps2web_gpu_ms();
       const memory = (Module.HEAPU8.length / 1048576).toFixed(0);
       const emuIdle = Module._ps2web_idle_ms(0), renderIdle = Module._ps2web_idle_ms(1), vuIdle = Module._ps2web_idle_ms(2), span = now - last;
@@ -1323,21 +1396,27 @@ document.getElementById('start').addEventListener('click', async () => {
     if (pendingResume || !Module.running || document.hidden) return;
     const request = pendingResume = {};
     start.disabled = true;
+    let waitingForPause = false;
     try {
       if (audio) {
         await audio.resume();
         if (audio.state !== 'running') throw new Error('Audio is still interrupted');
+      }
+      if (!Module._ps2web_pause_ready()) {
+        waitingForPause = true;
+        await waitForNativePause(() => pendingResume !== request || !Module.running || Module.failed || Module.stoppedForReload || document.hidden);
       }
     } catch (error) {
       if (pendingResume !== request) return;
       pendingResume = null;
       if (!Module.running || Module.failed || Module.stoppedForReload) return;
       start.disabled = false;
-      note('Could not resume audio. Tap Resume to try again.');
+      note(waitingForPause ? 'The game did not finish pausing. Tap Resume to try again.' : 'Could not resume audio. Tap Resume to try again.');
       return;
     }
     if (pendingResume !== request) return;
     if (!Module.running || Module.failed || Module.stoppedForReload || document.hidden) { cancelResume(); return; }
+    settlePausedInput();
     pendingResume = null;
     Module.paused = false;
     resetFrameStats();
@@ -1396,7 +1475,22 @@ document.getElementById('start').addEventListener('click', async () => {
 const runtimeLoader = document.getElementById('runtime-loader');
 if (!missing.length) {
   startupTimer = setTimeout(() => failPlayer('Loading took too long. Check your connection and reload.'), 120000);
-  for (const source of runtimeLoader.content.querySelectorAll('script')) {
+  if (workerPlayer) {
+    const source = runtimeLoader.content.querySelector('script[src]');
+    const runtimeUrl = new URL(source.src, document.baseURI);
+    const load = file => new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = new URL(file, runtimeUrl).href;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('Could not load the game worker.'));
+      document.body.appendChild(script);
+    });
+    (async () => {
+      await load('worker-runtime-bridge.js');
+      await load('game-runtime-client.js');
+      await startWorkerPlayer(runtimeUrl);
+    })().catch(error => failPlayer(error.message, error));
+  } else for (const source of runtimeLoader.content.querySelectorAll('script')) {
     const runtime = document.createElement('script');
     for (const { name, value } of source.attributes) runtime.setAttribute(name, value);
     runtime.textContent = source.textContent;

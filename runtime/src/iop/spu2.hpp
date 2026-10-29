@@ -12,6 +12,8 @@ namespace ps2::iop::spu2 {
 void state(ps2::state::Stream &s);
 
 void reset();
+// Start after the IOP kernel has cleared and initialized its event queues.
+void start_clock();
 std::uint16_t *ram();
 std::uint32_t read(std::uint32_t a, unsigned size);
 void write(std::uint32_t a, std::uint32_t v, unsigned size);

@@ -38,10 +38,19 @@ jobs:
           node scripts/test_queue_wait.cjs
           node scripts/test_yield_tasks.cjs
           node scripts/test_gpu_probe.cjs
+          node scripts/test_canvas_size.cjs
           node scripts/test_staged_uploads.cjs
           node scripts/test_input_resume.cjs
           node scripts/test_startup_audio.cjs
           node scripts/test_display_capacity.cjs
+          node scripts/test_sync_game_workers.cjs
+          node scripts/test_worker_runtime_bridge.cjs
+          node scripts/test_game_worker_client.cjs
+          node scripts/test_worker_shutdown.cjs
+          node scripts/test_pixel_producer.cjs
+          node scripts/test_pixel_presenter.cjs
+          node scripts/test_pixel_presenter_prefetch.cjs
+          node scripts/test_readback_progress.cjs
 
   wasm-vu-jit:
     runs-on: ubuntu-24.04
@@ -56,3 +65,45 @@ jobs:
         run: |
           source tools/emsdk/emsdk_env.sh
           python3 scripts/test_vu_jit_web.py
+      - name: Check synchronous worker exports and main-thread suspension
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_sync_game_workers.py
+      - name: Check synchronous VU interpretation and exception recovery
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_vu_sync_workers.py
+      - name: Check exact SIMD movie pixels
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_ipu_color.py
+      - name: Check exact SIMD inverse movie transforms
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_ipu_idct.py
+      - name: Check coefficient look-ahead and exact refill behavior
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_ipu_coefficients.py
+      - name: Check exact SIMD movie bit look-ahead
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_ipu_bits.py
+      - name: Check movie FIFO decoding and state continuity in Wasm
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_ipu_streaming_web.py
+      - name: Check producer-to-renderer notification with older wake paths withheld
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_render_queue_web.py
+      - name: Check rendering runtime event-loop availability
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          python3 scripts/test_renderer_runtime_wait.py
+      - name: Check band-limited audio fidelity and streaming in Wasm
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          mkdir -p build/audio-check
+          em++ -std=c++20 -O2 -msimd128 tests/audio_resampler.cpp -sENVIRONMENT=node -o build/audio-check/resampler.cjs
+          node build/audio-check/resampler.cjs

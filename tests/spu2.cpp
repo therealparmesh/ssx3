@@ -1,4 +1,5 @@
 #include "iop/iop.hpp"
+#include "iop/kernel.hpp"
 #include "iop/spu2.hpp"
 #include "ps2/state.hpp"
 
@@ -109,10 +110,89 @@ void state_roundtrip() {
     ps2::state::Reader old(legacy.out.data(), legacy.out.size()); old.set_version(5); ps2::iop::state(old);
     expect(ps2::iop::spu2::read(0x1F90079C, 2) == 0, "Legacy state inherited unrelated effect coefficients");
 }
+void interrupt_clock() {
+    reset(); reg(1, 0x198, 0xC0); stream(1, 12000, -6000);
+    // Keep a real IOP thread in a critical section. A deferred guest alarm
+    // deliberately precedes the next hardware tick in the event queue.
+    constexpr std::uint32_t loop[] = {0x1000FFFFu, 0};
+    std::memcpy(ps2::iop::ram_ptr(0x18000), loop, sizeof loop);
+    const int id = ps2::iop::kernel::create_thread(0x18000, 0x2000, 32, 0, 0, 0);
+    ps2::iop::kernel::start_thread(id, 0); run(1);
+    expect(ps2::iop::kernel::current() && ps2::iop::kernel::current()->id == id, "Critical-section test thread did not run");
+    static unsigned alarms = 0; alarms = 0;
+    ps2::iop::kernel::register_job(ps2::iop::kernel::kJobAlarm, [](const auto &) { ++alarms; });
+    ps2::iop::kernel::schedule(ps2::iop::kernel::now() + 1, ps2::iop::kernel::Job{ps2::iop::kernel::kJobAlarm});
+    ps2::iop::kernel::interrupt_state(true);
+    ps2::state::Writer saved; saved.set_version(6); ps2::iop::state(saved);
+    output.clear(); run(96);
+    expect(output.size() == 96 * 2, "SPU2 clock stopped while guest interrupts were suspended");
+    expect(!alarms && ps2::iop::kernel::interrupts_suspended(), "Audio ticking preempted the guest critical section");
+    const auto expected = output;
+    ps2::state::Reader restored(saved.out.data(), saved.out.size()); restored.set_version(6); ps2::iop::state(restored);
+    output.clear(); run(96);
+    expect(output == expected && !alarms, "State restore lost hardware clock or deferred guest event continuity");
+    ps2::iop::kernel::interrupt_state(false); run(1);
+    expect(alarms == 1, "Deferred guest event did not run once after interrupts resumed");
+    expect(output.size() == expected.size(), "Resuming interrupts replayed hardware audio ticks");
+    run(64); expect(alarms == 1, "Deferred guest event was replayed twice");
+    expect(output.size() == (96 + 64) * 2, "Audio clock lost its cadence after interrupts resumed");
+    ps2::state::Reader unmasked(saved.out.data(), saved.out.size()); unmasked.set_version(6); ps2::iop::state(unmasked);
+    ps2::iop::kernel::interrupt_state(false); alarms = 0; output.clear(); run(96);
+    expect(output == expected && alarms == 1, "Interrupt masking changed hardware PCM samples");
+}
+void startup_clock() {
+    // An attached DAC still needs hardware silence before the first MMIO.
+    ps2::iop::spu2::set_sink({});
+    ps2::iop::reset(); output.clear();
+    ps2::iop::spu2::set_sink([](const std::int16_t *samples, std::size_t frames) {
+        output.insert(output.end(), samples, samples + frames * 2);
+    });
+    ps2::state::Writer saved; saved.set_version(6); ps2::iop::state(saved);
+    run(32);
+    expect(output.size() == 64, "SPU2 output waited for the first register access");
+    expect(std::all_of(output.begin(), output.end(), [](auto x) { return x == 0; }),
+           "Reset hardware produced non-silent PCM");
+    const auto first_batch = output;
+    ps2::state::Reader restored(saved.out.data(), saved.out.size()); restored.set_version(6); ps2::iop::state(restored);
+    output.clear(); run(32);
+    expect(output == first_batch, "Pre-MMIO state restore lost or duplicated the sample clock");
+    ps2::iop::reset(); output.clear(); run(64);
+    expect(output.size() == 128, "IOP reset left an attached audio output without a clock");
+    // The sample clock and capture rings are hardware state, independent of
+    // whether the host is listening. Slot 32 is written by the first batch.
+    ps2::iop::spu2::set_sink({}); ps2::iop::reset();
+    ps2::iop::spu2::ram()[32] = 1234; run(32);
+    expect(ps2::iop::spu2::ram()[32] == 0, "No host sink stopped the hardware capture rings");
+}
+void deadline_clock() {
+    reset(); output.clear(); run(32);
+    expect(output.size() == 32 * 2, "A due SPU2 tick remained pending at the elapsed-time boundary");
+    ps2::iop::run(0);
+    expect(output.size() == 32 * 2, "A zero-cycle synchronization duplicated an audio tick");
+    run(32);
+    expect(output.size() == 64 * 2, "Consecutive exact-deadline advances lost audio cadence");
+}
+void event_order() {
+    static std::vector<int> order;
+    for (const bool alarm_first : {false, true}) {
+        ps2::iop::reset(); order.clear();
+        ps2::iop::spu2::set_sink([](const auto *, auto) { order.push_back(1); });
+        ps2::iop::kernel::register_job(ps2::iop::kernel::kJobAlarm, [](const auto &) { order.push_back(2); });
+        // Schedule on either side of the first tick's enqueue of the second
+        // tick, preserving both equal-time insertion orders with a running DAC.
+        const auto alarm = [] { ps2::iop::kernel::schedule(64 * 768, ps2::iop::kernel::Job{ps2::iop::kernel::kJobAlarm}); };
+        if (alarm_first) alarm();
+        run(32); order.clear();
+        if (!alarm_first) alarm();
+        run(32);
+        expect(order == (alarm_first ? std::vector<int>{2, 1} : std::vector<int>{1, 2}),
+               "Splitting hardware events changed equal-time guest event order");
+    }
+}
 }
 int main() {
     try {
-        routing(); reverb(); state_roundtrip(); ps2::iop::spu2::set_sink({});
-        std::puts("PASS: SPU2 stereo routing, core cascade, wet impulse, effect memory protection, mute and state continuity");
+        routing(); reverb(); state_roundtrip(); startup_clock(); deadline_clock(); interrupt_clock(); event_order(); ps2::iop::spu2::set_sink({});
+        std::puts("PASS: SPU2 stereo routing, effects, mute, interrupt-independent clock, deferred callbacks, event order and state continuity");
     } catch (const std::exception &error) { std::fprintf(stderr, "FAIL: %s\n", error.what()); return 1; }
 }

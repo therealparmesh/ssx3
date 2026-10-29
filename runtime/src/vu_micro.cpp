@@ -996,12 +996,17 @@ void run_fast(int n, std::uint32_t address) {
     std::uint32_t pc = address & u.code_mask, npc = (pc + 8u) & u.code_mask;
     bool ending = false;
     UpperOut out;
-    static std::uint64_t total = 0, calls = 0;
+    // Both VUs can interpret concurrently. Disabled diagnostics must not
+    // mutate a shared counter on every instruction.
+    static std::atomic<std::uint64_t> total{0}, calls{0};
     static const bool count = std::getenv("PS2_VU_COUNT") != nullptr;
     static const bool record_jumps = std::getenv("PS2_VU_RECORD") != nullptr || static_cast<bool>(g_options.on_vu_program);
-    if (count && ++calls % 20000 == 0) std::fprintf(stderr, "[vu1] %llu calls, %llu instructions\n", (unsigned long long)calls, (unsigned long long)total);
+    if (count) {
+        const auto call = calls.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (call % 20000 == 0) std::fprintf(stderr, "[vu1] %llu calls, %llu instructions\n", (unsigned long long)call, (unsigned long long)total.load(std::memory_order_relaxed));
+    }
     BranchView view;
-    for (std::uint32_t steps = 0; steps < 1'000'000; ++steps, ++total) {
+    for (std::uint32_t steps = 0; steps < 1'000'000; ++steps) {
         std::uint32_t lo, hi;
         std::memcpy(&lo, u.code + pc, 4);
         std::memcpy(&hi, u.code + pc + 4, 4);
@@ -1053,6 +1058,7 @@ void run_fast(int n, std::uint32_t address) {
             return;
         }
         if (hi & 0x40000000u) ending = true;
+        if (count) total.fetch_add(1, std::memory_order_relaxed);
     }
     std::fprintf(stderr, "[vu%d] program at 0x%04X did not end\n", n, address);
 }

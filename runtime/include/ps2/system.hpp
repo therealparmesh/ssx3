@@ -2,6 +2,7 @@
 
 #include "cpu.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -143,6 +144,7 @@ void set_pad_pressure(int button, std::uint8_t value, int pad = 0);
 void set_pad_connected(int pad, bool connected);
 std::uint16_t pad_rumble(int pad = 0);
 bool memory_card_pending();
+const std::atomic<bool> *memory_card_pending_flag();
 void set_audio_sink(std::function<void(const std::int16_t *samples, std::size_t frames)> sink);
 
 }

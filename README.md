@@ -39,7 +39,7 @@ Keyboard positions follow [PCSX2's layout](https://github.com/PCSX2/pcsx2/blob/m
 | Player pause / resume | Escape |
 | Fullscreen | Alt+Enter or double-click the game |
 
-Z/X remain Cross/Circle aliases. Opposing stick directions cancel to neutral. Browser shortcuts and focused form controls do not become game inputs. Browsers can consume Escape while leaving native fullscreen.
+Z/X remain Cross/Circle aliases. Opposing stick directions cancel to neutral. Browser shortcuts and focused form controls do not become game inputs. Browsers can consume Escape while leaving native fullscreen. Losing window focus or hiding the tab pauses play; use Resume after returning.
 
 Hold Space/K (Cross) to crouch and charge a jump; release it to jump. J (Square) boosts when adrenaline is available. Q/E/1/3 operate the shoulder grabs while airborne.
 
@@ -55,7 +55,7 @@ Saves use the browser's storage for the current origin. Export the `.ps2` card b
 
 ## Status and testing
 
-Desktop Firefox and Chromium gameplay, keyboard input, simulated controllers, save/recovery flows, startup modes and seven touch layouts have been exercised. Recent six-minute Snow Jam checks at 120 Hz averaged approximately 60 fresh submissions per second, with occasional Firefox callback timing gaps. Hosted HTTPS Gravitude and Firefox Snow Jam qualifier runs also passed frame/audio checks while streaming disc data. Hosted career checks verified card formatting, saving, loading, overwriting, cross-browser import and exact card persistence across reloads. Both presentation paths pace the game on high-refresh displays; source regressions cover nominal clock offsets, correlated timestamp drift and display-rate changes. Render waits also check shared work readiness at refreshes to recover from delayed asynchronous wakes. See [validation scope](docs/validation.md) for the hardware, measurements and limits.
+The current private hosted candidate passed separate five-minute Chromium and Firefox race/results checks before and after deployment: approximately 60 fresh submissions per second, no missing images or audio, and worst actual submission intervals below 23 ms. Keyboard navigation, simulated controllers and earlier save/recovery flows have been exercised. See [current release status](docs/release-status.md) for the exact build, four measurement windows and remaining sign-off, and [validation scope](docs/validation.md) for historical evidence and limitations.
 
 Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
 

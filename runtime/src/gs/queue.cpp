@@ -26,6 +26,9 @@ constexpr std::uint64_t align16(std::uint64_t n) { return (n + 15) & ~15ull; }
 
 Ring g_render, g_vu;
 thread_local Role g_role = Role::Emulation;
+#if defined(__EMSCRIPTEN__) && defined(PS2_RENDER_PROXY_WAKE)
+std::atomic<int> g_render_proxy_policy{-1};
+#endif
 
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
 void futex_wait(std::atomic<std::uint32_t> &word, std::uint32_t seen, int timeout_ms) {
@@ -39,6 +42,9 @@ void futex_wake(std::atomic<std::uint32_t> &word) { syscall(SYS_futex, reinterpr
 }
 
 #ifdef __EMSCRIPTEN__
+#ifdef PS2_RENDER_PROXY_WAKE
+EM_JS(int, ps2_render_proxy_enabled, (), { return Module.yieldForBufferedFrames ? 1 : 0; });
+#endif
 EM_ASYNC_JS(void, ps2_wait_async, (std::atomic<std::uint32_t> *word, std::uint32_t seen, int timeout_ms), {
     const result = Atomics.waitAsync(HEAP32, word >> 2, seen, timeout_ms);
     if (result.async) await new Promise((resolve) => {
@@ -47,8 +53,14 @@ EM_ASYNC_JS(void, ps2_wait_async, (std::atomic<std::uint32_t> *word, std::uint32
             if (finished) return;
             finished = true;
             cancelAnimationFrame(refresh);
+            if (wake && Module.renderWorkWake === wake) Module.renderWorkWake = undefined;
             resolve();
         };
+        const wake = Module.yieldForBufferedFrames ? address => {
+            if ((address >>> 0) === (word >>> 0) &&
+                (Atomics.load(HEAP32, word >> 2) >>> 0) !== (seen >>> 0)) finish();
+        } : undefined;
+        if (wake) Module.renderWorkWake = wake;
         const check = () => {
             if (finished) return;
             // A worker can post work while the browser delays the wait's
@@ -61,6 +73,18 @@ EM_ASYNC_JS(void, ps2_wait_async, (std::atomic<std::uint32_t> *word, std::uint32
         result.value.then(finish);
     });
 });
+
+#ifdef PS2_RENDER_PROXY_WAKE
+void post_render_wake(std::atomic<std::uint32_t> *word) {
+    if (g_render_proxy_policy.load(std::memory_order_acquire) != 1) return;
+    // A browser may defer the waitAsync promise past the next presentation.
+    // Post a separate wake when the producer actually makes work available.
+    MAIN_THREAD_ASYNC_EM_ASM({
+        const wake = Module.renderWorkWake;
+        if (wake) wake($0);
+    }, word);
+}
+#endif
 #endif
 
 void wait(std::atomic<std::uint32_t> &value, std::uint32_t seen) {
@@ -126,7 +150,12 @@ void Ring::post(Type type, std::uint32_t arg0, std::uint32_t arg1, const void *d
     if (bytes) std::memcpy(at + sizeof h, data, bytes);
     head_.store(head + need, std::memory_order_release);
     posted_.fetch_add(1);
-    if (consumer_waiting_.exchange(0)) notify(posted_);
+    if (consumer_waiting_.exchange(0)) {
+        notify(posted_);
+#if defined(__EMSCRIPTEN__) && defined(PS2_RENDER_PROXY_WAKE)
+        if (this == &g_render) post_render_wake(&posted_);
+#endif
+    }
 }
 
 bool Ring::peek(Header &header, const std::uint8_t *&payload) {
@@ -153,7 +182,12 @@ void Ring::pop(const Header &header) {
 
 void Ring::wake() {
     posted_.fetch_add(1);
-    if (consumer_waiting_.exchange(0)) notify(posted_);
+    if (consumer_waiting_.exchange(0)) {
+        notify(posted_);
+#if defined(__EMSCRIPTEN__) && defined(PS2_RENDER_PROXY_WAKE)
+        if (this == &g_render) post_render_wake(&posted_);
+#endif
+    }
 }
 
 void Ring::wait_for_work(int timeout_ms) {
@@ -164,8 +198,16 @@ void Ring::wait_for_work(int timeout_ms) {
         return;
     }
 #ifdef __EMSCRIPTEN__
-    if (emscripten_is_main_browser_thread()) ps2_wait_async(&posted_, seen, timeout_ms);
-    else emscripten_futex_wait(&posted_, seen, timeout_ms);
+    // The rendering runtime can own an OffscreenCanvas in a dedicated worker.
+    // Its event loop must remain available for presentation and GPU promises.
+    // Synchronous EE/VU pthreads keep their native futex wait below.
+    if (emscripten_is_main_runtime_thread()) {
+#ifdef PS2_RENDER_PROXY_WAKE
+        if (g_render_proxy_policy.load(std::memory_order_relaxed) < 0)
+            g_render_proxy_policy.store(ps2_render_proxy_enabled(), std::memory_order_release);
+#endif
+        ps2_wait_async(&posted_, seen, timeout_ms);
+    } else emscripten_futex_wait(&posted_, seen, timeout_ms);
 #elif defined(__linux__)
     futex_wait(posted_, seen, timeout_ms);
 #else

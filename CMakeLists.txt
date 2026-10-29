@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PS2_GENERATED "" CACHE PATH "Folder with the C++ generated for a game")
 option(PS2_DEVELOPER_TOOLS "Include native profiling and named Wasm profiling functions" OFF)
 option(PS2_RUNTIME_TESTS "Build asset-free runtime and code-generation regression tests" OFF)
+option(PS2_WEB_WORKER "Experimental dedicated-worker game renderer (Asyncify only)" OFF)
+option(PS2_GPU_TESTS "Build browser WebGPU regression fixtures without game assets" OFF)
 
 # Keep every indirect game entry point registered. Let the linker remove only
 # host/runtime sections that have no references; playthrough coverage alone
@@ -87,6 +89,11 @@ add_library(ps2runtime STATIC
     runtime/src/iop/cdvdfsv.cpp)
 target_include_directories(ps2runtime PUBLIC runtime/include)
 target_compile_options(ps2runtime PRIVATE -Wall -Wextra)
+if(EMSCRIPTEN AND PS2_WEB_ASYNC STREQUAL "asyncify")
+    # The deferred wait-promise workaround is for the compatibility renderer.
+    # JSPI keeps the original native queue notification path.
+    set_property(SOURCE runtime/src/gs/queue.cpp APPEND PROPERTY COMPILE_DEFINITIONS PS2_RENDER_PROXY_WAKE)
+endif()
 
 set(PS2_WGPU_DIR "${CMAKE_SOURCE_DIR}/third_party/wgpu-native" CACHE PATH "wgpu-native release folder")
 if(EMSCRIPTEN OR EXISTS "${PS2_WGPU_DIR}/lib/libwgpu_native.a")
@@ -112,6 +119,23 @@ if(EMSCRIPTEN OR EXISTS "${PS2_WGPU_DIR}/lib/libwgpu_native.a")
     endif()
 endif()
 
+if(PS2_GPU_TESTS)
+    if(NOT EMSCRIPTEN)
+        message(FATAL_ERROR "PS2_GPU_TESTS requires an Emscripten browser build")
+    endif()
+    add_executable(gpu_copy_readback tests/gpu_copy_readback.cpp)
+    target_include_directories(gpu_copy_readback PRIVATE runtime/src)
+    target_link_libraries(gpu_copy_readback PRIVATE ps2runtime)
+    target_link_options(gpu_copy_readback PRIVATE ${PS2_WEB_SUSPEND_FLAGS}
+        -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=16777216
+        -sENVIRONMENT=web -sALLOW_TABLE_GROWTH=1 -sEXPORTED_RUNTIME_METHODS=FS,callMain
+        "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js\""
+        "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js\""
+        "SHELL:--shell-file \"${CMAKE_CURRENT_SOURCE_DIR}/tests/gpu_probe_shell.html\"")
+    set_target_properties(gpu_copy_readback PROPERTIES SUFFIX ".html"
+        LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/gpu_probe_shell.html;${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js;${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js")
+endif()
+
 if(PS2_GENERATED)
     file(GLOB PS2_UNITS CONFIGURE_DEPENDS "${PS2_GENERATED}/*.cpp")
     add_library(ps2game STATIC ${PS2_UNITS})
@@ -125,12 +149,14 @@ if(PS2_GENERATED)
         set(PS2_WEB_PATCHES "" CACHE FILEPATH "Patch list the runtime writes into memory, preloaded as /game/patches.txt")
         add_executable(ps2web host/web.cpp)
         if(PS2_WEB_ASYNC STREQUAL "asyncify")
-            # Generated EE/VU code runs only on workers. Their disc, queue and
-            # pacing waits are synchronous futex waits; GPU suspension lives on
+            # Generated EE/VU code and the decoded VU interpreter run only on
+            # workers. Disc, queue and pacing waits are synchronous futex
+            # waits; GPU suspension lives on
             # the main thread. Enforce that invariant before entering either
             # worker, rather than silently allowing an uninstrumented unwind.
             target_compile_definitions(ps2web PRIVATE PS2_WEB_SYNC_GAME_WORKERS)
-            target_link_options(ps2web PRIVATE "-sASYNCIFY_REMOVE=[\"gen::*\"]")
+            target_link_options(ps2web PRIVATE "-sASYNCIFY_REMOVE=@${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-functions.json")
+            target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-workers.js\"")
         endif()
         if(PS2_DEVELOPER_TOOLS)
             target_compile_definitions(ps2web PRIVATE PS2_DEVELOPER_TOOLS)
@@ -147,15 +173,45 @@ if(PS2_GENERATED)
         else()
             target_link_options(ps2web PRIVATE -Wl,--strip-debug)
         endif()
+        if(NOT PS2_WEB_WORKER)
+            target_link_options(ps2web PRIVATE -sENVIRONMENT=web)
+        endif()
+        set(PS2_WEB_WORKER_ENABLED false)
+        if(PS2_WEB_WORKER)
+            if(NOT PS2_WEB_ASYNC STREQUAL "asyncify")
+                message(FATAL_ERROR "PS2_WEB_WORKER currently requires PS2_WEB_ASYNC=asyncify")
+            endif()
+            set(PS2_WEB_WORKER_ENABLED true)
+            find_package(Python3 REQUIRED COMPONENTS Interpreter)
+            execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/export_frame_clock.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js" "${CMAKE_CURRENT_BINARY_DIR}/frame-clock.js"
+                COMMAND_ERROR_IS_FATAL ANY)
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/export_frame_clock.py")
+            # Retain the SDK's incoming Module hooks plus the explicit compiled
+            # script URL used to start nested EE/VU pthread workers.
+            target_link_options(ps2web PRIVATE -sENVIRONMENT=web,worker -sOFFSCREENCANVAS_SUPPORT=1
+                -sINCOMING_MODULE_JS_API=ENVIRONMENT,arguments,canvas,dynamicLibraries,elementPointerLock,instantiateWasm,locateFile,monitorRunDependencies,noExitRuntime,noInitialRun,onAbort,onExit,onRuntimeInitialized,postRun,preInit,preRun,print,printErr,setStatus,statusMessage,stderr,stdin,stdout,thisProgram,wasm,websocket,mainScriptUrlOrBlob)
+            foreach(worker_asset worker-runtime-bridge.js game-runtime-worker.js game-runtime-client.js pixel-producer.js pixel-presenter-worker.js readback-progress.js)
+                configure_file("web/${worker_asset}" "${CMAKE_CURRENT_BINARY_DIR}/${worker_asset}" COPYONLY)
+            endforeach()
+            file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ps2web-worker-assets.json"
+                "{\"version\":1,\"files\":[\"worker-runtime-bridge.js\",\"game-runtime-worker.js\",\"game-runtime-client.js\",\"pixel-producer.js\",\"pixel-presenter-worker.js\",\"readback-progress.js\",\"frame-clock.js\"]}\n")
+        else()
+            file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/ps2web-worker-assets.json")
+        endif()
         configure_file(web/shell.html "${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html" @ONLY)
         target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/jspi-lifecycle.js\"")
         target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js\"")
         target_link_options(ps2web PRIVATE "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js\"")
-        target_link_options(ps2web PRIVATE ${PS2_WEB_SUSPEND_FLAGS} -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456 -sPTHREAD_POOL_SIZE=2 -sALLOW_TABLE_GROWTH=1 -lidbfs.js -sSTACK_SIZE=16777216 -sENVIRONMENT=web
+        target_link_options(ps2web PRIVATE ${PS2_WEB_SUSPEND_FLAGS} -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456 -sPTHREAD_POOL_SIZE=2 -sALLOW_TABLE_GROWTH=1 -lidbfs.js -sSTACK_SIZE=16777216
             -sEXPORTED_FUNCTIONS=_main,_ps2web_pad,_ps2web_pad_connected,_ps2web_resize,_ps2web_gpu_ms,_ps2web_frames,_ps2web_primitives,_ps2web_audio_ring,_ps2web_audio_queued_ms,_ps2web_idle_ms,_ps2web_vu_interpreted
             -sEXPORTED_RUNTIME_METHODS=callMain,addRunDependency,removeRunDependency,HEAPU8,ENV
             --shell-file ${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html --preload-file ${PS2_WEB_ELF}@/game/core.elf)
         set_target_properties(ps2web PROPERTIES SUFFIX ".html" LINK_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/ps2-shell.html;${CMAKE_CURRENT_SOURCE_DIR}/web/jspi-lifecycle.js;${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js;${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js")
+        if(PS2_WEB_ASYNC STREQUAL "asyncify")
+            set_property(TARGET ps2web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-workers.js" "${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-functions.json")
+        endif()
         return()
     endif()
 
@@ -175,20 +231,38 @@ endif()
 
 if(PS2_RUNTIME_TESTS AND NOT EMSCRIPTEN)
     enable_testing()
+    add_executable(ps2audio_resampler_tests tests/audio_resampler.cpp)
+    add_test(NAME audio-rate-conversion COMMAND ps2audio_resampler_tests)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME audio-producer-backpressure COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_audio_producer.py" --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME web-disc-cache COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_disc_cache.py"
+        --cxx "${CMAKE_CXX_COMPILER}")
+    add_test(NAME web-disc-dispatch COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_disc_dispatch.py"
         --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME optional-visuals COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_optional_visuals.py"
         --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME ssx3-startup COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_ssx3_startup.py" --cxx "${CMAKE_CXX_COMPILER}")
+    find_package(Threads REQUIRED)
+    add_executable(ps2vu_counter_tests tests/vu_counters.cpp)
+    target_include_directories(ps2vu_counter_tests PRIVATE runtime/src)
+    target_link_libraries(ps2vu_counter_tests PRIVATE ps2runtime Threads::Threads)
+    add_test(NAME vu-instruction-counters COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_vu_counters.py" "$<TARGET_FILE:ps2vu_counter_tests>")
     add_executable(ps2runtime_tests tests/runtime.cpp)
     target_include_directories(ps2runtime_tests PRIVATE runtime/src)
     target_link_libraries(ps2runtime_tests PRIVATE ps2runtime)
     add_test(NAME runtime-regressions COMMAND ps2runtime_tests)
     set_tests_properties(runtime-regressions PROPERTIES ENVIRONMENT "PS2_GS=software")
+    add_executable(ps2present_ack_tests tests/present_ack.cpp)
+    target_include_directories(ps2present_ack_tests PRIVATE runtime/src)
+    target_link_libraries(ps2present_ack_tests PRIVATE ps2runtime)
+    add_test(NAME prepared-copy-ack COMMAND ps2present_ack_tests)
+    set_tests_properties(prepared-copy-ack PROPERTIES ENVIRONMENT "PS2_GS=software")
     add_executable(ps2spu2_tests tests/spu2.cpp)
     target_include_directories(ps2spu2_tests PRIVATE runtime/src)
     target_link_libraries(ps2spu2_tests PRIVATE ps2runtime)
@@ -197,6 +271,12 @@ if(PS2_RUNTIME_TESTS AND NOT EMSCRIPTEN)
     target_include_directories(ps2ipu_tests PRIVATE runtime/src)
     target_link_libraries(ps2ipu_tests PRIVATE ps2runtime)
     add_test(NAME ipu-streaming COMMAND ps2ipu_tests)
+    add_executable(ps2ipu_idct_tests tests/ipu_idct.cpp)
+    target_include_directories(ps2ipu_idct_tests PRIVATE runtime/src)
+    add_test(NAME ipu-idct-exact COMMAND ps2ipu_idct_tests)
+    add_executable(ps2ipu_coefficients_tests tests/ipu_coefficients.cpp)
+    target_include_directories(ps2ipu_coefficients_tests PRIVATE runtime/include runtime/src)
+    add_test(NAME ipu-coefficients-exact COMMAND ps2ipu_coefficients_tests)
     add_executable(ps2codegen_fixture tests/codegen_fixture.cpp
         recomp/r5900.cpp recomp/elf.cpp recomp/analysis.cpp recomp/codegen.cpp recomp/snr2.cpp)
     target_include_directories(ps2codegen_fixture PRIVATE recomp)

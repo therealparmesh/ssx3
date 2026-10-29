@@ -8,6 +8,28 @@ const start = source.indexOf('EM_JS(void, ps2web_fetch,');
 const bodyStart = source.indexOf('{\n', start) + 1;
 const body = source.slice(bodyStart, source.indexOf('\n});', bodyStart));
 
+// A failed player still needs outstanding reads to settle before its EE thread
+// can acknowledge pause. Only teardown makes a queued Wasm entry unsafe.
+const dispatchStart = source.indexOf('void dispatch_fetch(Slot &slot) {');
+assert.ok(dispatchStart >= 0, 'Missing queued disc dispatch');
+const dispatchMatch = source.slice(dispatchStart).match(/MAIN_THREAD_ASYNC_EM_ASM\(\{([\s\S]*?)\n    \},/);
+assert.ok(dispatchMatch, 'Missing main-thread disc dispatch body');
+for (const failed of [false, true]) {
+  for (const stoppedForReload of [false, true]) {
+    const calls = [];
+    const Module = { failed, stoppedForReload };
+    Object.defineProperty(Module, '_ps2web_start_fetch', {
+      get() {
+        assert.equal(stoppedForReload, false, 'A queued task entered a torn-down runtime');
+        return (slot) => calls.push(slot);
+      },
+    });
+    vm.runInNewContext(dispatchMatch[1], { Module, $0: 17 });
+    assert.deepEqual(calls, stoppedForReload ? [] : [17],
+      `Queued fetch must settle before failure pause (failed=${failed}, stopped=${stoppedForReload})`);
+  }
+}
+
 async function check({ status = 206, range = 'bytes 1000-1015/4096', length = 16, reject = false, hang = false, bodyHang = false }) {
   const heap = new SharedArrayBuffer(1024);
   let cancelled = false, read = false, request;
@@ -56,5 +78,5 @@ async function check({ status = 206, range = 'bytes 1000-1015/4096', length = 16
   await check({ reject: true });
   await check({ hang: true });
   await check({ bodyHang: true });
-  console.log('PASS: exact disc ranges, ignored Range, authentication failure, invalid range, truncation, network failure, header timeout and body timeout');
+  console.log('PASS: queued failure/teardown guards, exact disc ranges, ignored Range, authentication failure, invalid range, truncation, network failure, header timeout and body timeout');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

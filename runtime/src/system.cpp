@@ -502,24 +502,30 @@ Rendered render_pending(bool surface, const std::function<void(const std::uint32
                         const std::function<void()> &before_present, double budget_ms, bool *displayed) {
     static std::vector<std::uint32_t> frame;
     if (displayed) *displayed = false;
-    return gs::render_pending([&](const gs::DisplayRegs &regs) {
+    std::uint32_t width = 0, height = 0;
+    bool copy_ready = false;
+    const Rendered rendered = gs::render_pending([&](const gs::DisplayRegs &regs) {
         if (surface) {
             if (before_present) before_present();
             const bool got = gs::present(regs);
             if (displayed) *displayed = got;
             return;
         }
-        std::uint32_t width = 0, height = 0;
         // Prepare the CPU image and submit the following GPU readback while
         // this refresh is still pending, rather than starting that work at
         // its deadline. Only the final canvas copy must wait for presentation.
-        const bool got = copy && gs::copy_frame(regs, frame, width, height);
+        copy_ready = copy && gs::copy_frame(regs, frame, width, height);
+    }, budget_ms);
+    if (!surface && rendered == Rendered::presented) {
+        // The image is owned by this renderer. Acknowledge its GS work before
+        // the display wait, so the EE worker can replenish audio independently.
         if (before_present) before_present();
-        if (got) {
+        if (copy_ready) {
             copy(frame.data(), width, height);
             if (displayed) *displayed = true;
         }
-    }, budget_ms);
+    }
+    return rendered;
 }
 
 void wait_render_work(int timeout_ms) { gs::queue::render().wait_for_work(timeout_ms); }
@@ -698,6 +704,7 @@ void set_pad_pressure(int button, std::uint8_t value, int pad) { iop::sio2::set_
 void set_pad_connected(int pad, bool connected) { iop::sio2::set_connected(pad, connected); }
 std::uint16_t pad_rumble(int pad) { return iop::sio2::rumble(pad); }
 bool memory_card_pending() { return iop::sio2::card_pending(); }
+const std::atomic<bool> *memory_card_pending_flag() { return iop::sio2::card_pending_flag(); }
 void set_audio_sink(std::function<void(const std::int16_t *, std::size_t)> sink) { iop::spu2::set_sink(std::move(sink)); }
 
 }

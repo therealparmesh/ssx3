@@ -47,7 +47,67 @@ The local server serves the selected directory directly. It does not choose betw
 
 The browser host passes the selected startup/effects mode to the runtime. The native runner accepts `--fast-boot` and `--full-effects` to enable the corresponding paths.
 
+### Dedicated game worker
+
+After generating the compatibility translation above, build the optional worker player with:
+
+```sh
+PS2_WEB_ASYNC=asyncify PS2_WEB_WORKER=ON bash scripts/build_web.sh ssx3
+python3 scripts/serve.py build/web-ssx3-asyncify-worker games/ssx3/disc.iso 8681
+```
+
+This variant requires worker WebGPU and transferable OffscreenCanvas in addition to the shared-memory requirements. The page owns user gestures, controls and audio; the game worker owns the runtime and saved-card filesystem. The window creates a separate lightweight presentation worker with three shared pixel slots, keeping its refresh callback separate from the larger Wasm realm. A MessagePort connects it directly to the game worker, so frame data bypasses the window. This also supplies Chromium's window-owned worker animation callbacks. Both workers are explicitly released on shutdown; a renderer crash preserves the game worker for card export. Add `?presenter=direct` to select the preceding direct game-worker surface for diagnostics. Both paths use the same frame-pacing clock.
+
+Keep all seven helper scripts listed in `ps2web-worker-assets.json` beside `ps2web.js`, `.wasm` and `.data`. The build checks their JavaScript and generates compressed copies. A deployment must include these helpers in its release identity and supply their JavaScript MIME types and isolation headers. Private QA wrappers, generated game translations and memory cards are not distributable source assets.
+
+The split presenter submits empty GPU work only while a readback mapping is pending, to advance completion on Firefox implementations with slow completion polling. Map completion, failure and shutdown cancel pending progress polls. Desktop checks do not qualify phone GPUs or physical controllers/audio devices; see [validation](validation.md).
+
 Normal browser play disables GPU timestamp queries; `?debug` enables them when supported. Native runs retain timing collection by default. `PS2_GPU_TIMESTAMPS=0` disables native timing collection, while an explicit `PS2_GPU_PROFILE` still requests the timestamps needed for its profile. Native environment variables are not arbitrary URL options.
+
+## GPU readback regression without game assets
+
+With the pinned SDK activated, build the optional fixture against the actual GS renderer and shaders:
+
+```sh
+emcmake cmake -S . -B build/gpu-tests -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DPS2_WEB_ASYNC=asyncify -DPS2_GPU_TESTS=ON
+cmake --build build/gpu-tests --target gpu_copy_readback --parallel 2
+python3 scripts/serve.py build/gpu-tests /dev/null 8722
+```
+
+The disc argument is unused by this fixture. With Puppeteer Core installed, run in a second terminal:
+
+```sh
+SSX3_TEST_BROWSER=firefox node scripts/test_gpu_copy_readback.cjs
+SSX3_TEST_BROWSER=chrome node scripts/test_gpu_copy_readback.cjs
+```
+
+Set `PUPPETEER_MODULE` to its installed directory when it is outside the project. `SSX3_TEST_URL` selects another fixture URL and `SSX3_TEST_OUTPUT` selects the result directory. Optional `SSX3_GPU_TEST_PROFILE=1` also requires timestamp-query support and exercises the profiling submission path. The fixture verifies all pixels from 64 ordered asynchronous frames, varying dimensions, doubled scale, staged uploads, synchronous display and a nonzero-offset VRAM readback. It needs a real WebGPU browser and does not qualify game performance or physical devices.
+
+## Pixel presenter regression without game assets
+
+The worker presenter also has a standalone real-browser check that serves its own isolated local fixture. It needs Node, Python 3, Puppeteer Core and an installed browser with WebGPU; no game build or disc is loaded:
+
+```sh
+node scripts/test_pixel_presenter_browser.cjs firefox
+node scripts/test_pixel_presenter_browser.cjs chrome
+```
+
+Set `PUPPETEER_MODULE` when the module is outside the project, `SSX3_BROWSER_EXECUTABLE` for another browser executable and `SSX3_TEST_OUTPUT` to retain results at a chosen path. `SSX3_TEST_PRESENTER` selects another presenter file for isolated candidate/mutant checks. `SSX3_TEST_HEADLESS=1` selects headless correctness testing. Firefox explicitly enables `dom.webgpu.enabled` for this check; it does not establish stock-browser availability on every platform.
+
+The fixture checks aligned buffer uploads, unaligned texture-upload fallback, exact first-frame updates, shared-storage growth, pause/resume, both aspect ratios, viewport resize and actual device-loss forwarding. Screenshots are compared against an independent bilinear reference, including alpha-zero source pixels and opaque output. A two-pixel viewport-edge margin excludes rasterizer coverage differences; interior RGB error is limited to two levels. Reports include source hashes and API counts so an all-fallback run cannot qualify the buffer path. This checks rendering correctness and lifecycle, not game performance or physical devices.
+
+## Prepared-copy pause and recovery regression
+
+After building and serving the primary JSPI player, Chromium with JSPI and WebGPU can exercise a full copy queue while animation callbacks are held:
+
+```sh
+SSX3_TEST_URL=http://127.0.0.1:8620 \
+  SSX3_TEST_STATE=test.state \
+  node scripts/test_browser_copy_wait.cjs
+```
+
+Supply your own compatible runtime state in the served directory; it is not included in the repository. Set `PUPPETEER_MODULE` when Puppeteer Core is installed elsewhere, `CHROMIUM_EXECUTABLE` for another Chromium path, and `SSX3_TEST_OUTPUT` for the evidence directory. The default run uses a visible desktop window so another real tab can background the game. It checks pause acknowledgement with frames frozen, backgrounding, runtime failure and a clean reload into gameplay, with no further animation callback available to release the blocked presenter. It uses `nocard` and leaves saved careers untouched. This is a recovery regression, not a performance measurement.
 
 ## Hosting
 

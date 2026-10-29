@@ -13,6 +13,7 @@ addToLibrary({
       if (!Module.singleCommandSubmission) Module.singleCommandSubmission = commands;
     }
   },
+  // BEGIN SHARED FRAME CLOCK
   $ps2webFrameClock: function() {
     var period = 1000 / 60;
     var next = 0, lastRefresh = 0, refreshPeriod = 0;
@@ -70,4 +71,5 @@ addToLibrary({
       },
     };
   },
+  // END SHARED FRAME CLOCK
 });

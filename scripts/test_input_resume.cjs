@@ -6,6 +6,8 @@ const vm = require('node:vm');
 const shell = fs.readFileSync(path.join(__dirname, '../web/shell.html'), 'utf8');
 const inputStart = shell.indexOf('const keys = new Set();');
 const inputEnd = shell.indexOf('// some browsers cannot show a canvas', inputStart);
+const nativePauseStart = shell.indexOf('async function waitForNativePause(');
+const nativePauseEnd = shell.indexOf('function acquireCardStorage()', nativePauseStart);
 const pauseStart = shell.indexOf('function cancelResume() {');
 const pauseEnd = shell.indexOf('async function startAudio(', pauseStart);
 const audioListenerStart = shell.indexOf("  audio.addEventListener('statechange', () => {", pauseEnd);
@@ -27,18 +29,21 @@ function controller(index) {
 function fixture() {
   const pads = [], nativePads = {}, nativePressure = {}, connected = {}, resumes = [], notes = [];
   const elements = new Map(), windowEvents = new Map(), documentEvents = new Map(), audioEvents = new Map(), audioRequests = [];
-  let blocked = false, clock = 0;
+  let blocked = false, clock = 0, pauseReady = true, nativePaused = true;
+  const calls = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, { hidden: false, open: false, disabled: false,
       listeners: new Map(), addEventListener(type, fn) { this.listeners.set(type, fn); } });
     return elements.get(id);
   };
   const Module = { running: true, paused: true, failed: false,
-    _ps2web_pad(port, ...state) { nativePads[port] = state; },
+    _ps2web_pad(port, ...state) { calls.push({ name: 'pad', port, state: [...state], paused: nativePaused, ready: pauseReady }); nativePads[port] = state; },
     _ps2web_pressure(port, ...state) { nativePressure[port] = state; },
     _ps2web_pad_connected(port, value) { connected[port] = value; },
     _ps2web_rumble() { return 0; },
+    _ps2web_pause_ready() { return pauseReady; },
     _ps2web_pause(value) {
+      calls.push({ name: 'pause', value }); nativePaused = !!value;
       if (!value) resumes.push(JSON.parse(JSON.stringify({ pads: nativePads, pressure: nativePressure, connected })));
     },
   };
@@ -57,10 +62,11 @@ function fixture() {
     fingers: new Map(), touchPad: { buttons: 0, stick: false }, knob: { style: {} },
     touchRoot: { querySelectorAll: () => [] }, canvas: { focus() {} }, statusEl: {},
     fullscreen: false, cardImportBusy: false, flushCard() {}, hasPendingRuntimeCard: () => false,
-    startupTimer: 0, noteTimer: 0, clearTimeout() {}, stopCompiler() {}, cardRecovery: null,
+    startupTimer: 0, noteTimer: 0, setTimeout, clearTimeout, stopCompiler() {}, cardRecovery: null,
     resetFrameStats() {}, note: message => notes.push(message),
   });
   vm.runInContext('let pendingResume = null, pendingStartup = null;', context);
+  if (nativePauseStart >= 0) vm.runInContext(shell.slice(nativePauseStart, nativePauseEnd), context);
   vm.runInContext(shell.slice(inputStart, inputEnd), context);
   vm.runInContext(shell.slice(pauseStart, pauseEnd), context);
   vm.runInContext('(function(context) {' + shell.slice(audioListenerStart, audioListenerEnd) + '})(audio)', context);
@@ -68,11 +74,16 @@ function fixture() {
   vm.runInContext(shell.slice(failureStart, failureEnd), context);
   vm.runInContext(shell.slice(resumeStart, resumeEnd + '\n});'.length), context);
   const poll = () => vm.runInContext('pollInput()', context);
-  return { Module, pads, nativePads, connected, resumes, notes, context,
-    seed() { Module.paused = false; poll(); Module.paused = true; vm.runInContext('releaseInput()', context); },
+  return { Module, pads, nativePads, connected, resumes, notes, context, calls, poll,
+    setPauseReady(value) { pauseReady = value; },
+    advanceClock(ms) { clock += ms; },
+    play() { Module.paused = false; nativePaused = false; poll(); },
+    pause() { vm.runInContext('pausePlayer()', context); },
+    seed() { Module.paused = false; nativePaused = false; poll(); vm.runInContext('pausePlayer()', context); },
     block() { blocked = true; },
     unblock() { blocked = false; },
     blur() { windowEvents.get('blur')(); },
+    focus() { windowEvents.get('focus')(); },
     beginResume() { return element('start').listeners.get('click')(); },
     resolveAudio(index = audioRequests.length - 1, state = 'running') { context.audio.state = state; audioRequests[index].resolve(); },
     rejectAudio(index = audioRequests.length - 1) { audioRequests[index].reject(Error('Audio interrupted')); },
@@ -97,6 +108,80 @@ async function resume(f) {
 }
 
 (async () => {
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); const begin = f.calls.length; f.pause();
+    assert.deepEqual(f.calls.slice(begin).map(c => c.name), ['pause'], 'Do not release native input before the guest has acknowledged pause');
+    assert.equal(f.nativePads[0][0], 0x4000);
+    f.poll(); assert.equal(f.calls.length, begin + 1, 'A delayed acknowledgement must retain held native input');
+    f.setPauseReady(true); f.poll();
+    const releases = f.calls.slice(begin + 1); assert.equal(releases.length, 2);
+    assert(releases.every(c => c.name === 'pad' && c.state[0] === 0 && c.paused && c.ready));
+    f.poll(); assert.equal(f.calls.length, begin + 3, 'Retire the pending release exactly once');
+  }
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0); hold(pad, 6, .6);
+    f.play(); f.setPauseReady(false); f.pause();
+    const task = f.beginResume(); f.resolveAudio(); await new Promise(setImmediate);
+    assert.equal(f.resumes.length, 0, 'A rapid Resume must wait for the actual pause acknowledgement');
+    assert.equal(f.nativePads[0][0], 0x4100);
+    f.setPauseReady(true); await task;
+    assert.equal(f.resumes.length, 1); assert.equal(f.resumes[0].pads[0][0], 0x4100);
+    assert.equal(pressure(f.resumes[0], 0, 8), 153);
+    const done = f.calls.length; f.poll();
+    assert(!f.calls.slice(done).some(c => c.name === 'pad' && c.state[0] === 0), 'No deferred release may clear resumed input');
+  }
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); f.pause();
+    const task = f.beginResume(); f.resolveAudio(); await new Promise(setImmediate); f.hide();
+    f.setPauseReady(true); await task; f.poll();
+    assert.equal(f.resumes.length, 0); assert.equal(f.nativePads[0][0], 0);
+    assert(f.calls.filter(c => c.name === 'pad' && c.state[0] === 0).every(c => c.paused && c.ready));
+    f.hide(false); await resume(f); assert.equal(f.resumes.length, 1);
+    assert.equal(f.resumes[0].pads[0][0], 0x4000, 'A fresh action restores a still-held physical controller');
+  }
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); f.pause();
+    const task = f.beginResume(); f.resolveAudio(); await new Promise(setImmediate); f.fail();
+    f.setPauseReady(true); await task; f.poll();
+    assert.equal(f.resumes.length, 0); assert.equal(f.start.textContent, 'Reload player');
+    assert.equal(f.context.statusEl.textContent, 'Player stopped');
+  }
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); f.pause();
+    const task = f.beginResume(); f.resolveAudio(); await new Promise(setImmediate);
+    await vm.runInContext('stopPlayerForReload()', f.context);
+    f.setPauseReady(true); await task; f.poll(); assert.equal(f.resumes.length, 0);
+  }
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); f.pause();
+    const task = f.beginResume(); f.resolveAudio(); await new Promise(setImmediate);
+    f.advanceClock(10001); await task;
+    assert.equal(f.resumes.length, 0); assert.equal(f.Module.paused, true);
+    assert.equal(f.start.disabled, false); assert(f.notes.at(-1).includes('did not finish pausing'));
+    assert.equal(f.nativePads[0][0], 0x4000, 'Timeout cannot fabricate a pause acknowledgement or neutral release');
+    f.setPauseReady(true); await resume(f); assert.equal(f.resumes.length, 1);
+  }
+  {
+    const f = fixture(); f.play();
+    vm.runInContext("keys.add('Space');fingers.set(1,{});touchPad={buttons:16384,x:1,y:0,stick:true};pollInput()", f.context);
+    f.setPauseReady(false); f.pause();
+    assert.equal(vm.runInContext('keys.size + fingers.size + touchPad.buttons', f.context), 0, 'Clear local keyboard/touch state immediately while native pause is pending');
+    assert.equal(f.nativePads[0][0], 0x4000);
+    f.setPauseReady(true); f.poll(); assert.equal(f.nativePads[0][0], 0);
+  }
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); f.pause();
+    const task = f.beginResume(); f.rejectAudio(); await task;
+    assert.equal(f.resumes.length, 0); assert.equal(f.nativePads[0][0], 0x4000);
+    assert(f.notes.at(-1).includes('Could not resume audio'));
+    f.setPauseReady(true); f.poll(); assert.equal(f.nativePads[0][0], 0);
+  }
   {
     const f = fixture(); f.Module.paused = false;
     f.pads[3] = controller(3); f.pads[7] = controller(7); f.pads[12] = controller(12);
@@ -251,5 +336,21 @@ async function resume(f) {
     assert.equal(f.resumes.length, 0, 'Hidden documents must not begin a resume');
     assert.equal(f.start.disabled, false);
   }
-  console.log('Input resume: 20 regression scenarios passed');
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); const begin = f.calls.length; f.blur();
+    assert.equal(f.Module.paused, true, 'Focus loss must request pause before releasing held native input');
+    assert.deepEqual(f.calls.slice(begin).map(c => c.name), ['pause']);
+    f.setPauseReady(true); f.poll(); assert.equal(f.nativePads[0][0], 0);
+    f.focus(); assert.equal(f.Module.paused, true, 'Focus return cannot automatically restart the guest');
+    const state = await resume(f); assert.equal(state.pads[0][0], 0x4000);
+  }
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.play(); f.setPauseReady(false); f.pause();
+    const task = f.beginResume(); f.resolveAudio(); await new Promise(setImmediate); f.blur();
+    f.setPauseReady(true); await task; f.poll(); assert.equal(f.resumes.length, 0);
+    f.focus(); const state = await resume(f); assert.equal(state.pads[0][0], 0x4000);
+  }
+  console.log('Input pause/resume: 30 regression scenarios passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
