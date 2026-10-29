@@ -38,6 +38,7 @@ jobs:
           node scripts/test_queue_wait.cjs
           node scripts/test_yield_tasks.cjs
           node scripts/test_gpu_probe.cjs
+          node scripts/test_canvas_size.cjs
           node scripts/test_staged_uploads.cjs
           node scripts/test_input_resume.cjs
           node scripts/test_startup_audio.cjs

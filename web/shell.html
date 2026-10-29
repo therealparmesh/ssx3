@@ -656,7 +656,11 @@ function fitCanvas() {
   // landscape controls above its actual edge instead of assuming one row.
   const toolbarHeight = document.getElementById('bar').getBoundingClientRect().height;
   document.body.style.setProperty('--toolbar-height', toolbarHeight + 'px');
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  // Stay just below WebGPU's default 8192-pixel 2D texture limit. Firefox
+  // can produce a blank canvas at the exact width boundary despite valid GPU
+  // pixels. Uniform scaling preserves the CSS size and displayed aspect.
+  const ratio = Math.min(window.devicePixelRatio || 1, 2,
+    8191 / Math.max(1, canvas.clientWidth), 8191 / Math.max(1, canvas.clientHeight));
   const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
   const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
   if (Module.offscreenTransferred) {
