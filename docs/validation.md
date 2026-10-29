@@ -6,7 +6,16 @@ The separate pixel presenter now prepares Firefox's next texture in a timer task
 
 A private current-native comparison retained Wasm `6d779d6` and used normal cold startup, card import, menu navigation and race/results flow without profiling or artificial delays. Firefox completed 600.902 seconds at 60.000041 successful submissions/second, with a 22.08-ms maximum actual gap, no missing/overwritten images, no missing audio, no producer replacements and no application errors. The worklet consumed all 28,844,032 produced stereo frames. This is a passing candidate experiment; source-integration and hosted qualification remain separate gates.
 
-The integrated production-source presenter passes the existing reusable-buffer ownership/lifecycle regression and a new Firefox preparation regression covering pinned slots, sequence races, upload order, prepared pause/resume, cancellation, failure, resize and device loss. The new regression rejects the prior presenter. All 21 JavaScript suites pass. Real GPU comparisons pass eight Firefox cases, including a distinct prepared image that must remain undisplayed while paused, and six Chromium cases retaining five aligned buffer uploads/copies plus one unaligned texture fallback. Normal performance qualification of the integrated source remains pending; nothing from this change has been deployed.
+The integrated production-source presenter passes the existing reusable-buffer ownership/lifecycle regression and a new Firefox preparation regression covering pinned slots, sequence races, upload order, prepared pause/resume, cancellation, failure, resize and device loss. The new regression rejects the prior presenter. All 21 JavaScript suites pass. Real GPU comparisons pass eight Firefox cases, including a distinct prepared image that must remain undisplayed while paused, and six Chromium cases retaining five aligned buffer uploads/copies plus one unaligned texture fallback. The deliberate premature-draw mutant fails the real Firefox comparison with a 254.64-level maximum channel error. Nothing from this change has been deployed.
+
+The integrated source at `484e67c` then passed separate normal cold-start, card-import and race/results windows on the 60-Hz desktop at 1280×800 CSS pixels and DPR 1, without profiling, native state fixtures or injected delays:
+
+| Browser | Seconds | Successful submissions/s | Maximum actual gap | Missing images | Missing stereo audio frames |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Firefox 158.0.1, WebGPU explicitly enabled | 600.871 | 59.999928 | 22.20 ms | 0 | 0 |
+| Chromium 156, Vulkan WebGPU enabled | 600.381 | 60.002366 | 19.95 ms | 0 | 0 |
+
+Neither run overwrote images, replaced producer images, exhausted the pool, logged application errors or exceeded the 25-ms actual submission gate. Firefox prepared all 36,052 measured uploads with no fallback; Chromium prepared none. Consumed stereo-frame totals exactly matched production: 28,843,520 in Firefox and 28,818,944 in Chromium. Native/audio clock differences were -6.67 and +22 ms. Both default-entry startup/native-pause smokes and all 45 CI suites (14 native, 21 JavaScript, 10 Wasm) passed. The source audit checked 204 files with no violations, and every one of ten gzip pairs matches its raw asset. The held native binary remains byte-identical. These local results qualify these tested desktop flows; immutable staged/hosted verification, physical phones/controllers/A-V and full progression remain open.
 
 ## Exact-binary CPU and Firefox upload diagnostics
 
