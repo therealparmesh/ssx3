@@ -59,6 +59,16 @@ An opt-in Chromium diagnostic on preceding source `25d915e` completed 180.435 se
 
 Runtime frame/time/pool counters were frozen before awaiting presenter completion. Presenter audio/visual counters were frozen before GPU settlement. A controlled five-second delayed settlement verified that neither counter snapshot included that wait. Actual settlement took 0.055 ms. Completion requests can alter GPU progress, and notification lag includes scheduling delay: it is neither GPU execution time nor physical presentation time. This diagnostic is excluded from the normal checks above.
 
+## Standalone fallback audit
+
+The retained standalone assets were compared with current source and rebuilt on 2026-10-29. Both builds compiled all runtime and host translation units, retaining the generated game archives used by the corresponding browser mode. The compatibility Wasm matched the verified desktop Wasm byte for byte. The rebuilt standalone primary and compatibility players passed all42 actual-native pause, resume, held-controller and real focus-switch checkpoints across primary Chromium, compatibility Chromium and compatibility Firefox. These are functional checks, not physical-controller qualification.
+
+The rebuilt primary completed a normal300.759-second Snow Jam race/results window at60.002343 submissions/s with a22.880ms maximum actual submission interval. There were no missing or overwritten images, pool underflows, producer replacements or application errors. Actual audio consumption missed64 samples across two quanta (1.333ms total), so it failed the unchanged zero-underrun gate. Stereo PCM was nonzero with no full-scale samples. A separate120.398-second startup-only48ms audio-reserve diagnostic also missed32 actual samples; it was rejected rather than treated as a fix. Neither candidate was deployed. These results do not establish that the retained and rebuilt binaries differ in audible reliability; no matched causal comparison has established that.
+
+An earlier HTML-only fallback candidate passed normal300-second primary and compatibility Chromium windows but retained one26.980ms Firefox submission interval and one producer replacement in a separate short primary PCM check. The later rebuild is a different candidate, and its passing frame results do not erase those failures. The known-context guard in the QA observer prevents a WebGPU-less startup context from throwing; it changes neither per-frame measurement nor acceptance thresholds.
+
+All these candidate checks staged the exact document and native assets through browser request interception while reading the real private HTTPS disc and importing a card through the player UI. The staging response was corrected to include the hosting isolation headers after an initial blocked-script startup attempt. The live version62 desktop assets, hosting source, access audience and rollback remain unchanged. Whole-course fallback qualification in Firefox and compatibility Chromium has not been completed for the rebuilt assets. Production sign-off remains open.
+
 ## Remaining sign-off
 
 - Real iPhone and Android browser compatibility, sustained performance, memory pressure, thermal behavior and touch play. Agent device access is currently unavailable; desktop viewport emulation is not device qualification.
