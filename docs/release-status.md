@@ -4,6 +4,12 @@ As of 2026-10-29, saved version 61 is running on the owner-private hosted site. 
 
 The application runtime is source `25d915e04964bdcb3dbbbb21c7e8b0c2d54d1f3c`; the hosting source is `a4869d4ce198b558b0a85420aa744f8c1f986d5f`. The immutable desktop asset release is `97ea17232a6f2831fd209bbef0a4c465569ad7285742b1910180db1769e272e6`. Version 56 remains available for rollback. Game assets and private access credentials are excluded from this repository.
 
+## Pending pause acknowledgement correction
+
+An ordinary player-widget pause on live version61 reproduced a native ordering exposure: both neutral controller calls arrived while the emulation worker was still running, before its native pause call. The probe inserted no delay. This proves the ordering defect; it does not establish a particular guest jump/crash or explain earlier performance outliers. A normal Crow's Nest Big Air heat was reached through the career transport menus, with Peaks2/3 visibly locked. No medal or unlock was earned in that bounded probe.
+
+The source candidate now requests pause before clearing local keyboard/touch state, defers neutral native input until actual pause acknowledgement, and retires that release through the existing UI polling path. A rapid Resume waits for acknowledgement before restoring current input and waking the guest. Cancellation, failure, reload and timeout cannot clear a later resumed input state. The source regression now covers28 pause/resume scenarios; all22 JavaScript suites pass. The prior shell, a reorder-only control and a candidate without acknowledgement gating all fail the new ordering regression. Real browser qualification and deployment of this correction are still pending; the live version remains61.
+
 ## Desktop release checks
 
 Each window followed cold startup, memory-card import through the player UI and ordinary Single Event menus/default rules into a Snow Jam race and results. Headed Chromium 156 and Firefox 158.0.1 ran separately on the same Linux desktop at 60 Hz, 1280×800 CSS pixels and DPR 1. Linux WebGPU enablement was explicit. Simulated standard gamepad input drove the race; keyboard input navigated menus. This does not qualify physical controllers. GPU timestamps, per-frame completion requests, screen capture and profiling were disabled during these normal timed windows.

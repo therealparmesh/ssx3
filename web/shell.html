@@ -215,13 +215,17 @@ function showPendingRuntimeCard() {
   document.getElementById('recovery-export').hidden = true;
   if (Module.paused) { document.getElementById('help').textContent = message; document.getElementById('help').hidden = false; }
 }
-async function waitForPause() {
-  pausePlayer();
+async function waitForNativePause(cancelled = null) {
   const deadline = performance.now() + 10000;
   while (Module.running && !Module._ps2web_pause_ready()) {
+    if (cancelled && cancelled()) return;
     if (performance.now() >= deadline) throw new Error('The game did not finish pausing.');
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+}
+async function waitForPause() {
+  pausePlayer();
+  await waitForNativePause();
 }
 function acquireCardStorage() {
   return new Promise((resolve, reject) => {
@@ -781,9 +785,11 @@ function pausePlayer() {
   // Invalidate that request even when there is no new native pause to send.
   cancelResume();
   if (!Module.running || Module.paused) return;
-  releaseInput();
   Module.paused = true;
   Module._ps2web_pause(1);
+  // A neutral Cross can trigger a jump. Do not expose released input to the
+  // running guest while its asynchronous pause is still being acknowledged.
+  releaseInput();
   if (audio) audio.suspend().catch(() => {});
   flushCard();
   document.getElementById('overlay').hidden = false;
@@ -857,17 +863,26 @@ document.getElementById('overlay-options').addEventListener('click', () => {
 });
 // the keyboard and touch controls are player 1 along with the first gamepad, a second gamepad is player 2
 const players = [0, 1].map(() => ({ controllerIndex: null, plugged: false, pad: -1, pressure: new Int32Array(4), values: new Uint8Array(16), strong: 0, weak: 0, rumbleAt: 0 }));
-let inputFocused = true, gamepadErrorShown = false;
+let inputFocused = true, gamepadErrorShown = false, pauseInputPending = false;
+function clearNativeInput() {
+  pauseInputPending = false;
+  for (let port = 0; port < players.length; ++port) Module._ps2web_pad(port, 0, 128, 128, 128, 128);
+}
+function settlePausedInput() {
+  if (!pauseInputPending) return;
+  if (!Module.running || Module.failed || Module.stoppedForReload || !Module.paused) { pauseInputPending = false; return; }
+  if (Module._ps2web_pause_ready()) clearNativeInput();
+}
 function releaseInput() {
   keys.clear();
   fingers.clear();
   touchPad = { buttons: 0, x: 0, y: 0, stick: false };
   knob.style.transform = '';
   touchRoot.querySelectorAll('.on').forEach((el) => el.classList.remove('on'));
-  for (const [port, player] of players.entries()) {
-    player.pad = -1;
-    if (Module.running) Module._ps2web_pad(port, 0, 128, 128, 128, 128);
-  }
+  for (const player of players) player.pad = -1;
+  if (!Module.running) { pauseInputPending = false; return; }
+  if (Module.paused) { pauseInputPending = true; settlePausedInput(); }
+  else clearNativeInput();
 }
 window.addEventListener('blur', () => { inputFocused = false; releaseInput(); });
 window.addEventListener('focus', () => { inputFocused = true; });
@@ -942,7 +957,11 @@ function pollPlayer(port, gamepad, own) {
   }
 }
 function pollInput() {
-  if (document.hidden || !inputFocused || Module.paused || Module.failed) return;
+  // The existing UI refresh also retires a pending pause release; no new
+  // polling timer or recurring allocation is needed. Hidden tabs may defer
+  // this until visible, while the guest remains stopped.
+  if (Module.paused) { if (pauseInputPending) settlePausedInput(); return; }
+  if (document.hidden || !inputFocused || Module.failed) return;
   let pads = noGamepads;
   try {
     pads = navigator.getGamepads ? navigator.getGamepads() : noGamepads;
@@ -1370,21 +1389,27 @@ document.getElementById('start').addEventListener('click', async () => {
     if (pendingResume || !Module.running || document.hidden) return;
     const request = pendingResume = {};
     start.disabled = true;
+    let waitingForPause = false;
     try {
       if (audio) {
         await audio.resume();
         if (audio.state !== 'running') throw new Error('Audio is still interrupted');
+      }
+      if (!Module._ps2web_pause_ready()) {
+        waitingForPause = true;
+        await waitForNativePause(() => pendingResume !== request || !Module.running || Module.failed || Module.stoppedForReload || document.hidden);
       }
     } catch (error) {
       if (pendingResume !== request) return;
       pendingResume = null;
       if (!Module.running || Module.failed || Module.stoppedForReload) return;
       start.disabled = false;
-      note('Could not resume audio. Tap Resume to try again.');
+      note(waitingForPause ? 'The game did not finish pausing. Tap Resume to try again.' : 'Could not resume audio. Tap Resume to try again.');
       return;
     }
     if (pendingResume !== request) return;
     if (!Module.running || Module.failed || Module.stoppedForReload || document.hidden) { cancelResume(); return; }
+    settlePausedInput();
     pendingResume = null;
     Module.paused = false;
     resetFrameStats();
