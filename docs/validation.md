@@ -1,5 +1,7 @@
 # Validation scope
 
+See [current release status](release-status.md) for the latest deployed candidate, corrected-environment desktop checks and outstanding production qualification. Sections below preserve historical outcomes; a later passing window does not erase an earlier failure.
+
 ## Optional GPU completion observations
 
 A CPU-only timing rule can miss delayed GPU work. A private Chromium control put timestamped compute work on the visible draw's critical path: the fragment shader consumed its output and checked an independently computed hash. Changing the expected hash produced magenta pixels; the correct hash produced the expected gray pixels. Initial/final checksum reads also matched the CPU reference. An earlier workload without a render-resource dependency was rejected because independent GPU work may overlap graphics.
