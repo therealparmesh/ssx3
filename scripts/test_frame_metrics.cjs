@@ -18,7 +18,12 @@ function fixture(kind) {
     constructor(id) { this.canvas = { id }; }
     getCurrentTexture() { this.onAcquire?.(); return {}; }
   }
-  class GPUQueue { writeBuffer(...args) { this.bufferArgs=args; if(this.failWrite)throw new Error('buffer write failed'); this.onBufferWrite?.(); } writeTexture() { this.onWrite?.(); } submit() { this.onSubmit?.(); if (this.fail) throw new Error('submit failed'); return 9; } }
+  class GPUQueue {
+    writeBuffer(...args) { this.bufferArgs=args; if(this.failWrite)throw new Error('buffer write failed'); this.onBufferWrite?.(); }
+    writeTexture() { this.onWrite?.(); }
+    submit() { this.onSubmit?.(); if (this.fail) throw new Error('submit failed'); return 9; }
+    onSubmittedWorkDone() { this.completionCalls=(this.completionCalls||0)+1; return this.completion ? this.completion() : Promise.resolve(); }
+  }
   class GPUBuffer { mapAsync() {} }
   const context = vm.createContext({ performance: { now: () => now }, CanvasRenderingContext2D,
     GPUCanvasContext, GPUQueue, GPUBuffer,
@@ -27,7 +32,7 @@ function fixture(kind) {
       running: true, _ps2web_frames: () => 100, audioQueuedMs: () => 80 },
     document: { body: { append() {} }, createElement() { ++domCreates; return { style: {} }; } },
     ResizeObserver: class { constructor(callback) { ++resizeObservers; observe = callback; } observe() {} },
-    requestAnimationFrame: callback => callbacks.push(callback),
+    requestAnimationFrame: callback => callbacks.push(callback), setTimeout, clearTimeout,
   });
   context.window = context;
   vm.runInContext(source, context);
@@ -219,3 +224,86 @@ for (const kind of ['copy', 'surface']) {
   f.queue.failWrite=true;assert.throws(()=>f.queue.writeBuffer(buffer,0,data),/buffer write failed/);
 }
 console.log('Frame metrics: RAF-relative lag, cached callbacks, texture/buffer timing, native call forms, delayed output, lifecycle and bounded diagnostics passed');
+
+async function gpuCompletionTests() {
+  const flush=async()=>{for(let i=0;i<8;++i)await Promise.resolve();};
+  const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
+  const enable=f=>{f.context.qaGpuCompletions(true);f.begin();};
+  {
+    const f=fixture('surface');f.begin();f.at(1);f.submit();await flush();
+    assert.equal(f.queue.completionCalls,undefined,'Default measurements must not request GPU fences');
+    assert.equal(f.context.qa.gpu.enabled,false);assert.equal(f.context.qa.gpu.frames,0);
+  }
+  {
+    const f=fixture('surface'),pending=[];
+    f.queue.completion=function(){assert.equal(this,f.queue);const d=deferred();pending.push(d);return d.promise;};
+    f.presenter([1,1]);enable(f);f.at(1001);f.refresh(1000);f.at(1017.667);f.refresh(1016.667);
+    const state=f.context.qa.gpu;
+    assert.equal(state.pending,2);assert.equal(state.maxPending,2);assert.equal(f.context.qa.wall.longGaps,0);
+    assert.throws(()=>f.context.qaGpuCompletions(false),/Stop measurement/);
+    assert.throws(()=>f.context.qaGpuSettled(),/Stop measurement/);
+    f.context.qaActive(false);f.context.qaPhase('later');const settled=f.context.qaGpuSettled(1000);settled.catch(()=>{});
+    f.at(1040);pending[1].resolve();await flush();assert.equal(state.completed,1);assert.equal(state.pending,1);
+    f.at(1070);pending[0].resolve();assert.equal(await settled,state);
+    assert.equal(state.frames,2);assert.equal(state.requested,2);assert.equal(state.completed,2);assert.equal(state.pending,0);
+    assert.equal(state.maxNotificationLagMs,69);assert.equal(state.maxRafNotificationLagMs,70);
+    assert.equal(state.unknownRafSamples,0);assert.equal(state.clockErrors,0);
+    assert.equal(state.events.length,1);assert.equal(state.events[0].id,1);assert.equal(state.events[0].phase,'test');
+  }
+  {
+    const f=fixture('surface'),pending=[];f.queue.completion=()=>{const d=deferred();pending.push(d);return d.promise;};
+    f.presenter([1,1]);enable(f);f.at(1001);f.refresh(1000);f.at(1002);pending[0].resolve();await flush();
+    f.at(1026.2);f.refresh(1016.667);f.at(1027);pending[1].resolve();await flush();
+    const {qa}=f.context;assert.equal(qa.wall.longGaps,1,'Completion diagnostics must retain the existing CPU gate');
+    assert.equal(qa.gpu.events.length,1,'A long CPU interval retains its completion even when the GPU is fast');
+    assert.equal(qa.gpu.events[0].id,qa.wall.events[0].id);
+    assert(Math.abs(qa.gpu.events[0].afterSubmitMs-.8)<.001);assert(Math.abs(qa.gpu.events[0].afterRafMs-10.333)<.001);
+  }
+  for(const failure of [()=>Promise.reject(Error('device lost')),()=>{throw Error('queue rejected');},()=>{throw 0;},()=>undefined,()=>({get then(){throw Error('invalid promise');}})]) {
+    const f=fixture('surface');f.queue.completion=failure;enable(f);f.at(1000);assert.equal(f.submit(),9);await flush();
+    const state=f.context.qa.gpu;assert.equal(state.requested,1);assert.equal(state.completed,0);assert.equal(state.rejected,1);assert.equal(state.pending,0);
+    assert.equal(state.events.length,1);assert.equal(f.context.qa.id,1,'Diagnostic failure must not discard successful output');
+  }
+  {
+    const f=fixture('surface');enable(f);f.context.qaActive(false);f.submit();assert.equal(f.context.qa.gpu.frames,0);
+    f.context.qaActive(true);f.context.Module.paused=true;f.submit();f.context.Module.paused=false;
+    f.queue.submit([]);new f.context.GPUCanvasContext('other').getCurrentTexture();f.queue.submit([]);
+    f.queue.fail=true;assert.throws(()=>f.submit(),/submit failed/);f.queue.fail=false;
+    assert.equal(f.context.qa.gpu.frames,0,'Inactive, unrelated and failed output must not request completion');
+  }
+  {
+    const f=fixture('copy');enable(f);f.submit();f.context.qaActive(false);
+    const state=await f.context.qaGpuSettled();assert.equal(state.frames,0);assert.equal(state.completed,0,'CPU-copy output must not fabricate GPU samples');
+  }
+  {
+    const f=fixture('surface'),pending=[];f.queue.completion=()=>{const d=deferred();pending.push(d);return d.promise;};enable(f);
+    for(let i=0;i<180;++i){f.at(i);f.submit();}
+    const state=f.context.qa.gpu;assert.equal(state.frames,180);assert.equal(state.requested,16);assert.equal(state.skipped,164);assert.equal(state.pending,16);assert.equal(state.maxPending,16);
+    assert.equal(f.queue.completionCalls,16,'A hung queue must not accumulate unbounded completion promises');
+    f.context.qaActive(false);await assert.rejects(f.context.qaGpuSettled(0),/timed out/);assert.equal(state.pending,16,'Timeout does not prove pending work completed');
+    f.context.qaActive(true);f.at(500);f.submit();const next=f.context.qa.gpu;
+    assert.equal(next.skipped,1);assert.equal(next.requested,0,'Reset must not bypass the realm-wide pending cap');
+    f.context.qaActive(false);f.at(1000);for(const d of pending)d.resolve();await flush();assert.equal(state.completed,16);assert.equal(state.pending,0);assert.equal(await f.context.qaGpuSettled(0),next);
+    assert.equal(next.completed,0,'Old completions must not leak into the next window');
+  }
+  {
+    const f=fixture('surface');enable(f);
+    for(let batch=0;batch<13;++batch){for(let i=0;i<16;++i){f.at(batch*200+i);f.submit();}f.at(batch*200+100);await flush();}
+    const state=f.context.qa.gpu;assert.equal(state.requested,208);assert.equal(state.completed,208);assert.equal(state.skipped,0);assert.equal(state.events.length,200,'Completion event storage stays bounded');
+  }
+  {
+    const f=fixture('surface'),d=deferred();f.queue.completion=()=>d.promise;enable(f);f.at(1000);f.submit();
+    const old=f.context.qa.gpu;f.context.qaActive(false);const settled=f.context.qaGpuSettled(1000);settled.catch(()=>{});
+    f.context.qaActive(true);const current=f.context.qa.gpu;assert.notEqual(current,old);f.at(1010);d.resolve();assert.equal(await settled,old);
+    assert.equal(old.completed,1);assert.equal(old.pending,0);assert.equal(current.frames,0);assert.equal(current.pending,0,'Old callbacks must not mutate the next measurement');
+    f.context.qaActive(false);f.context.qaGpuCompletions(false);f.context.qaActive(true);f.submit();await flush();
+    assert.equal(f.context.qa.gpu.enabled,false);assert.equal(f.context.qa.gpu.frames,0);assert.equal(f.queue.completionCalls,1,'Disabling diagnostics restores fence-free measurement');
+  }
+  {
+    const f=fixture('surface'),d=deferred();f.queue.completion=()=>d.promise;enable(f);f.at(1000);f.submit();f.at(999);d.resolve();await flush();
+    assert.equal(f.context.qa.gpu.clockErrors,1);assert.equal(f.context.qa.gpu.events[0].afterSubmitMs,-1,'Invalid clock differences must remain visible');
+    f.context.qaActive(false);assert.throws(()=>f.context.qaGpuSettled(-1),/Invalid/);assert.throws(()=>f.context.qaGpuSettled(NaN),/Invalid/);
+  }
+  console.log('GPU completion metrics: opt-in/default inactivity, queue ownership, timing, failures, capacity, bounded events, settlement and reset isolation passed');
+}
+gpuCompletionTests().catch(error=>{console.error(error);process.exitCode=1;});
