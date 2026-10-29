@@ -41,6 +41,12 @@ Firefox imported that actual Chromium export through the UI, loaded the career a
 
 Both players finished paused and their test browsers closed, with no application errors or application warnings. Firefox also emitted the known hosting `__cf_bm` cookie-domain warning, recorded separately. No application assets, native save-state fixtures, game memory or card bytes were edited by the driver; purchases and saves used ordinary in-game controls. These functional checks add career persistence and cross-browser evidence, not a new performance window, event medals/unlocks, complete progression or physical-device qualification. A final Firefox image named free-ride actually showed a lodge Save progress prompt and is excluded from free-ride evidence.
 
+## Current career qualifier and return flow
+
+On live version62, Chromium imported the actual Firefox-exported career card through the player UI and loaded `PLAYER1` using the normal game menus. Free ride showed the saved $8 balance. Transport entered Peak1's Crow's Nest Big Air event. Both qualifiers completed: Zoe scored 3,100 and 2,000, and the final standings correctly carried a combined 5,100 into sixth place. The game rejected advancement because the top three qualify. Transport then returned to Select Peak, where Peaks2/3 remained locked, and the Peak1 Freeride destinations opened normally.
+
+The run used ordinary keyboard events and simulated standard gamepad snapshots through production input polling, with player pauses between observations. It used no native save-state fixture, game-memory edits, altered rules or fabricated scores. There were no application errors or warnings. No in-game save was performed, and the final worker card still matched the imported 8,650,752-byte card exactly. The browser finished with native pause acknowledged and was closed. This checks the unsuccessful qualification/results/return path; it does not verify a medal, unlock, newly earned progress persistence, Firefox event progression or a new performance window.
+
 ## Separate GPU diagnostic
 
 An opt-in Chromium diagnostic on preceding source `25d915e` completed 180.435 seconds at 60.002658 submissions/s, with no image/audio loss or application errors. All 10,826 GPU completion requests completed; none were rejected/skipped, no RAF stamps were unknown and no clock errors occurred. At most two requests were outstanding. Maximum completion-notification lag was 16.965 ms after submit and 18.560 ms after RAF; maximum CPU submission interval was 19.470 ms. No natural late event reproduced.
