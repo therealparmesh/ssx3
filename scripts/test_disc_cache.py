@@ -21,6 +21,10 @@ source = args.source.read_text()
 begin = source.index('constexpr std::size_t kChunk =')
 end = source.index('\nvoid service_disc()', begin)
 code = source[begin:end]
+# Audio state is adjacent to the cache, but is not part of this fixture.
+audio_begin = code.index('struct AudioRing {')
+audio_end = code.index('Slot g_slots[', audio_begin)
+code = code[:audio_begin] + code[audio_end:]
 header = r'''
 #include <algorithm>
 #include <atomic>

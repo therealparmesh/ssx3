@@ -3,7 +3,12 @@
 from pathlib import Path
 import argparse, subprocess, tempfile, os, shlex
 p=argparse.ArgumentParser();p.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[1]/'host/web.cpp');p.add_argument('--cxx',default=os.environ.get('CXX','c++'));a=p.parse_args()
-s=a.source.read_text();code=s[s.index('constexpr std::size_t kChunk ='):s.index('\nvoid push_audio(')]
+s=a.source.read_text()
+end = s.index('\nvoid wait_while_paused(') if '\nvoid wait_while_paused(' in s else s.index('\nvoid push_audio(')
+code = s[s.index('constexpr std::size_t kChunk ='):end]
+audio_begin = code.index('struct AudioRing {')
+audio_end = code.index('Slot g_slots[', audio_begin)
+code = code[:audio_begin] + code[audio_end:]
 marker='extern "C" EMSCRIPTEN_KEEPALIVE void ps2web_start_fetch('
 if marker in s:
  start=s.index(marker);export=s[start:s.index('\n}',start)+2]
