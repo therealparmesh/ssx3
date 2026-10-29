@@ -137,8 +137,13 @@ EM_JS(int, ps2web_wait_capacity_safe, (double audio_ms), {
     }
     // A full queue needs capacity, not another completed image. Near 60 Hz,
     // use the actual presentation time rather than a potentially old RAF stamp.
-    if (!Module.yieldForBufferedFrames || Module.surfaceFrames?.length !== 3) return 0;
-    const refresh = Module.surfaceClock.refreshInterval();
+    if (Module.surfaceFrames?.length !== 3) return 0;
+    const refresh = Module.surfaceClock?.refreshInterval();
+    // Rate conversion keeps audio within its reserve. Preserve each queued
+    // image until presentation frees a slot, including on faster displays.
+    if (typeof Module._ps2web_audio_rate_stats === 'function')
+        return Number.isFinite(refresh) && refresh > 0 && refresh <= 1000 / 60 + 0.25 ? 1 : 0;
+    if (!Module.yieldForBufferedFrames) return 0;
     if (!Number.isFinite(refresh) || Math.abs(refresh - 1000 / 60) > 0.25) return 0;
     const elapsed = performance.now() - Module.surfacePresentedAt;
     if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 2 * refresh) return 0;
@@ -152,14 +157,18 @@ EM_ASYNC_JS(void, ps2web_wait_shown, (int capacity_only), {
     const frames = Module.bufferedSurface || !Module.prepareCopyFrames ? Module.surfaceFrames : Module.blitFrames;
     const refresh = !Module.bufferedSurface && Module.prepareCopyFrames ? Module.blitClock?.refreshInterval() : 0;
     const copy_capacity = frames?.length === 3 && Number.isFinite(refresh) && refresh > 0 && refresh <= 1000 / 60 + 0.25;
-    if (capacity_only || (!Module.paused && !Module.failed && !Module.stoppedForReload && copy_capacity) ||
+    const surface_refresh = Module.bufferedSurface ? Module.surfaceClock?.refreshInterval() : 0;
+    const controlled_surface = Module.bufferedSurface && frames?.length === 3 &&
+        typeof Module._ps2web_audio_rate_stats === 'function' &&
+        Number.isFinite(surface_refresh) && surface_refresh > 0 && surface_refresh <= 1000 / 60 + 0.25;
+    if (controlled_surface || capacity_only || (!Module.paused && !Module.failed && !Module.stoppedForReload && copy_capacity) ||
         (Module.yieldForBufferedFrames && Module.bufferedSurface && !Module.paused &&
         !Module.failed && !Module.stoppedForReload && Module.surfaceFrames?.length === 3 &&
         Math.abs(Module.surfaceClock.refreshInterval() - 1000 / 60) <= 0.25)) {
         do {
             await new Promise(resolve => { Module.surfaceYield = resolve; });
         } while (!Module.paused && !Module.failed && !Module.stoppedForReload &&
-                 frames?.length === 3 && (copy_capacity || Module.audioQueuedMs() >= (capacity_only ? 20 : 40)));
+                 frames?.length === 3 && (controlled_surface || copy_capacity || Module.audioQueuedMs() >= (capacity_only ? 20 : 40)));
         return;
     }
     // Prepare the copy queue as well as the GPU queue before waiting. An
@@ -270,9 +279,10 @@ struct AudioRing {
 AudioRing g_audio;
 ps2::audio::RateConverter g_audio_converter;
 ps2::audio::PeakLimiter g_audio_limiter;
-std::atomic<double> g_audio_rate_stats[9]{};
+std::atomic<double> g_audio_rate_stats[10]{};
 std::uint64_t g_audio_source_frames = 0, g_audio_output_frames = 0, g_audio_clipped_frames = 0, g_audio_capacity_waits = 0;
 double g_audio_ratio = 1.0, g_audio_peak_deviation = 0.0;
+double g_audio_target_frames = 1920.0;
 std::atomic<bool> g_paused{false};
 std::atomic<std::uint32_t> g_pause_request{0}, g_pause_acknowledged{0};
 Slot g_slots[kSlots];
@@ -422,6 +432,14 @@ void wait_while_paused() {
     g_pause_acknowledged.store(0);
 }
 
+void configure_audio_reserve(bool surface) {
+    // GPU presentation waits before acknowledging its GS field. Cover its
+    // 40 ms pacing gate, a refresh, and packet/phase margin while the queue
+    // waits for capacity. Copying acknowledges first and can refill sooner.
+    // This is selected once, before starting either emulation worker.
+    g_audio_target_frames = surface ? 3072.0 : 1920.0;
+}
+
 void push_audio(const std::int16_t *samples, std::size_t frames) {
     // The usual SPU packet is 32 frames. Bound larger callers too, reserving
     // enough output capacity before consuming input rather than dropping PCM.
@@ -437,7 +455,7 @@ void push_audio(const std::int16_t *samples, std::size_t frames) {
             else usleep(1000);
             read = g_audio.read.load(std::memory_order_acquire);
         }
-        constexpr double target = 1920.0; // 40 ms at the output's 48 kHz clock.
+        const double target = g_audio_target_frames;
         const double error = std::clamp((target - (write - read)) / target, -1.0, 1.0);
         const double desired = 1.0 + 0.005 * error;
         g_audio_ratio += (desired - g_audio_ratio) * (0.02 * count / 32.0);
@@ -470,6 +488,7 @@ void push_audio(const std::int16_t *samples, std::size_t frames) {
         g_audio_rate_stats[6].store(g_audio_limiter.minimum_gain());
         g_audio_rate_stats[7].store(g_audio_limiter.maximum_input_peak());
         g_audio_rate_stats[8].store(static_cast<double>(g_audio_limiter.limited_frames()));
+        g_audio_rate_stats[9].store(target);
         offset += count;
     }
 }
@@ -599,7 +618,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_primitives() { return static_cast<
 extern "C" EMSCRIPTEN_KEEPALIVE void *ps2web_audio_ring() { return &g_audio; }
 extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_audio_queued_ms() { return audio_queued_ms(); }
 extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_audio_rate_stats(int which) {
-    return which >= 0 && which < 9 ? g_audio_rate_stats[which].load() : 0.0;
+    return which >= 0 && which < 10 ? g_audio_rate_stats[which].load() : 0.0;
 }
 extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_vu_interpreted() { return static_cast<double>(ps2::vu1_interpreted_calls()); }
 extern "C" EMSCRIPTEN_KEEPALIVE double ps2web_idle_ms(int which) {
@@ -669,6 +688,7 @@ int main(int argc, char **argv) {
         surface = ps2::attach_window(target);
     }
     copy = copy || (!surface && !no_surface);
+    configure_audio_reserve(surface);
     std::fprintf(stderr, "[web] %s\n", surface ? "presenting through WebGPU" : copy ? "presenting through a 2D canvas copy" : "not presenting");
 
     ps2::start_render_thread();

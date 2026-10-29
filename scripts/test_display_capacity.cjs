@@ -85,6 +85,28 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     const task = f.wait(0); assert.equal(f.Module.surfaceYield, undefined); assert.equal(f.Module.shownWaiters.length, 1);
     f.Module.shownWaiters.shift()(); await task;
   }
+  // New native rate control must not turn low audio into image replacement.
+  for (const hz of [60, 90, 120, 144, 240]) {
+    for (const yieldForBufferedFrames of [false, true]) {
+      const f = fixture();
+      Object.assign(f.Module, { _ps2web_audio_rate_stats() {}, yieldForBufferedFrames,
+        surfaceClock: { refreshInterval: () => 1000 / hz }, audioQueuedMs: () => 0 });
+      assert.equal(f.safe(0), 1);
+      let finished = false; const task = f.wait(0).then(() => { finished = true; });
+      f.wake(); await flush(); assert(!finished, 'Low reserve cannot discard a queued image');
+      f.Module.surfaceFrames.pop(); f.wake(); await task;
+    }
+  }
+  for (const flag of ['paused', 'failed', 'stoppedForReload']) {
+    const f = fixture(); f.Module._ps2web_audio_rate_stats = () => 0;
+    const task = f.wait(1); f.Module[flag] = true; f.wake(); await task;
+    assert.equal(f.safe(0), 0);
+  }
+  for (const refresh of [20, 0, -1, NaN, Infinity]) {
+    const f = fixture(); f.Module._ps2web_audio_rate_stats = () => 0;
+    f.Module.surfaceClock.refreshInterval = () => refresh;
+    assert.equal(f.safe(0), 0); await f.wait(0);
+  }
   for (const count of [0, 1, 2, 3]) {
     const f = fixture(); f.Module.bufferedSurface = false; f.Module.prepareCopyFrames = true; f.Module.shownPending = true;
     // A retired surface queue must not govern a copy presenter's capacity.
@@ -190,5 +212,5 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     release(); assert.equal(jobs.length, 2, 'Each old waiter is released only once');
     for (const job of jobs) job(); assert.equal(capacityWakes, 1); assert.equal(refreshWakes, 1);
   }
-  console.log(`Display capacity: ${cases.length} selection gates, ${reserveGates} reserve gates and 32 wait/recovery scenarios passed`);
+  console.log(`Display capacity: ${cases.length} selection gates, ${reserveGates} reserve gates and legacy plus rate-controlled wait/recovery scenarios passed`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -34,6 +34,7 @@ void reset() {
     g_audio_limiter = ps2::audio::PeakLimiter{};
     g_audio_source_frames = g_audio_output_frames = g_audio_clipped_frames = g_audio_capacity_waits = 0;
     g_audio_ratio = 1; g_audio_peak_deviation = 0;
+    configure_audio_reserve(false);
     for (auto &value : g_audio_rate_stats) value = 0;
     g_paused = false; g_pause_request = 0; g_pause_acknowledged = 0; sleeps = 0;
 }
@@ -84,5 +85,23 @@ int main() {
     assert(consumed > 38000 && consumed < 38600);
     assert(g_audio.write.load() == static_cast<std::uint32_t>(origin + consumed));
     assert(g_audio_capacity_waits == 0 && g_audio_clipped_frames == 0);
+    reset();
+    g_audio.write = 1920;
+    push_audio(input, 32);
+    const double copy_ratio = g_audio_rate_stats[2].load();
+    assert(g_audio_rate_stats[9].load() == 1920);
+    reset();
+    configure_audio_reserve(true);
+    g_audio.write = 1920;
+    push_audio(input, 32);
+    assert(g_audio_rate_stats[9].load() == 3072);
+    assert(g_audio_rate_stats[9].load() > (40 + 1000.0 / 60) * 48);
+    assert(copy_ratio == 1 && g_audio_rate_stats[2].load() > copy_ratio);
+    assert(g_audio_rate_stats[2].load() <= ps2::audio::RateConverter::kMaximumRatio);
+    reset();
+    configure_audio_reserve(true);
+    g_audio.write = 3072;
+    push_audio(input, 32);
+    assert(g_audio_rate_stats[2].load() == 1);
     std::puts("Audio producer: full/63/64-slot admission, paused backpressure acknowledgement, exact source admission, stereo PCM, repeated ring wrap and32-bit counter rollover passed.");
 }

@@ -89,3 +89,13 @@ The peak-controlled primary passed all 14 native interaction checkpoints and a 6
 - Physical display delivery and historical rare timing events. CPU submissions, completion notifications and screenshots alone do not prove physical scanout timing.
 
 See [validation scope](validation.md) for the individual fixes, controlled fault tests, earlier rejected candidates and measurement limitations. These results are bounded desktop evidence, not a bug-free or universal 60-fps guarantee.
+
+## Desktop audio and GPU pacing candidate
+
+The band-limited primary completed a normal 300.771-second Chromium Snow Jam run at 60.002505 submissions/s, maximum interval 21.425 ms. No image loss, producer replacement, audio underrun, actual clipped frame, full-scale PCM sample or application error was recorded. Audio/emulation clock difference was 4.667 ms. The rendered result was Zoe in sixth at 03:54; this verifies race completion, not a win or progression unlock.
+
+The first compatibility run with the same 40 ms audio target was rejected: Firefox recorded 21 producer image replacements, 330 ms clock difference and two submission intervals of 26.00/25.52 ms. Actual audio remained continuous and unclipped. The original failure is retained; neither the 25 ms interval gate nor zero-loss checks were relaxed.
+
+The follow-up host selects a 64 ms audio target for GPU presentation, which waits before GS acknowledgment, while retaining 40 ms for the copy presenter, which acknowledges first. Rate-controlled GPU presentation now waits for an actual free slot at supported display cadences of at least 60 Hz even when audio reserve is low. Legacy hosts keep their prior predictive audio gate. Extracted production-code tests cover 60/90/120/144/240 Hz, both yield settings, low reserve, free-slot admission and pause/failure/reload cancellation. All 22 JavaScript regression suites and the native producer/disc fixtures pass.
+
+This compatibility candidate passed all 14 native interaction checkpoints and a normal 301.062-second Firefox run at 59.999940 submissions/s, maximum interval 24.540 ms. All 18,063 presentation intervals had an image, with zero producer replacements, overwritten images, long intervals or audio underruns. There were zero actual clipped or full-scale PCM samples and no application errors/warnings. Audio/emulation clock difference was -16.667 ms. The actual results screen showed Zoe sixth at 03:59. This is desktop evidence; physical phone and physical-controller qualification remain outstanding. Chromium compatibility and the rebuilt primary still require qualification before any deployment. Live version62 remains unchanged.
