@@ -48,6 +48,7 @@ jobs:
           node scripts/test_worker_shutdown.cjs
           node scripts/test_pixel_producer.cjs
           node scripts/test_pixel_presenter.cjs
+          node scripts/test_pixel_presenter_prefetch.cjs
           node scripts/test_readback_progress.cjs
 
   wasm-vu-jit:

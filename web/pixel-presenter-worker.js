@@ -9,13 +9,48 @@ importScripts('./frame-clock.js');
   const send = message => transport.postMessage(message);
   let device, context, pipeline, sampler, texture, bundle, canvas, state, buffers, clock;
   let uploadBuffer, uploadDestination, uploadLayout, uploadSize, uploadSource;
+  // Firefox queue writes can wait inside the display callback. Prepare its
+  // next texture between refreshes, retaining the pinned slot until drawn.
+  const prepareUploads = /Firefox\//.test(scope.navigator?.userAgent || '');
+  let prepared = null, prepareTimer = null, preparedUploads = 0, fallbackUploads = 0;
+  const pending = { get length() { return frames.length + (prepared ? 1 : 0); } };
+  function cancelPreparation() {
+    if (prepareTimer !== null) clearTimeout(prepareTimer);
+    prepareTimer = null;
+  }
+  function schedulePreparation() {
+    if (prepareUploads && !stopped && !paused && primed && !prepared && prepareTimer === null)
+      prepareTimer = setTimeout(prepareNext, 0);
+  }
+  function prepareNext() {
+    prepareTimer = null;
+    if (stopped || paused || prepared) return;
+    try {
+      const frame = acquireFrame();
+      if (frame) { upload(frame); prepared = frame; ++preparedUploads; }
+    } catch (error) { failure(error); }
+  }
+  function acquireFrame() {
+    while (frames.length) {
+      const candidate = frames.shift(), offset = candidate.id * 2;
+      if ((Atomics.load(state, offset + 1) >>> 0) !== candidate.sequence) continue;
+      if (Atomics.compareExchange(state, offset, READY, READING) !== READY) continue;
+      // Revalidate after pinning: a producer could replace the ready slot
+      // between the first version read and the CAS.
+      if ((Atomics.load(state, offset + 1) >>> 0) !== candidate.sequence) {
+        Atomics.store(state, offset, READY); continue;
+      }
+      return candidate;
+    }
+    return null;
+  }
   const attachment = { view: null, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] };
   const passDescriptor = { colorAttachments: [attachment] };
   let format, textureWidth = 0, textureHeight = 0, primed = false, shown = 0;
   const frames = [], uploadViews = new Array(COUNT), commands = [null], bundles = [null];
   function failure(error) {
     if (stopped) return;
-    stopped = failed = true; running = false;
+    stopped = failed = true; running = false; cancelPreparation();
     send({ type: 'failure', error: String(error?.message || error) });
   }
   scope.addEventListener('unhandledrejection', event => { event.preventDefault(); failure(event.reason); });
@@ -76,6 +111,7 @@ importScripts('./frame-clock.js');
             !Number.isInteger(message.width) || !Number.isInteger(message.height) ||
             message.width < 1 || message.height < 1 || message.width > 4096 || message.height > 4096)
           throw new Error('Invalid presenter frame.');
+        if (prepared && message.id === prepared.id) return;
         if (message.buffer !== undefined) {
           if (!(message.buffer instanceof SharedArrayBuffer)) throw new Error('Invalid resized pixel storage.');
           buffers[message.id] = new Uint8Array(message.buffer); uploadViews[message.id] = undefined;
@@ -84,10 +120,11 @@ importScripts('./frame-clock.js');
           throw new Error('Frame exceeds its pixel storage.');
         const old = frames.findIndex(frame => frame.id === message.id);
         if (old >= 0) frames.splice(old, 1);
-        if (frames.length >= COUNT) throw new Error('Presenter queue exceeded its capacity.');
-        frames.push(message);
+        if (pending.length >= COUNT) throw new Error('Presenter queue exceeded its capacity.');
+        frames.push(message); schedulePreparation();
       } else if (message?.type === 'pause') {
         paused = !!message.value; clock?.reset();
+        if (paused) cancelPreparation(); else schedulePreparation();
       } else if (message?.type === 'resize') {
         const { width, height } = message;
         if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384)
@@ -95,7 +132,7 @@ importScripts('./frame-clock.js');
         canvas.width = width; canvas.height = height;
       } else if (message?.type === 'stop') {
         stopped = true; running = false; paused = true;
-        frames.length = 0;
+        cancelPreparation(); prepared = null; frames.length = 0;
         uploadBuffer?.destroy(); texture?.destroy(); device?.destroy(); context?.unconfigure();
         if (transport !== scope) transport.close();
       }
@@ -108,31 +145,23 @@ importScripts('./frame-clock.js');
       else {
         if (frames.length >= 2) primed = true;
         if (primed && clock.due(stamp)) {
-          let frame;
-          while (frames.length) {
-            const candidate = frames.shift(), offset = candidate.id * 2;
-            if ((Atomics.load(state, offset + 1) >>> 0) !== candidate.sequence) continue;
-            if (Atomics.compareExchange(state, offset, READY, READING) !== READY) continue;
-            // Revalidate after pinning: the producer could have replaced a
-            // ready slot between our first version read and the CAS.
-            if ((Atomics.load(state, offset + 1) >>> 0) !== candidate.sequence) {
-              Atomics.store(state, offset, READY); continue;
-            }
-            frame = candidate; break;
-          }
+          const uploaded = prepared !== null;
+          const frame = prepared || acquireFrame(); prepared = null;
           if (frame) {
+            if (!uploaded) { upload(frame); if (prepareUploads) ++fallbackUploads; }
             draw(frame);
             ++shown; clock.presented(stamp);
             Atomics.store(state, frame.id * 2, FREE);
             send({ type: 'release', id: frame.id, sequence: frame.sequence,
               shown, refresh: clock.refreshInterval() });
+            schedulePreparation();
           }
         }
       }
     } catch (error) { failure(error); }
     if (!stopped) requestAnimationFrame(present);
   }
-  function draw(frame) {
+  function upload(frame) {
     if (textureWidth !== frame.width || textureHeight !== frame.height) {
       uploadBuffer?.destroy(); uploadBuffer = undefined;
       texture?.destroy(); textureWidth = frame.width; textureHeight = frame.height;
@@ -143,7 +172,7 @@ importScripts('./frame-clock.js');
       uploadSize = { width: textureWidth, height: textureHeight, depthOrArrayLayers: 1 };
       // Buffer-to-texture copies require aligned rows. Other widths retain
       // the ordinary texture upload, with the same pixels and filtering.
-      if ((textureWidth * 4) % 256 === 0) {
+      if (!prepareUploads && (textureWidth * 4) % 256 === 0) {
         uploadBuffer = device.createBuffer({ size: textureWidth * textureHeight * 4,
           usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
         uploadSource = { buffer: uploadBuffer, bytesPerRow: textureWidth * 4, rowsPerImage: textureHeight };
@@ -161,6 +190,8 @@ importScripts('./frame-clock.js');
     // Queue ordering lets the same upload buffer serve the following frame.
     if (uploadBuffer) device.queue.writeBuffer(uploadBuffer, 0, uploadViews[frame.id], 0, bytes);
     else device.queue.writeTexture(uploadDestination, uploadViews[frame.id], uploadLayout, uploadSize);
+  }
+  function draw(frame) {
     const encoder = device.createCommandEncoder();
     if (uploadBuffer) encoder.copyBufferToTexture(uploadSource, uploadDestination, uploadSize);
     attachment.view = context.getCurrentTexture().createView();
@@ -178,7 +209,8 @@ importScripts('./frame-clock.js');
   scope.ps2PixelPresenter = {
     get canvas() { return canvas; }, get paused() { return paused; },
     get running() { return running && !stopped; }, get failed() { return failed; },
-    get pendingFrames() { return frames; }, get shown() { return shown; },
+    get preparedUploads() { return preparedUploads; }, get fallbackUploads() { return fallbackUploads; },
+    get pendingFrames() { return pending; }, get shown() { return shown; },
     get freeSlotCount() { let count = 0; if (state) for (let id = 0; id < COUNT; ++id) if (Atomics.load(state, id * 2) === FREE) ++count; return count; },
   };
 })(self);

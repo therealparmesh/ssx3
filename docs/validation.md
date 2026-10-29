@@ -1,5 +1,13 @@
 # Validation scope
 
+## Prepare Firefox pixel uploads between display callbacks
+
+The separate pixel presenter now prepares Firefox's next texture in a timer task after the display callback returns. It pins the shared slot through upload and actual presentation, counts the prepared image within the existing three-slot bound, and cancels pending preparation on pause, stop or failure. Chromium and other browsers retain reusable buffer uploads inside the display callback. The change leaves native GS staging, game code, resolution, shaders and audio reserve unchanged.
+
+A private current-native comparison retained Wasm `6d779d6` and used normal cold startup, card import, menu navigation and race/results flow without profiling or artificial delays. Firefox completed 600.902 seconds at 60.000041 successful submissions/second, with a 22.08-ms maximum actual gap, no missing/overwritten images, no missing audio, no producer replacements and no application errors. The worklet consumed all 28,844,032 produced stereo frames. This is a passing candidate experiment; source-integration and hosted qualification remain separate gates.
+
+The integrated production-source presenter passes the existing reusable-buffer ownership/lifecycle regression and a new Firefox preparation regression covering pinned slots, sequence races, upload order, prepared pause/resume, cancellation, failure, resize and device loss. The new regression rejects the prior presenter. All 21 JavaScript suites pass. Real GPU comparisons pass eight Firefox cases, including a distinct prepared image that must remain undisplayed while paused, and six Chromium cases retaining five aligned buffer uploads/copies plus one unaligned texture fallback. Normal performance qualification of the integrated source remains pending; nothing from this change has been deployed.
+
 ## Exact-binary CPU and Firefox upload diagnostics
 
 A reconstructed symbol map covers all 3,286 function identities in the held `6d779d6` native binary. The named intermediate and side transforms match every non-custom section of the actual link stages, and the final diagnostic transform is byte-identical to the native binary. Eight independent exported C functions and four Asyncify helper aliases validate the identity joins; deliberately shifted indices fail the verifier. A separately linked named binary is not substituted for this binary.
