@@ -54,6 +54,17 @@ testing; these fixtures do not measure performance.
   per browser. Failed transfers must throw before changing RAM, consume the GL
   error and permit an exact retry. A control that suppresses error reporting
   must fail the memory-atomicity assertion.
+- **Sampler lifetime:** 32 cases and 2,048 pixels exercise blending, partial
+  pixel masks and passing/failing destination-alpha tests. Two renderer
+  instances, resets and repeated shader selection must retain the destination
+  sampler's unit assignment. Suppressing that assignment must change pixels.
+- **Alpha phases:** 416 comparisons check 26,624 color/depth pairs and the complete
+  4 MB RAM image. All eight comparisons and four failure actions run with
+  passing, failing and equal-reference alpha values, blending and reset/reuse.
+  This includes 32 nested-rectangle sequences with no intermediate RAM export,
+  so full GL-state invalidation cannot hide a missed phase reset.
+  Suppressing the scalar phase uniform must fail. The preceding UBO-based
+  implementation is also an independently tested positive control.
 - **Restore:** 24 cases, 1,572,864 pixels per browser. Replacing RAM must discard
   stale framebuffers and pending draws. Repeated invalidation preserves loaded
   RAM, registers and CLUT contents, and the next surface observes restored data.

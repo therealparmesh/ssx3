@@ -244,7 +244,20 @@
  
  	m_primBuffer = Framework::OpenGl::CBuffer::Create();
  	m_primVertexArray = GeneratePrimVertexArray();
-@@ -540,8 +560,7 @@
+@@ -517,6 +537,12 @@
+ 			glUniform1i(paletteUniform, 1);
+ 		}
+ 
++#ifdef __EMSCRIPTEN__
++		// Sampler assignments persist for this linked program.
++		auto destinationUniform = glGetUniformLocation(*shader, "g_destination");
++		if(destinationUniform != -1) glUniform1i(destinationUniform, 2);
++#endif
++
+ 		auto vertexParamsUniformBlock = glGetUniformBlockIndex(*shader, "VertexParams");
+ 		if(vertexParamsUniformBlock != GL_INVALID_INDEX)
+ 		{
+@@ -540,8 +566,7 @@
  void CGSH_OpenGL::SetRenderingContext(uint64 primReg)
  {
  	auto prim = make_convertible<PRMODE>(primReg);
@@ -254,7 +267,7 @@
  
  	uint64 testReg = m_nReg[GS_REG_TEST_1 + context];
  	uint64 frameReg = m_nReg[GS_REG_FRAME_1 + context];
-@@ -562,6 +581,13 @@
+@@ -562,6 +587,13 @@
  	FillShaderCapsFromTexture(shaderCaps, tex0Reg, tex1Reg, texAReg, clampReg);
  	FillShaderCapsFromTest(shaderCaps, testReg);
  	FillShaderCapsFromAlpha(shaderCaps, prim.nAlpha != 0, alphaReg);
@@ -268,7 +281,7 @@
  
  	if(prim.nFog)
  	{
-@@ -579,7 +605,7 @@
+@@ -579,7 +611,7 @@
  	if(m_renderState.isValid)
  	{
  		if(m_renderState.isTextureStateValid && m_renderState.isFramebufferStateValid &&
@@ -277,7 +290,7 @@
  		   (m_renderState.primReg == primReg) &&
  		   (m_renderState.alphaReg == alphaReg) &&
  		   (m_renderState.testReg == testReg) &&
-@@ -605,7 +631,7 @@
+@@ -605,7 +637,7 @@
  	//--------------------------------------------------------
  	uint64 prevPrimValue = m_renderState.isValid ? m_renderState.primReg : 0;
  	auto prevPrim = make_convertible<PRMODE>(prevPrimValue);
@@ -286,7 +299,7 @@
  	bool primChanged = !m_renderState.isValid || (m_renderState.primReg != primReg);
  	bool blendEnableChanged = primChanged && !m_hasFramebufferFetchExtension && ((!m_renderState.isValid) || (prevPrim.nAlpha != prim.nAlpha));
  	bool alphaChanged = !m_renderState.isValid || (m_renderState.alphaReg != alphaReg);
-@@ -684,6 +710,8 @@
+@@ -684,6 +716,8 @@
  
  	CHECKGLERROR();
  
@@ -295,7 +308,7 @@
  	m_renderState.isValid = true;
  	m_renderState.isTextureStateValid = true;
  	m_renderState.isFramebufferStateValid = true;
-@@ -703,8 +731,12 @@
+@@ -703,8 +737,12 @@
  void CGSH_OpenGL::SetupBlendingFunction(uint64 alphaReg)
  {
  	auto alpha = make_convertible<ALPHA>(alphaReg);
@@ -310,7 +323,7 @@
  	{
  		m_fragmentParams.alphaFix = (static_cast<float>(alpha.nFix) / 255.f);
  		m_validGlState &= ~GLSTATE_FRAGMENT_PARAMS;
-@@ -963,7 +995,10 @@
+@@ -963,7 +1001,10 @@
  	{
  		depthWriteEnabled = false;
  	}
@@ -322,7 +335,7 @@
  	m_validGlState &= ~GLSTATE_DEPTHMASK;
  }
  
-@@ -972,14 +1007,29 @@
+@@ -972,14 +1013,29 @@
  	if(frameReg == 0) return;
  
  	auto frame = make_convertible<FRAME>(frameReg);
@@ -353,7 +366,7 @@
  
  	//Don't write to alpha in PSMCT24
  	if(frame.nPsm == PSMCT24)
-@@ -999,7 +1049,10 @@
+@@ -999,7 +1055,10 @@
  		}
  	}
  
@@ -365,7 +378,7 @@
  	m_renderState.colorMaskG = g;
  	m_renderState.colorMaskB = b;
  	m_renderState.colorMaskA = a;
-@@ -1028,6 +1081,7 @@
+@@ -1028,6 +1087,7 @@
  	{
  		depthbuffer = DepthbufferPtr(new CDepthbuffer(zbuf.GetBasePtr(), frame.GetWidth(), FRAMEBUFFER_HEIGHT, zbuf.nPsm, m_fbScale, m_multisampleEnabled));
  		m_depthbuffers.push_back(depthbuffer);
@@ -373,7 +386,7 @@
  	}
  
  	assert(framebuffer->m_width == depthbuffer->m_width);
-@@ -1207,6 +1261,10 @@
+@@ -1207,6 +1267,10 @@
  		shaderCaps.hasAlphaTest = 0;
  	}
  
@@ -384,7 +397,7 @@
  	shaderCaps.hasDestAlphaTest = test.nDestAlphaEnabled;
  	shaderCaps.destAlphaTestRef = test.nDestAlphaMode;
  }
-@@ -1214,6 +1272,13 @@
+@@ -1214,6 +1278,13 @@
  void CGSH_OpenGL::FillShaderCapsFromAlpha(SHADERCAPS& shaderCaps, bool alphaEnabled, const uint64& alphaReg)
  {
  	if(!alphaEnabled) return;
@@ -398,7 +411,7 @@
  
  	auto alpha = make_convertible<ALPHA>(alphaReg);
  
-@@ -1235,6 +1300,9 @@
+@@ -1235,6 +1306,9 @@
  void CGSH_OpenGL::SetupTexture(uint64 primReg, uint64 tex0Reg, uint64 tex1Reg, uint64 texAReg, uint64 clampReg)
  {
  	m_renderState.texture0Handle = 0;
@@ -408,7 +421,7 @@
  	m_renderState.texture1Handle = 0;
  	m_renderState.texture0MinFilter = GL_NEAREST;
  	m_renderState.texture0MagFilter = GL_NEAREST;
-@@ -1260,6 +1328,9 @@
+@@ -1260,6 +1334,9 @@
  	auto texInfo = PrepareTexture(tex0);
  	m_renderState.texture0Handle = texInfo.textureHandle;
  	m_renderState.texture0AlphaAsIndex = texInfo.alphaAsIndex;
@@ -418,7 +431,7 @@
  
  	//Setup sampling modes
  	switch(tex1.nMagFilter)
-@@ -1387,7 +1458,7 @@
+@@ -1387,7 +1464,7 @@
  {
  	auto depthbufferIterator = std::find_if(std::begin(m_depthbuffers), std::end(m_depthbuffers),
  	                                        [&](const DepthbufferPtr& depthbuffer) {
@@ -427,7 +440,7 @@
  	                                        });
  
  	return (depthbufferIterator != std::end(m_depthbuffers)) ? *(depthbufferIterator) : DepthbufferPtr();
-@@ -1646,6 +1717,7 @@
+@@ -1646,6 +1723,7 @@
  	float nT[2] = {0, 0};
  
  	float nF = 0;
@@ -435,7 +448,7 @@
  
  	if(m_PrimitiveMode.nFog)
  	{
-@@ -1683,6 +1755,9 @@
+@@ -1683,6 +1761,9 @@
  
  			nT[0] = st[0].nT / nQ1;
  			nT[1] = st[1].nT / nQ2;
@@ -445,7 +458,7 @@
  		}
  	}
  
-@@ -1693,13 +1768,13 @@
+@@ -1693,13 +1774,13 @@
  	// clang-format off
  	PRIM_VERTEX vertices[] =
  	{
@@ -466,7 +479,7 @@
  	};
  	// clang-format on
  
-@@ -1708,9 +1783,11 @@
+@@ -1708,9 +1789,11 @@
  
  void CGSH_OpenGL::FlushVertexBuffer()
  {
@@ -478,7 +491,7 @@
  
  	auto shader = GetShaderFromCaps(m_renderState.shaderCaps);
  	if(*shader != m_renderState.shaderHandle)
-@@ -1719,11 +1796,13 @@
+@@ -1719,11 +1802,13 @@
  		m_validGlState &= ~GLSTATE_PROGRAM;
  	}
  	DoRenderPass();
@@ -492,7 +505,7 @@
  	if((m_validGlState & GLSTATE_VERTEX_PARAMS) == 0)
  	{
  		glBindBuffer(GL_UNIFORM_BUFFER, m_vertexParamsBuffer);
-@@ -1762,7 +1841,11 @@
+@@ -1762,7 +1847,11 @@
  
  	if((m_validGlState & GLSTATE_BLEND) == 0)
  	{
@@ -505,7 +518,7 @@
  		m_validGlState |= GLSTATE_BLEND;
  	}
  
-@@ -1790,18 +1873,26 @@
+@@ -1790,18 +1879,26 @@
  	{
  		glActiveTexture(GL_TEXTURE0);
  		glBindTexture(GL_TEXTURE_2D, m_renderState.texture0Handle);
@@ -544,7 +557,7 @@
  
  		m_validGlState |= GLSTATE_TEXTURE;
  	}
-@@ -1841,9 +1932,57 @@
+@@ -1841,9 +1938,55 @@
  		break;
  	}
  
@@ -575,7 +588,6 @@
 +   x=std::max(x,int(std::floor(minX*m_fbScale))-2);y=std::max(y,int(std::floor(minY*m_fbScale))-2);cw=std::max(0,ex-x);ch=std::max(0,ey-y);
 +   if(cw&&ch){glCopyTexSubImage2D(GL_TEXTURE_2D,0,x,y,x,y,cw,ch);m_profileSnapshotPixels+=uint64(cw)*ch;m_profileSnapshots++;}
 +  }
-+  glUniform1i(glGetUniformLocation(m_renderState.shaderHandle,"g_destination"),2);
 +  glActiveTexture(GL_TEXTURE0);
 +  if(m_renderState.textureFeedback){
 +   glBindTexture(GL_TEXTURE_2D,m_blendDestination);
@@ -591,21 +603,20 @@
 +#ifdef __EMSCRIPTEN__
 + if(m_renderState.shaderCaps.hasAlphaTest && m_renderState.shaderCaps.alphaTestMethod!=ALPHA_TEST_ALWAYS && m_renderState.shaderCaps.alphaFailMethod!=ALPHA_TEST_FAIL_KEEP){
 +  auto failure=m_renderState.shaderCaps.alphaFailMethod;
-+  m_fragmentParams.alphaPhase=1;
-+  glBindBuffer(GL_UNIFORM_BUFFER,m_fragmentParamsBuffer);
-+  glBufferData(GL_UNIFORM_BUFFER,sizeof(FRAGMENTPARAMS),&m_fragmentParams,GL_STREAM_DRAW);
++  // Phase changes do not alter the shared shading parameters.
++  glUniform1ui(glGetUniformLocation(m_renderState.shaderHandle,"g_alphaPhase"),1);
 +  glDepthMask(failure==ALPHA_TEST_FAIL_ZBONLY ? m_renderState.depthMask : GL_FALSE);
 +  glColorMask(failure==ALPHA_TEST_FAIL_ZBONLY?GL_FALSE:m_renderState.colorMaskR,failure==ALPHA_TEST_FAIL_ZBONLY?GL_FALSE:m_renderState.colorMaskG,failure==ALPHA_TEST_FAIL_ZBONLY?GL_FALSE:m_renderState.colorMaskB,failure==ALPHA_TEST_FAIL_FBONLY?m_renderState.colorMaskA:GL_FALSE);
 +  glDrawArrays(primitiveMode,0,m_vertexBuffer.size());m_drawCallCount++;
-+  m_fragmentParams.alphaPhase=0;
-+  m_validGlState &= ~(GLSTATE_FRAGMENT_PARAMS|GLSTATE_COLORMASK|GLSTATE_DEPTHMASK);
++  glUniform1ui(glGetUniformLocation(m_renderState.shaderHandle,"g_alphaPhase"),0);
++  m_validGlState &= ~(GLSTATE_COLORMASK|GLSTATE_DEPTHMASK);
 + }
 +#endif
 + m_drawCallCount++;
  }
  
  void CGSH_OpenGL::DrawToDepth(unsigned int primitiveType, uint64 primReg)
-@@ -1880,6 +2019,7 @@
+@@ -1880,6 +2023,7 @@
  	glDepthMask(GL_TRUE);
  	glClearDepthf(0);
  	glClear(GL_DEPTH_BUFFER_BIT);
@@ -613,7 +624,7 @@
  
  	m_validGlState &= ~GLSTATE_DEPTHMASK;
  }
-@@ -1887,7 +2027,7 @@
+@@ -1887,7 +2031,7 @@
  void CGSH_OpenGL::CopyToFb(
      int32 srcX0, int32 srcY0, int32 srcX1, int32 srcY1,
      int32 srcWidth, int32 srcHeight,
@@ -622,7 +633,7 @@
  {
  	m_validGlState &= ~(GLSTATE_BLEND | GLSTATE_COLORMASK | GLSTATE_SCISSOR | GLSTATE_PROGRAM);
  	m_validGlState &= ~(GLSTATE_VIEWPORT | GLSTATE_DEPTHTEST | GLSTATE_DEPTHMASK);
-@@ -1912,6 +2052,7 @@
+@@ -1912,6 +2056,7 @@
  
  	glUniform2f(m_copyToFbSrcPositionUniform, positionX, positionY);
  	glUniform2f(m_copyToFbSrcSizeUniform, sizeX, sizeY);
@@ -630,7 +641,7 @@
  	glViewport(dstX0, dstY0, dstX1 - dstX0, dstY1 - dstY0);
  
  	glBindBuffer(GL_ARRAY_BUFFER, m_copyToFbVertexBuffer);
-@@ -1932,7 +2073,10 @@
+@@ -1932,7 +2077,10 @@
  
  void CGSH_OpenGL::WriteRegisterImpl(uint8 nRegister, uint64 nData)
  {
@@ -642,7 +653,7 @@
  
  	switch(nRegister)
  	{
-@@ -2023,9 +2167,17 @@
+@@ -2023,9 +2171,17 @@
  			m_PrimitiveMode <<= m_nReg[GS_REG_PRMODE];
  		}
  
@@ -662,7 +673,7 @@
  			bool needCtx = true;
  			if(m_renderState.isValid && m_renderState.isTextureStateValid && m_renderState.isFramebufferStateValid)
  			{
-@@ -2105,6 +2257,7 @@
+@@ -2105,6 +2261,7 @@
  
  void CGSH_OpenGL::ProcessHostToLocalTransfer()
  {
@@ -670,7 +681,7 @@
  	if(m_trxCtx.nDirty)
  	{
  		FlushVertexBuffer();
-@@ -2130,54 +2283,48 @@
+@@ -2130,54 +2287,48 @@
  
  void CGSH_OpenGL::ProcessLocalToHostTransfer()
  {
@@ -763,7 +774,7 @@
  	auto bltBuf = make_convertible<BITBLTBUF>(m_nReg[GS_REG_BITBLTBUF]);
  	auto srcFramebufferIterator = std::find_if(m_framebuffers.begin(), m_framebuffers.end(),
  	                                           [&](const FramebufferPtr& framebuffer) {
-@@ -2197,6 +2344,7 @@
+@@ -2197,6 +2348,7 @@
  	{
  		FlushVertexBuffer();
  		m_renderState.isValid = false;
@@ -771,7 +782,7 @@
  
  		const auto& srcFramebuffer = (*srcFramebufferIterator);
  		const auto& dstFramebuffer = (*dstFramebufferIterator);
-@@ -2204,17 +2352,38 @@
+@@ -2204,17 +2356,38 @@
  		glBindFramebuffer(GL_FRAMEBUFFER, dstFramebuffer->m_framebuffer);
  		glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFramebuffer->m_framebuffer);
  
@@ -815,7 +826,7 @@
  		FlushVertexBuffer();
  		m_renderState.isValid = false;
  
-@@ -2231,6 +2400,7 @@
+@@ -2231,6 +2404,7 @@
  
  		auto [transferAddress, transferSize] = GsTransfer::GetDstRange(bltBuf, trxReg, trxPos);
  		m_textureCache.InvalidateRange(transferAddress, transferSize);
@@ -823,7 +834,7 @@
  
  		//Write back to RAM
  		{
-@@ -2253,6 +2423,7 @@
+@@ -2253,6 +2427,7 @@
  
  void CGSH_OpenGL::ProcessClutTransfer(uint32 csa, uint32)
  {
@@ -831,7 +842,7 @@
  	FlushVertexBuffer();
  	m_renderState.isTextureStateValid = false;
  	PalCache_Invalidate(csa);
-@@ -2512,7 +2683,8 @@
+@@ -2512,7 +2687,8 @@
  	CopyToFb(
  	    0, 0, framebuffer->m_width, framebuffer->m_height,
  	    framebuffer->m_width, framebuffer->m_height,
@@ -841,7 +852,7 @@
  	framebuffer->m_resolveNeeded = true;
  
  	CHECKGLERROR();
-@@ -2531,8 +2703,9 @@
+@@ -2531,8 +2707,9 @@
  
  			glActiveTexture(GL_TEXTURE0);
  			glBindTexture(GL_TEXTURE_2D, copyToFbTexture);
@@ -853,7 +864,7 @@
  			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
  			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
  			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-@@ -2591,7 +2764,8 @@
+@@ -2591,7 +2768,8 @@
  		CopyToFb(
  		    texX, texY, (texX + texWidth), (texY + texHeight),
  		    framebuffer->m_width, framebuffer->m_height,
@@ -863,7 +874,7 @@
  		framebuffer->m_resolveNeeded = true;
  
  		CHECKGLERROR();
-@@ -2643,3 +2817,162 @@
+@@ -2643,3 +2821,162 @@
  	}
  	CHECKGLERROR();
  }
@@ -1046,24 +1057,29 @@
  
  	shaderBuilder << "in highp float v_depth;" << std::endl;
  	shaderBuilder << "in vec4 v_color;" << std::endl;
-@@ -175,7 +175,7 @@
+@@ -174,8 +174,11 @@
+ 	shaderBuilder << "out vec4 blendColor;" << std::endl;
  #endif
  
++#ifdef __EMSCRIPTEN__
++ shaderBuilder << "uniform uint g_alphaPhase;" << std::endl;
++#endif
  	shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
 -	shaderBuilder << "uniform sampler2D g_palette;" << std::endl;
 +	shaderBuilder << "uniform sampler2D g_palette; uniform highp sampler2D g_destination;" << std::endl;
  
  	shaderBuilder << "layout(std140) uniform FragmentParams" << std::endl;
  	shaderBuilder << "{" << std::endl;
-@@ -188,6 +188,7 @@
+@@ -188,6 +191,8 @@
  	shaderBuilder << "	uint g_alphaRef;" << std::endl;
  	shaderBuilder << "	float g_alphaFix;" << std::endl;
  	shaderBuilder << "	vec3 g_fogColor;" << std::endl;
-+	shaderBuilder << "float g_textureAlphaAsIndex; uint g_frameMask;uint g_alphaPhase;" << std::endl;
++	// Retain the std140 offsets while phase lives in a scalar uniform.
++	shaderBuilder << "float g_textureAlphaAsIndex; uint g_frameMask;uint g_alphaPhasePadding;" << std::endl;
  	shaderBuilder << "};" << std::endl;
  
  	if(caps.texClampS == TEXTURE_CLAMP_MODE_REGION_REPEAT || caps.texClampT == TEXTURE_CLAMP_MODE_REGION_REPEAT)
-@@ -196,10 +197,15 @@
+@@ -196,10 +201,15 @@
  		shaderBuilder << s_orFunction << std::endl;
  	}
  
@@ -1081,7 +1097,7 @@
  	shaderBuilder << "	uint result = min((aInt * bInt) >> 7, 255u);" << std::endl;
  	shaderBuilder << "	return float(result) / 255.0;" << std::endl;
  	shaderBuilder << "}" << std::endl;
-@@ -225,6 +231,12 @@
+@@ -225,6 +235,12 @@
  	shaderBuilder << "void main()" << std::endl;
  	shaderBuilder << "{" << std::endl;
  
@@ -1094,7 +1110,7 @@
  	if(useFramebufferFetch && caps.hasDestAlphaTest)
  	{
  		switch(caps.destAlphaTestRef)
-@@ -241,7 +253,7 @@
+@@ -241,7 +257,7 @@
  	shaderBuilder << "	highp vec3 texCoord = v_texCoord;" << std::endl;
  	shaderBuilder << "	texCoord.st /= texCoord.p;" << std::endl;
  
@@ -1103,7 +1119,7 @@
  	{
  		shaderBuilder << "	texCoord.st *= g_textureSize.st;" << std::endl;
  		shaderBuilder << GenerateTexCoordClampingSection(static_cast<TEXTURE_CLAMP_MODE>(caps.texClampS), "s");
-@@ -254,7 +266,7 @@
+@@ -254,7 +270,7 @@
  	{
  		if(!caps.texBilinearFilter)
  		{
@@ -1112,7 +1128,7 @@
  			if(caps.texSourceMode == TEXTURE_SOURCE_MODE_IDX4)
  			{
  				shaderBuilder << "	float paletteTexelBias = 0.5 / 16.0;" << std::endl;
-@@ -268,10 +280,11 @@
+@@ -268,10 +284,11 @@
  		}
  		else
  		{
@@ -1128,7 +1144,7 @@
  
  			if(caps.texSourceMode == TEXTURE_SOURCE_MODE_IDX4)
  			{
-@@ -290,10 +303,10 @@
+@@ -290,10 +307,10 @@
  				shaderBuilder << "	vec4 br = expandAlpha(texture(g_palette, vec2(brIdx / 256.0 + paletteTexelBias, 0)));" << std::endl;
  			}
  
@@ -1143,7 +1159,7 @@
  		}
  	}
  	else if(caps.texSourceMode == TEXTURE_SOURCE_MODE_STD)
-@@ -311,7 +324,7 @@
+@@ -311,7 +328,7 @@
  		switch(caps.texFunction)
  		{
  		case TEX0_FUNCTION_MODULATE:
@@ -1152,7 +1168,7 @@
  			if(!caps.texHasAlpha)
  			{
  				shaderBuilder << "	textureColor.a = v_color.a;" << std::endl;
-@@ -393,11 +406,29 @@
+@@ -393,11 +410,29 @@
  	}
  	else
  	{
@@ -1184,7 +1200,7 @@
  	if(useFramebufferFetch)
  	{
  		if(caps.hasAlphaBlend)
-@@ -510,6 +541,11 @@
+@@ -510,6 +545,11 @@
  
  std::string CGSH_OpenGL::GenerateAlphaTestSection(ALPHA_TEST_METHOD testMethod, ALPHA_TEST_FAIL_METHOD failMethod)
  {
@@ -1196,7 +1212,7 @@
  	std::stringstream shaderBuilder;
  
  	const char* test = "	if(false)";
-@@ -676,7 +712,7 @@
+@@ -676,7 +716,7 @@
  	{
  		std::stringstream shaderBuilder;
  		shaderBuilder << GLSL_VERSION << std::endl;
@@ -1205,7 +1221,7 @@
  		shaderBuilder << "in vec2 v_texCoord;" << std::endl;
  		shaderBuilder << "out vec4 fragColor;" << std::endl;
  		shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
-@@ -733,13 +769,18 @@
+@@ -733,13 +773,18 @@
  	{
  		std::stringstream shaderBuilder;
  		shaderBuilder << GLSL_VERSION << std::endl;

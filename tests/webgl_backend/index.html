@@ -8,7 +8,7 @@
 <script src="ordered_raster.js"></script>
 <script>
 const fixture = new URLSearchParams(location.search).get('fixture') || 'restore';
-if (!['population', 'readback', 'restore', 'export', 'alias'].includes(fixture)) throw Error('Unknown fixture');
+if (!['population', 'readback', 'restore', 'export', 'alias', 'sampler', 'phase'].includes(fixture)) throw Error('Unknown fixture');
 var Module = {
   canvas: document.getElementById('canvas'),
   orderedRasterEnabled: new URLSearchParams(location.search).has('ordered'),

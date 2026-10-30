@@ -20,7 +20,7 @@ const puppeteer = require('puppeteer-core');
   });
   const evidence = {browser: kind, version: await browser.version(), origin, explicitGpuOverrides: false, fixtures: []};
   try {
-    for (const [fixture, cases, pixels] of [['population', null, 393216], ['readback', 16, 266488], ['restore', 24, 1572864], ['export', 21, null], ['export-hybrid', 21, null], ['alias', 6, 458752], ['alias-hybrid', 6, 458752]]) {
+    for (const [fixture, cases, pixels] of [['population', null, 393216], ['readback', 16, 266488], ['restore', 24, 1572864], ['export', 21, null], ['export-hybrid', 21, null], ['alias', 6, 458752], ['alias-hybrid', 6, 458752], ['sampler', 32, 2048], ['phase', 416, 26624]]) {
       const page = await browser.newPage();
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
@@ -52,6 +52,7 @@ const puppeteer = require('puppeteer-core');
         assert.equal(result.result.aliasRejected, true);
         assert.equal(result.result.z32Rejected, true);
       }
+      if (route === 'phase') assert.equal(result.result.deferredSequences, 32);
       if (route === 'readback') assert.equal(result.result.faults, 32);
       if (fixture.endsWith('-hybrid')) assert(result.result.orderedBatches > 0, 'Hybrid export fell back to the native path');
       assert.deepEqual(errors, []);
@@ -87,7 +88,24 @@ const puppeteer = require('puppeteer-core');
     assert.match(result.error || '', /Failed readback was not atomic: rejected=0 intact=0/);
     assert.deepEqual(errors, []);
     await page.close();
-    console.log(`PASS ${kind}: population, readback with 32 GL faults, restore, native/hybrid export, bounded depth aliases and three negative controls; evidence ${artifacts}`);
+    for (const [fixture, query, message] of [
+      ['sampler', 'skipDestination', /Destination sampler mismatch/],
+      ['phase', 'skipAlphaPhase', /Alpha phase mismatch/],
+    ]) {
+      const page = await browser.newPage(), errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('console', message => {if (message.type() === 'error') errors.push(message.text());});
+      const url = new URL(origin);
+      url.searchParams.set('fixture', fixture); url.searchParams.set(query, '1');
+      await page.goto(url.href, {waitUntil: 'load'});
+      await page.waitForFunction(() => window.fixtureResult, {timeout: 60000});
+      const result = await page.evaluate(() => window.fixtureResult);
+      evidence.fixtures.push({fixture: `${fixture}-missing-uniform`, expectedFailure: true, result, errors});
+      assert.match(result.error || '', message);
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+    console.log(`PASS ${kind}: population, readback with 32 GL faults, restore, native/hybrid export, bounded depth aliases, uniform reuse/alpha phases and five negative controls; evidence ${artifacts}`);
   } finally {
     fs.writeFileSync(path.join(artifacts, `${kind}-backend.json`), JSON.stringify(evidence, null, 2) + '\n');
     await browser.close();

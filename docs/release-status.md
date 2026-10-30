@@ -1,7 +1,7 @@
 # Release status
 
 **Production sign-off is pending.** The current ordinary-browser WebGL candidate
-has measured roughly 14–16 fresh images/s in short Firefox briefing/race-entry
+has measured below 20 fresh images/s in short Firefox briefing/race-entry
 windows, with audio starvation. The earlier near-60 results below qualify their
 specific hosted configurations; they do not establish that the current candidate
 works at that speed in default browser settings or on phones.
@@ -11,6 +11,23 @@ As of 2026-10-30, saved version 68 is running on the owner-private hosted site. 
 The current shell is from source `f85e4af96277d92b39f272412f5d633024ac6792`, with hosting source `43e95691bdd160427bd4c195b0b24479e308c075`. Native assets are unchanged: desktop runtime source `43fb1f0b293353a4880d26c0302deaec1ebaf69e`, immutable release `289893fc3b9a64e8759a0a6bd222b1e9680ab048a95e555ed582098248f0a275`, native SHA-256 `b8cf5dfe41f9cab9fbd5ca85907515737224f8659e99300887a65d880d2935f4`. Version 67 is retained for rollback. Primary/compatibility players receive the same shell change while retaining their assets and earlier desktop qualification; there is no new standalone performance window. Game assets and private access credentials are excluded from this repository.
 
 ## Unreleased live WebGL integration
+
+Destination samplers are now assigned once per linked shader program. Alpha-test
+failure passes update a scalar uniform while retaining the shading block's
+std140 offsets, instead of uploading the full block for every phase change.
+Independent sampler-lifetime and alpha-phase fixtures pass in both desktop
+browsers, including partial masks, destination-alpha tests, all eight alpha
+comparisons, all four failure actions and missing-uniform controls. The phase
+fixture checks 26,624 color/depth pairs, including 32 deferred sequences that
+retain intermediate results without exporting RAM between passes. Uniform
+buffer uploads fall from 1,297 to 898. These counts describe the fixture's work.
+
+Two matched Firefox briefing windows delivered 14.80 and 15.07 fresh images/s
+with the preceding implementation, versus 15.75 and 15.92/s with these changes.
+Weighted throughput rises from 14.94 to 15.84/s, approximately 6%. Candidate
+maximum intervals are 100.36 and 100.56 ms, and audio still reaches zero. This
+bounded comparison fails the release performance requirement; it does not
+qualify a complete race, physical output or phone compatibility.
 
 Framebuffer-to-host transfers now check GL errors before copying temporary readback
 pixels into GS RAM. The preceding implementation silently changed RAM after an
