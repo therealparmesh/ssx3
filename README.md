@@ -51,7 +51,7 @@ Opening logos, the timed legal screen and startup movies are skipped by default.
 
 GPU timestamp queries and their asynchronous readbacks are disabled during normal browser play. Add `?debug` to the player URL to enable detailed statistics and GPU timings when the adapter supports them.
 
-Saves use the browser's storage for the current origin. Export the `.ps2` card before changing browser, device or host. Import restores that card on the destination. Concurrent tabs cannot independently overwrite the same origin's card.
+Save career progress in the game first: **Mcomm → Options → Save game**, or the lodge's **Save Game** command. Saves use the browser's storage for the current origin. Then use the player's **Options → Export card** before changing browser, device or host. Import restores that `.ps2` card on the destination; load the career through the game's normal menus. Concurrent tabs cannot independently overwrite the same origin's card.
 
 ## Status and testing
 
