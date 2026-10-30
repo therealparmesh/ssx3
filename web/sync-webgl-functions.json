@@ -1,0 +1,7 @@
+[
+  "gen::*",
+  "ps2::vu::run_fast*",
+  "ps2::vu::(anonymous.namespace)::lower*",
+  "CGSH_OpenGL::*",
+  "CGSHandler::*"
+]

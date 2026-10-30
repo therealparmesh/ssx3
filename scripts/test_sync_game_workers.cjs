@@ -34,4 +34,11 @@ for (const worker of [false, true]) {
   library.$ps2SyncWorkerExports();
   assert.equal(current(exports).memory, memory);
 }
-console.log('Synchronous worker exports: main-thread isolation, identity, memory, exceptions and async guard passed');
+
+// The WebGL exclusion set must retain every synchronous game-worker exclusion,
+// while narrowing the added exclusions to the two synchronous GS handlers.
+const baseFunctions = JSON.parse(fs.readFileSync(__dirname + '/../web/sync-game-functions.json', 'utf8'));
+const webglFunctions = JSON.parse(fs.readFileSync(__dirname + '/../web/sync-webgl-functions.json', 'utf8'));
+assert.deepEqual(webglFunctions.filter(name => baseFunctions.includes(name)), baseFunctions);
+assert.deepEqual(webglFunctions.filter(name => !baseFunctions.includes(name)), ['CGSH_OpenGL::*', 'CGSHandler::*']);
+console.log('Synchronous worker exports and renderer exclusions: isolation, identity, memory, exceptions and async guard passed');

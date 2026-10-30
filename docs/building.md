@@ -91,6 +91,8 @@ The driver withholds `navigator.gpu`, uses no GPU feature flags or Firefox prefe
 
 To build the game, use the compatibility configuration above with `-DPS2_GPU_BACKEND=webgl -DPS2_WEBGL_UPSTREAM="$PWD/build/webgl-upstream" -DPS2_WEB_WORKER=OFF`. Keep the locally generated game translation and game files private. Build-time selection is intentional; this is not an automatic fallback in the shipped WebGPU player.
 
+Asyncify uses `web/sync-webgl-functions.json` for this backend, including the existing synchronous EE/VU worker exclusions and the synchronous GS handler methods. The runtime probe uses the same list. The host still suspends between completed submissions; excluded renderer methods must not call browser-yield or asynchronous readback callbacks. WebGPU continues to use `web/sync-game-functions.json`.
+
 This remains an experimental integration. Full-game transitions, rendering accuracy, frame pacing, context loss/recovery, old snapshot interchange, audio and physical devices still require qualification. Native RAM export rejects unsupported overlapping physical layouts rather than silently overwriting them. Passing the asset-free probe does not establish a playable or performant full game.
 
 ## GPU readback regression without game assets
