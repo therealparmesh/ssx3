@@ -44,6 +44,8 @@ Z/X remain Cross/Circle aliases. WASD and arrows operate independently; opposing
 
 Hold Space/K (Cross) to crouch and charge a jump; release it to jump. J (Square) boosts when adrenaline is available. Q/E/1/3 operate the shoulder grabs while airborne.
 
+The steering and air-control labels assume the game's **Default** controller setting. Check it from **Select Character → J (Options) → Controller Settings**. The game's **Pro** setting changes the steering and spin actions; keyboard bindings still represent the same controller inputs.
+
 ## Startup, graphics and saves
 
 Opening logos, the timed legal screen and startup movies are skipped by default. The normal title screen, memory-card prompts and profile choices remain interactive. Select **Options → Startup → Show full intro** to restore the sequence.
