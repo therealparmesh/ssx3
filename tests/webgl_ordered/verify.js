@@ -533,6 +533,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
           for (let i = 0; i < vu.length; i += 24)
             data.set(vu.subarray(vu.length - 24 - i, vu.length - i), i);
         }
+        const packetBefore = gpuConfig.slice();
         bridge.render({
           targetFramebuffer: bridgeFramebuffer,
           colorTexture: bridgeColor,
@@ -545,6 +546,8 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
           palette: paletteTexture,
           integerTexture: integerSource,
         });
+        if (gpuConfig.some((word, i) => word !== packetBefore[i]))
+          throw Error("Bridge mutated the host GS packet");
         // Inspect the actual resolved target/depth, not only temporary outputs.
         // This additional GPU snapshot and readback belongs to verification.
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, bridgeFramebuffer);
@@ -1201,6 +1204,16 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
       const b = [40, 40, 200, pack(128, 64, 32, 128), 0.75, 1.25, q, 192];
       run("sprite-final-q-" + q, c, [a, b, b]);
     }
+    for (let selector = 0; selector < 3; selector++)
+      for (const pabe of [0, 1]) {
+        const c = baseConfig();
+        c[2] = selector | (selector << 2) | (2 << 4);
+        c[3] = 255;
+        c[4] = 0x00f00f00;
+        c[5] = pabe;
+        if (selector === 2) c[26] = 2;
+        run("identity-blend-" + selector + "-" + pabe, c, geometry(64));
+      }
     if (bridge) {
       for (const size of [8, 16, 24, 32, 48]) bridge.targets(size, size);
       const c = baseConfig();

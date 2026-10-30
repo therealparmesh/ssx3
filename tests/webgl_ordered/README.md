@@ -46,8 +46,8 @@ used by this harness. WebGL2 is required.
 
 ## What the checks prove
 
-Each browser runs **857 controlled cases**, comparing all 4,096 color pixels and
-all 4,096 integer depth values. Of these, 856 use the software renderer and one
+Each browser runs **863 controlled cases**, comparing all 4,096 color pixels and
+all 4,096 integer depth values. Of these, 862 use the software renderer and one
 uses an independent expected image for a constant-color/depth horizontal line. The matrix covers:
 
 - Line coverage: endpoint exclusion, reversal, clipping, fractional/zero-length
@@ -128,12 +128,12 @@ NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.c
 NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.cjs firefox bridge
 ```
 
-This mode exercises **825 cases per browser**, comparing the actual resolved
+This mode exercises **831 cases per browser**, comparing the actual resolved
 color and depth with the CPU renderer and the independent constant-line image.
 It also checks both negative controls.
 The bridge accepts the supported 32/24/16-bit color views and a 24-bit-or-smaller
 depth domain; D32F cannot reconstruct all 32-bit integer depth values. The raw integer kernel
-matrix retains its 857-case coverage. Unsupported bridge cases are explicitly
+matrix retains its 863-case coverage. Unsupported bridge cases are explicitly
 listed as skipped, rather than counted as passes. No tests are removed from the
 raw kernel matrix.
 
@@ -171,3 +171,9 @@ verification step from hiding incorrect low color bits. The bridge skips its
 depth copy/sample when ZTE is disabled, or when ZTST is ALWAYS and ZMSK prevents
 writes, and disables depth writes during resolve for those batches. Its depth
 blit/bypass counters exclude verification-only copies.
+
+Dedicated identity-blend cases cover ALPHA selecting the same A and B with D
+selecting the source: `(A-A)*C+Cs` equals Cs. The cases cover all valid equal
+selectors, both PABE states, partial masks and 16-bit color. Each bridge case
+also verifies that the host GS packet was not mutated. These checks support
+future optimizations; the current bridge retains the general blend calculation.
