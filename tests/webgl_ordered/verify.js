@@ -1087,6 +1087,94 @@
       const b = [59, 7, 200, color];
       run("line-constant-independent", c, [a, b, b], expected);
     }
+    const rectangles = [
+      [3, 5, 59, 22],
+      [8.5, 8.5, 40.5, 24.5],
+      [-0.5, 8.5, 17.5, 11.5],
+      [-8, -3, 63, 30],
+      [8, 8, 8, 8],
+      [8.25, 8.25, 8.75, 8.75],
+      [62.5, 2, 64.5, 62],
+      [4.5, 63.5, 60.5, 64.5],
+      [9, 4, 9, 57],
+      [3, 7, 58, 7],
+      [8, 8, 40, 24],
+      [40, 8, 8, 40],
+    ];
+    for (let n = 0; n < rectangles.length; n++)
+      for (const reverse of [false, true]) {
+        const c = baseConfig();
+        c[0] = 6 | 8;
+        const [x0, y0, x1, y1] = rectangles[n];
+        const a = [x0, y0, 180, pack(12, 34, 56, 78)];
+        const b = [x1, y1, 200, pack(128, 64, 32, 128)];
+        const ends = reverse ? [b, a] : [a, b];
+        run("sprite-coverage-" + n + "-" + reverse, c, [...ends, ends[1]]);
+      }
+    for (let mode = 0; mode < 64; mode++) {
+      const c = baseConfig();
+      const fst = (mode & 1) !== 0;
+      c[0] =
+        6 |
+        16 |
+        (fst ? 256 : 0) |
+        (mode & 2 ? 64 : 0) |
+        (mode & 4 ? 32 : 0) |
+        (mode & 8 ? 8 : 0);
+      c[15] = mode & 16 ? 1 : 0;
+      c[25] = mode & 32 ? 3 : 1;
+      c[14] = (mode >> 2) & 7;
+      const a = [
+        8,
+        8,
+        128,
+        pack(20, 40, 60, 80),
+        fst ? 8 : 0.03125,
+        fst ? 8 : 0.03125,
+        0.5,
+        64,
+      ];
+      const b = [
+        40,
+        40,
+        200,
+        pack(128, 64, 32, 128),
+        fst ? 504 : 1.96875,
+        fst ? 504 : 1.96875,
+        2,
+        192,
+      ];
+      const d = [
+        16,
+        16,
+        150,
+        pack(10, 20, 30, 40),
+        fst ? 504 : 1.96875,
+        fst ? 8 : 0.03125,
+        4,
+        128,
+      ];
+      const e = [
+        48,
+        32,
+        175,
+        pack(64, 128, 32, 96),
+        fst ? 8 : 0.03125,
+        fst ? 504 : 1.96875,
+        2,
+        224,
+      ];
+      run("sprite-attributes-" + mode, c, [a, b, b, d, e, e]);
+    }
+    for (const q of [0, -2, 0.5, 4]) {
+      const c = baseConfig();
+      c[0] = 6 | 16;
+      c[25] = 1;
+      c[14] = 5;
+      const a = [8, 8, 128, pack(10, 20, 30, 40), -0.25, 0.25, 7, 64];
+      const b = [40, 40, 200, pack(128, 64, 32, 128), 0.75, 1.25, q, 192];
+      run("sprite-final-q-" + q, c, [a, b, b]);
+    }
     if (bridge) {
       for (const size of [8, 16, 24, 32, 48]) bridge.targets(size, size);
       const c = baseConfig();
@@ -1113,7 +1201,7 @@
       milliseconds: performance.now() - started,
       errors: [],
       scope:
-        "Ordered WebGL2 triangles/lines versus CPU GS reference plus an independent constant-line oracle:32/24/16-bit color/depth, PSMT4/8/8H and32/24/16-bit textures, alpha/blend/masks/fog/clamp/filtering.64x64 controlled cases only; no full-game or performance qualification.",
+        "Ordered WebGL2 triangles/lines/sprites versus CPU GS reference plus an independent constant-line oracle:32/24/16-bit color/depth, PSMT4/8/8H and32/24/16-bit textures, alpha/blend/masks/fog/clamp/filtering.64x64 controlled cases only; no full-game or performance qualification.",
     };
     if (bridge) {
       bridge.destroy();

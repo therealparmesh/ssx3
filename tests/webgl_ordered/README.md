@@ -46,12 +46,15 @@ used by this harness. WebGL2 is required.
 
 ## What the checks prove
 
-Each browser runs **765 controlled cases**, comparing all 4,096 color pixels and
-all 4,096 integer depth values. Of these, 764 use the software renderer and one
+Each browser runs **857 controlled cases**, comparing all 4,096 color pixels and
+all 4,096 integer depth values. Of these, 856 use the software renderer and one
 uses an independent expected image for a constant-color/depth horizontal line. The matrix covers:
 
 - Line coverage: endpoint exclusion, reversal, clipping, fractional/zero-length
   lines, fixed-point rounding, and interpolated color/depth/texture/fog.
+- Sprites: fractional/reversed rectangles, clipping and empty coverage, separate
+  X/Y texture interpolation, final-endpoint attributes, Q zero/sign changes,
+  direct/indexed sources, nearest/bilinear sampling, texture functions and fog.
 - 81 blend equations and factors, alpha comparisons, and all four failure modes.
 - Overlapping triangles, depth comparisons and masks, destination alpha, PABE,
   FBA, partial framebuffer masks, clamp/wrap and scanline masks.
@@ -73,7 +76,7 @@ an FPS measurement.
 
 ## Data layout and remaining work
 
-Each primitive occupies three 32-byte vertices (a line stores A, B, B): `float x, y; uint32 z, rgba; float s, t,
+Each primitive occupies three 32-byte vertices (lines and sprites store A, B, B): `float x, y; uint32 z, rgba; float s, t,
 q; uint32 fog`. Vertex data is uploaded to RGBA32UI, two texels per vertex.
 Eight-pixel tile headers contain the ordered list offset and count. Color and
 depth inputs are RGBA8UI and R32UI; separate integer attachments receive outputs.
@@ -99,7 +102,7 @@ Integration still needs real GS command batching, texture and palette lifetimes,
 physical VRAM alias coherence, presentation and context-loss recovery. The
 GPU bridge below supplies transfers and owned-resource cleanup, but still needs
 those renderer-level integrations. The fixture does not implement points,
-sprites, dithering, mip LOD or general framebuffer feedback. Region coordinates
+dithering, mip LOD or general framebuffer feedback. Region coordinates
 in these tests stay within the supplied texture storage. Full-game fidelity,
 sustained performance, audio, saves, controls and physical phone testing remain
 separate release requirements.
@@ -122,12 +125,12 @@ NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.c
 NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.cjs firefox bridge
 ```
 
-This mode exercises **733 cases per browser**, comparing the actual resolved
+This mode exercises **825 cases per browser**, comparing the actual resolved
 color and depth with the CPU renderer and the independent constant-line image.
 It also checks both negative controls.
 The bridge accepts the supported 32/24/16-bit color views and a 24-bit-or-smaller
 depth domain; D32F cannot reconstruct all 32-bit integer depth values. The raw integer kernel
-matrix retains its 765-case coverage. Unsupported bridge cases are explicitly
+matrix retains its 857-case coverage. Unsupported bridge cases are explicitly
 listed as skipped, rather than counted as passes. No tests are removed from the
 raw kernel matrix.
 
@@ -151,4 +154,10 @@ them from weighted-sum rounding in the unchanged CPU line reference; interpolate
 attribute cases use power-of-two lengths. The independent horizontal-line image
 checks that the last vertex's flat color and constant depth survive a
 non-power-of-two length. Arbitrary line attributes still need broader fidelity
-checks. Bridge counters distinguish lines, triangles, and total primitives.
+checks. Bridge counters distinguish lines, sprites, triangles, and total primitives.
+
+Sprites carry two original GS endpoints rather than triangle-expanded attributes.
+The final endpoint supplies flat color, depth, Q and fog regardless of IIP.
+S and T interpolate independently along X and Y before division by the final Q
+(or Q=1 when zero); FST uses fixed UV coordinates instead. A host adapter must
+preserve those inputs before any legacy perspective division or tessellation.

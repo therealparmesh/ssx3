@@ -1,8 +1,9 @@
 #version 300 es
-// Experimental ordered triangle/line rasterizer. The host must preserve resource
-// lifetimes and split batches at feedback/VRAM hazards. See the asset-free
-// protocol and qualification limits in tests/webgl_ordered/README.md.
-// GS shading follows raster.cpp and gpu/gs.wgsl; distributed under LICENSE.
+// Experimental ordered triangle/line/sprite rasterizer. The host must preserve
+// resource lifetimes and split batches at feedback/VRAM hazards. See the
+// asset-free protocol and qualification limits in
+// tests/webgl_ordered/README.md. GS shading follows raster.cpp and gpu/gs.wgsl;
+// distributed under LICENSE.
 precision highp float;
 precision highp int;
 uniform highp usampler2D initialColor;
@@ -164,6 +165,13 @@ void main() {
         if (!hit)
           continue;
         w0 = 1.0 - w1;
+      } else if (kind == 6u) {
+        if (any(lessThan(p, ceil(min(a, b)))) ||
+            any(greaterThanEqual(p, ceil(max(a, b)))))
+          continue;
+        // Rectangles use the final endpoint's color, depth, Q and fog.
+        w0 = 0.0;
+        w1 = 1.0;
       } else {
         if (any(lessThan(p, ceil(min(a, min(b, c))))) ||
             any(greaterThanEqual(p, ceil(max(a, max(b, c))))))
@@ -207,6 +215,11 @@ void main() {
             t2 = loadVertex(i + 5u);
       vec3 tex = uintBitsToFloat(t0.xyz) * w0 + uintBitsToFloat(t1.xyz) * w1 +
                  uintBitsToFloat(t2.xyz) * w2;
+      if (kind == 6u) {
+        vec3 first = uintBitsToFloat(t0.xyz), last = uintBitsToFloat(t1.xyz);
+        vec2 fraction = (p - a) / (b - a);
+        tex = vec3(first.xy + (last.xy - first.xy) * fraction, last.z);
+      }
       if ((cfg(0) & 16u) != 0u) {
         vec2 uv;
         if ((cfg(0) & 256u) != 0u)

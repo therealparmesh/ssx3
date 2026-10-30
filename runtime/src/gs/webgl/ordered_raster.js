@@ -18,6 +18,7 @@ class Ps2OrderedRaster {
       primitives: 0,
       triangles: 0,
       lines: 0,
+      sprites: 0,
       rasterDraws: 0,
       readbacks: 0,
     };
@@ -349,7 +350,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       throw Error("Unsupported transitional color/depth view");
     this.targets(width, height);
     const kind = settings[0] & 7;
-    if (![1, 2, 3, 4, 5].includes(kind))
+    if (![1, 2, 3, 4, 5, 6].includes(kind))
       throw Error("Unsupported ordered raster primitive");
     const line = kind === 1 || kind === 2;
     const positions = new Float32Array(
@@ -537,7 +538,8 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     // would force repeated GL command round trips. The fixture checks each case.
     this.stats.batches++;
     this.stats.primitives += vertexWords.length / 24;
-    this.stats[line ? "lines" : "triangles"] += vertexWords.length / 24;
+    this.stats[line ? "lines" : kind === 6 ? "sprites" : "triangles"] +=
+      vertexWords.length / 24;
     this.stats.rasterDraws += 3;
   }
 
