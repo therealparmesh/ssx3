@@ -213,7 +213,7 @@
 + m_syncReadbacks=0; m_memoryAliasUnresolved=false;
 + m_aliasDraws=m_aliasPasses=0;
 + m_aliasRects.clear();m_aliasTarget.reset();m_aliasDepth.reset();m_aliasMaps.clear();
-+ m_aliasProgram.reset();m_aliasDepthTexture.Reset();m_aliasSourceFbo.Reset();m_aliasCopyFbo.Reset();m_aliasVao.Reset();m_aliasWidth=m_aliasHeight=0;
++ m_aliasProgram.reset();m_aliasDepthTexture.Reset();m_aliasSourceFbo.Reset();m_aliasCopyFbo.Reset();m_aliasVao.Reset();m_aliasWidth=m_aliasHeight=0;m_aliasValidatedDepth.reset();m_aliasCopyValidated=false;m_aliasFullSurfaceForValidation=false;
 +
  	LoadPreferences();
  	m_textureCache.Flush();
@@ -1235,10 +1235,12 @@
  #include <unordered_map>
  #include "../GSHandler.h"
  #include "../GsDebuggerInterface.h"
-@@ -22,8 +24,22 @@
+@@ -22,8 +24,24 @@
  
  class CGSH_OpenGL : public CGSHandler, public CGsDebuggerInterface
  {
++ // Asset-free fixture exercises private attachment ownership transitions.
++ friend class WebglAliasFixture;
 +
  public:
  	CGSH_OpenGL(bool = true);
@@ -1258,7 +1260,7 @@
  	virtual ~CGSH_OpenGL();
  
  	static void RegisterPreferences();
-@@ -60,13 +76,25 @@
+@@ -60,13 +78,25 @@
  	void InitializeImpl() override;
  	void ReleaseImpl() override;
  	void ResetImpl() override;
@@ -1284,7 +1286,7 @@
  	typedef CGsTextureCache<Framework::OpenGl::CTexture> TextureCache;
  	typedef uint64 ShaderCapsInt;
  
-@@ -98,6 +126,11 @@
+@@ -98,6 +128,11 @@
  		unsigned int alphaFailMethod : 2;
  		unsigned int alphaTestDepthTest_DepthFetch : 1;
  		unsigned int alphaTestDepthTestEqual_DepthFetch : 1;
@@ -1296,7 +1298,7 @@
  
  		bool isIndexedTextureSource() const
  		{
-@@ -111,6 +144,7 @@
+@@ -111,6 +146,7 @@
  		bool isValid;
  		bool isTextureStateValid;
  		bool isFramebufferStateValid;
@@ -1304,7 +1306,7 @@
  
  		//Register State
  		uint64 primReg;
-@@ -172,9 +206,12 @@
+@@ -172,9 +208,12 @@
  		uint32 alphaRef;
  		float alphaFix;
  		float fogColor[3];
@@ -1320,7 +1322,7 @@
  
  	enum
  	{
-@@ -228,6 +265,11 @@
+@@ -228,6 +267,11 @@
  	typedef std::shared_ptr<CPalette> PalettePtr;
  	typedef std::list<PalettePtr> PaletteList;
  
@@ -1332,7 +1334,7 @@
  	class CFramebuffer
  	{
  	public:
-@@ -247,6 +289,7 @@
+@@ -247,6 +291,7 @@
  		Framework::OpenGl::CRenderbuffer m_colorBufferMs;
  
  		CGsCachedArea m_cachedArea;
@@ -1340,7 +1342,7 @@
  	};
  	typedef std::shared_ptr<CFramebuffer> FramebufferPtr;
  	typedef std::vector<FramebufferPtr> FramebufferList;
-@@ -262,8 +305,22 @@
+@@ -262,8 +307,25 @@
  		uint32 m_height;
  		uint32 m_psm;
  		Framework::OpenGl::CRenderbuffer m_depthBuffer;
@@ -1348,12 +1350,15 @@
  	};
  	typedef std::shared_ptr<CDepthbuffer> DepthbufferPtr;
 + struct DepthAliasRect {uint32 dx,dy,sx,sy,w,h;};
-+ struct DepthAliasMap {DirtyRect dirty;std::vector<uint32> key;Framework::OpenGl::CTexture texture;bool green=false,alpha=false;};
++ struct DepthAliasMap {DirtyRect dirty,sourceDirty;std::vector<uint32> key;Framework::OpenGl::CTexture texture;bool green=false,alpha=false;};
 + FramebufferPtr m_aliasTarget;DepthbufferPtr m_aliasDepth;
 + std::vector<DepthAliasRect> m_aliasRects;
 + std::vector<DepthAliasMap> m_aliasMaps;
 + Framework::OpenGl::CTexture m_aliasDepthTexture;
 + Framework::OpenGl::CFramebuffer m_aliasSourceFbo,m_aliasCopyFbo;
++ std::weak_ptr<CDepthbuffer> m_aliasValidatedDepth;
++ bool m_aliasCopyValidated=false;
++ bool m_aliasFullSurfaceForValidation=false;
 + Framework::OpenGl::CVertexArray m_aliasVao;
 + std::unique_ptr<Framework::OpenGl::CProgram> m_aliasProgram;
 + uint32 m_aliasWidth=0,m_aliasHeight=0;
@@ -1363,7 +1368,7 @@
  	typedef std::vector<DepthbufferPtr> DepthbufferList;
  
  	struct TEXTURE_INFO
-@@ -345,10 +402,15 @@
+@@ -345,10 +407,15 @@
  	void Prim_Triangle();
  	void Prim_Sprite();
  
@@ -1380,7 +1385,7 @@
  	void DrawToDepth(unsigned int, uint64);
  
  	void SetRenderingContext(uint64);
-@@ -427,6 +489,7 @@
+@@ -427,6 +494,7 @@
  	Framework::OpenGl::CVertexArray m_copyToFbVertexArray;
  	GLint m_copyToFbSrcPositionUniform = -1;
  	GLint m_copyToFbSrcSizeUniform = -1;
@@ -1388,7 +1393,7 @@
  
  	TextureCache m_textureCache;
  	PaletteList m_paletteCache;
-@@ -470,7 +533,7 @@
+@@ -470,7 +538,7 @@
  	RENDERSTATE m_renderState;
  	uint32 m_validGlState = 0;
  	VERTEXPARAMS m_vertexParams;
@@ -1469,7 +1474,7 @@
 +}
 --- /dev/null
 +++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL_DepthAlias.inc
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,109 @@
 +bool CGSH_OpenGL::TryDepthAliasSprite()
 +{
 + if(m_primitiveType!=PRIM_SPRITE || m_fbScale!=1 || m_multisampleEnabled)return false;
@@ -1518,18 +1523,19 @@
 +  std::vector<int32> destination(RAMSIZE/4,-1),source(RAMSIZE/4,-1);
 +  for(uint32 y=0;y<target->m_height;y++)for(uint32 x=0;x<target->m_width;x++)destination[(reinterpret_cast<uint8*>(dst32.GetPixelAddress(x,y))-m_pRAM)/4]=y*target->m_width+x;
 +  for(uint32 y=0;y<depth->m_height;y++)for(uint32 x=0;x<depth->m_width;x++)source[(reinterpret_cast<uint8*>(src32.GetPixelAddress(x,y))-m_pRAM)/4]=y*depth->m_width+x;
-+  std::vector<uint32> lookup(target->m_width*target->m_height*2);bool green=false,alpha=false;DirtyRect dirty;
++  std::vector<uint32> lookup(target->m_width*target->m_height*2);bool green=false,alpha=false;DirtyRect dirty,sourceDirty;
 +  for(auto& r:m_aliasRects)for(uint32 y=0;y<r.h;y++)for(uint32 x=0;x<r.w;x++){
 +   auto da=reinterpret_cast<uint8*>(dst16.GetPixelAddress(r.dx+x,r.dy+y))-m_pRAM+1;
 +   auto sa=reinterpret_cast<uint8*>(src16.GetPixelAddress(r.sx+x,r.sy+y))-m_pRAM+1;
 +   auto di=destination[da/4],si=source[sa/4];auto channel=da&3;
 +   // Z24 leaves byte3 in RAM; handling that byte needs a coherent RAM cache first.
 +   if(di<0||si<0||(sa&3)!=1||(channel!=1&&channel!=3))throw std::runtime_error("Unsupported depth alias storage mapping");
++   sourceDirty.include(si%depth->m_width,si/depth->m_width,si%depth->m_width+1,si/depth->m_width+1);
 +   dirty.include(di%target->m_width,di/target->m_width,di%target->m_width+1,di/target->m_width+1);
 +   lookup[di*2+(channel==3)]=0x80000000u|uint32(si);green|=channel==1;alpha|=channel==3;
 +  }
 +  if(m_aliasMaps.size()>=8)m_aliasMaps.erase(m_aliasMaps.begin());
-+  DepthAliasMap map;map.dirty=dirty;map.key=std::move(key);map.green=green;map.alpha=alpha;map.texture=CTexture::Create();
++  DepthAliasMap map;map.dirty=dirty;map.sourceDirty=sourceDirty;map.key=std::move(key);map.green=green;map.alpha=alpha;map.texture=CTexture::Create();
 +  glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,map.texture);glTexStorage2D(GL_TEXTURE_2D,1,GL_RG32UI,target->m_width,target->m_height);glTexSubImage2D(GL_TEXTURE_2D,0,0,0,target->m_width,target->m_height,GL_RG_INTEGER,GL_UNSIGNED_INT,lookup.data());glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
 +  m_aliasMaps.push_back(std::move(map));found=std::prev(m_aliasMaps.end());
 + }
@@ -1539,20 +1545,38 @@
 +  CShader vert(GL_VERTEX_SHADER),frag(GL_FRAGMENT_SHADER);vert.SetSource(vs);frag.SetSource(fs);vert.Compile();frag.Compile();m_aliasProgram=std::make_unique<CProgram>();m_aliasProgram->AttachShader(vert);m_aliasProgram->AttachShader(frag);m_aliasProgram->Link();m_aliasVao=CVertexArray::Create();
 + }
 + if(m_aliasWidth!=depth->m_width||m_aliasHeight!=depth->m_height){
++  m_aliasValidatedDepth.reset();m_aliasCopyValidated=false;
 +  m_aliasDepthTexture=CTexture::Create();m_aliasSourceFbo=Framework::OpenGl::CFramebuffer::Create();m_aliasCopyFbo=Framework::OpenGl::CFramebuffer::Create();
 +  glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,m_aliasDepthTexture);glTexStorage2D(GL_TEXTURE_2D,1,GL_DEPTH_COMPONENT32F,depth->m_width,depth->m_height);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_COMPARE_MODE,GL_NONE);m_aliasWidth=depth->m_width;m_aliasHeight=depth->m_height;
 + }
 + glDisable(GL_SCISSOR_TEST);glDisable(GL_BLEND);glDisable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);
-+ GLenum none=GL_NONE;glBindFramebuffer(GL_FRAMEBUFFER,m_aliasSourceFbo);glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,depth->m_depthBuffer);glDrawBuffers(1,&none);glReadBuffer(GL_NONE);
-+ if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Alias depth source incomplete");
-+ glBindFramebuffer(GL_FRAMEBUFFER,m_aliasCopyFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,m_aliasDepthTexture,0);glDrawBuffers(1,&none);glReadBuffer(GL_NONE);
-+ if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Alias depth copy incomplete");
-+ glBindFramebuffer(GL_READ_FRAMEBUFFER,m_aliasSourceFbo);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,m_aliasCopyFbo);glBlitFramebuffer(0,0,depth->m_width,depth->m_height,0,0,depth->m_width,depth->m_height,GL_DEPTH_BUFFER_BIT,GL_NEAREST);
++ // These private FBOs retain immutable attachments. Validate only when
++ // their resource owner changes; weak ownership also detects deleted/reused
++ // renderbuffer names without extending the depth cache's lifetime.
++ GLenum none=GL_NONE;
++ if(m_aliasValidatedDepth.lock()!=depth){
++  glBindFramebuffer(GL_FRAMEBUFFER,m_aliasSourceFbo);glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,depth->m_depthBuffer);glDrawBuffers(1,&none);glReadBuffer(GL_NONE);
++  if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Alias depth source incomplete");
++  m_aliasValidatedDepth=depth;
++ }
++ if(!m_aliasCopyValidated){
++  glBindFramebuffer(GL_FRAMEBUFFER,m_aliasCopyFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,m_aliasDepthTexture,0);glDrawBuffers(1,&none);glReadBuffer(GL_NONE);
++  if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Alias depth copy incomplete");
++  m_aliasCopyValidated=true;
++ }
++ auto sourceRect=found->sourceDirty;
++ if(m_aliasFullSurfaceForValidation)sourceRect={0,0,int(depth->m_width),int(depth->m_height)};
++ glBindFramebuffer(GL_READ_FRAMEBUFFER,m_aliasSourceFbo);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,m_aliasCopyFbo);
++ glBlitFramebuffer(sourceRect.x0,sourceRect.y0,sourceRect.x1,sourceRect.y1,sourceRect.x0,sourceRect.y0,sourceRect.x1,sourceRect.y1,GL_DEPTH_BUFFER_BIT,GL_NEAREST);
 + glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,m_aliasDepthTexture);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,found->texture);
 + glUseProgram(*m_aliasProgram);glUniform1i(glGetUniformLocation(*m_aliasProgram,"depthSource"),0);glUniform1i(glGetUniformLocation(*m_aliasProgram,"mapping"),1);glUniform1ui(glGetUniformLocation(*m_aliasProgram,"depthWidth"),depth->m_width);
++ if(!m_aliasFullSurfaceForValidation){
++  const auto& r=found->dirty;glEnable(GL_SCISSOR_TEST);glScissor(r.x0,r.y0,r.x1-r.x0,r.y1-r.y0);
++ }
 + glBindFramebuffer(GL_FRAMEBUFFER,target->m_framebuffer);GLenum color=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&color);glReadBuffer(color);glViewport(0,0,target->m_width,target->m_height);glBindVertexArray(m_aliasVao);
 + if(found->green){glColorMask(GL_FALSE,GL_TRUE,GL_FALSE,GL_FALSE);glUniform1i(glGetUniformLocation(*m_aliasProgram,"channel"),0);glDrawArrays(GL_TRIANGLES,0,3);m_aliasPasses++;}
 + if(found->alpha){glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_TRUE);glUniform1i(glGetUniformLocation(*m_aliasProgram,"channel"),1);glDrawArrays(GL_TRIANGLES,0,3);m_aliasPasses++;}
++ glDisable(GL_SCISSOR_TEST); // Preserve the alias pass's previous outgoing GL state.
 + m_textureCache.InvalidateRange(target->m_basePtr,target->m_width*target->m_height*4);
 + target->m_gpuDirty.include(found->dirty.x0,found->dirty.y0,found->dirty.x1,found->dirty.y1);
 + for(const auto& f:m_framebuffers)if(f!=target&&f->m_basePtr==target->m_basePtr&&!f->m_gpuDirty.empty())m_memoryAliasUnresolved=true;

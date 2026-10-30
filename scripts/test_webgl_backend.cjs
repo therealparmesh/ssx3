@@ -20,7 +20,7 @@ const puppeteer = require('puppeteer-core');
   });
   const evidence = {browser: kind, version: await browser.version(), origin, explicitGpuOverrides: false, fixtures: []};
   try {
-    for (const [fixture, cases, pixels] of [['population', null, 393216], ['readback', 16, 266488], ['restore', 24, 1572864], ['export', 21, null], ['export-hybrid', 21, null]]) {
+    for (const [fixture, cases, pixels] of [['population', null, 393216], ['readback', 16, 266488], ['restore', 24, 1572864], ['export', 21, null], ['export-hybrid', 21, null], ['alias', 6, 458752], ['alias-hybrid', 6, 458752]]) {
       const page = await browser.newPage();
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
@@ -32,6 +32,12 @@ const puppeteer = require('puppeteer-core');
       await page.goto(url.href, {waitUntil: 'load'});
       await page.waitForFunction(() => window.fixtureResult, {timeout: 60000});
       const result = await page.evaluate(() => ({result: window.fixtureResult, log: document.getElementById('log').textContent}));
+      if (route === 'alias') {
+        assert.equal(result.result.sameOwnerChecks, 2);
+        assert(result.result.cachedChecks >= 8);
+        assert.equal(result.result.controlChecks - result.result.cachedChecks, 128);
+        assert(result.result.cachedBlitPixels < result.result.controlBlitPixels);
+      }
       await page.screenshot({path: path.join(artifacts, `${kind}-${fixture}.png`)});
       assert.equal(await page.title(), 'GS backend verification');
       assert.equal(new URL(page.url()).searchParams.get('fixture'), route);
@@ -66,7 +72,7 @@ const puppeteer = require('puppeteer-core');
       assert.equal(result.glError, 0); assert.deepEqual(errors, []);
       await page.close();
     }
-    console.log(`PASS ${kind}: population, readback, restore, native/hybrid export and two negative controls; evidence ${artifacts}`);
+    console.log(`PASS ${kind}: population, readback, restore, native/hybrid export, bounded depth aliases and two negative controls; evidence ${artifacts}`);
   } finally {
     fs.writeFileSync(path.join(artifacts, `${kind}-backend.json`), JSON.stringify(evidence, null, 2) + '\n');
     await browser.close();

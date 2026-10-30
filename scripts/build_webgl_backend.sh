@@ -10,7 +10,7 @@ python3 "$backend_root/scripts/prepare_webgl_backend.py" "$backend_output/upstre
     -B "$backend_output/compiler" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DWEBGL_UPSTREAM="$backend_output/upstream"
 "${CMAKE:-cmake}" --build "$backend_output/compiler" --parallel "${WEBGL_BUILD_JOBS:-2}"
-for fixture in population readback restore export; do
+for fixture in population readback restore export alias; do
     cp "$backend_output/compiler/$fixture.js" "$backend_output/$fixture.js"
     cp "$backend_output/compiler/$fixture.wasm" "$backend_output/$fixture.wasm"
 done

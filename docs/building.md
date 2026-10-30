@@ -143,3 +143,5 @@ Supply your own compatible runtime state in the served directory; it is not incl
 A private HTTPS deployment needs WebGPU, secure-context APIs, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, byte-range disc requests and suitable Wasm/JavaScript MIME types. Authentication must cover the player, disc and game assets. The existing private deployment's identity, credentials, bucket bindings and release objects are not part of this repository.
 
 The generic runtime design and additional porting flags are documented in [upstream.md](upstream.md).
+
+The standalone backend browser driver also runs native and hybrid depth-alias fixtures. These compare complete target images against forced framebuffer revalidation and full-surface copying, covering stable owners, changed/expired owners, reset, resized storage, nonzero coordinates and disjoint rectangles. Reported validation calls and copied pixel areas measure fixture work, independently of full-game performance.

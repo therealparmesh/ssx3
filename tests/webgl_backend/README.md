@@ -62,6 +62,17 @@ testing; these fixtures do not measure performance.
   synchronization controls must fail through RAM mismatches with no GL errors.
   The hybrid run must actually execute the ordered renderer.
 
+The `alias` fixture runs in native and hybrid modes. Six cases compare complete
+framebuffer images against forced per-copy attachment validation and full-surface
+depth copying: stable resource owners, switched owners, expired/recreated owners,
+resized storage with nonzero mapping coordinates, reset, and two disjoint mapped
+rectangles in one batch. Source changes must change pixels. It verifies 458,752
+pixels per mode and requires actual hybrid batches. GL-call counters independently
+check attachment-validation reuse and reduced copied depth area. These work counts
+do not establish full-game speed. The runtime validates again when the source
+resource owner or immutable copy storage changes, copies mapped source bounds and
+scissors destination writes; reset clears the validation cache.
+
 Native depth caches initialize from RAM, including untouched pixels. Before a
 CPU upload, physical-page overlap determines whether pending GPU writes must
 be exported. Disjoint uploads do not cause readback. Copy/alias operations also
