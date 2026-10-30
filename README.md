@@ -60,6 +60,8 @@ Save career progress in the game first: **Mcomm → Options → Save game**, or 
 
 Version 68 is deployed privately with live statistics moved to the existing `?debug` mode. Separate five-minute hosted two-player Snow Jam windows passed at 120 Hz: Firefox 60.000005 fresh submissions/s with a 19.180 ms maximum interval; Chromium 60.002325 with a 20.080 ms maximum. Both riders finished in each run. There was no image/audio loss, clipping or application error. All 50 asset-free CI suites pass. See [current release status](docs/release-status.md) for exact builds, scope and retained earlier failures, and [validation scope](docs/validation.md) for historical evidence and limitations.
 
+The Linux timing tests explicitly enable WebGPU: Firefox uses `dom.webgpu.enabled=true`; Chromium uses `--enable-unsafe-webgpu --enable-features=Vulkan`. Fresh automation profiles without those overrides do not start the game on the tested AMD Linux host. Hardware WebGL 2 is available there, but this build has no WebGL renderer. Default-browser startup therefore remains an open compatibility requirement.
+
 Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
 
 Asset-free checks can run without a disc image:
