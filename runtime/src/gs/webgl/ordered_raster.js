@@ -54,6 +54,8 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       this.dummyNormalized = this.texture(gl.RGBA8, 1, 1);
       this.vertexData = null;
       this.indexData = null;
+      this.boundsScratch = new Uint32Array(0);
+      this.indicesScratch = new Uint32Array(0);
     } catch (error) {
       this.destroy();
       throw error;
@@ -141,6 +143,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       "tilesX",
       "tilesY",
       "headerScratch",
+      "tileCounts",
       "sourceDepthRenderbuffer",
     ];
     if (this.activeTargetSet)
@@ -185,6 +188,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     this.tilesX = Math.ceil(width / 8);
     this.tilesY = Math.ceil(height / 8);
     this.headerScratch = new Uint32Array(0);
+    this.tileCounts = new Uint32Array(this.tilesX * this.tilesY);
     this.sourceDepthRenderbuffer = null;
     this.headersTexture = this.texture(gl.RG32UI, this.tilesX, this.tilesY);
     this.inputFramebuffer = this.framebuffer();
@@ -368,7 +372,16 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
           )
             throw Error("Line coordinates must use the GS 12.4 domain");
     }
-    const bins = new Map();
+    const primitiveCount = vertexWords.length / 24;
+    if (this.boundsScratch.length < primitiveCount * 5)
+      this.boundsScratch = new Uint32Array(
+        2 ** Math.ceil(Math.log2(Math.max(1, primitiveCount * 5))),
+      );
+    const bounds = this.boundsScratch,
+      counts = this.tileCounts;
+    counts.fill(0);
+    let usedBounds = 0,
+      count = 0;
     let left = width,
       bottom = height,
       right = 0,
@@ -402,25 +415,39 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
           Math.max(positions[i + 1], positions[i + 9], positions[i + 17]),
         ) + (line ? 1 : -1),
       );
-      if (![x0, y0, x1, y1].every(Number.isFinite))
+      if (
+        !Number.isFinite(x0) ||
+        !Number.isFinite(y0) ||
+        !Number.isFinite(x1) ||
+        !Number.isFinite(y1)
+      )
         throw Error("Invalid ordered raster coordinates");
       if (x0 > x1 || y0 > y1) continue;
       left = Math.min(left, x0);
       bottom = Math.min(bottom, y0);
       right = Math.max(right, x1 + 1);
       top = Math.max(top, y1 + 1);
-      for (let y = y0 >> 3; y <= y1 >> 3; y++)
-        for (let x = x0 >> 3; x <= x1 >> 3; x++) {
-          const key = y * this.tilesX + x;
-          let list = bins.get(key);
-          if (!list) bins.set(key, (list = []));
-          list.push(i / 24);
-        }
+      const bx0 = x0 >> 3,
+        by0 = y0 >> 3,
+        bx1 = x1 >> 3,
+        by1 = y1 >> 3;
+      bounds[usedBounds++] = bx0;
+      bounds[usedBounds++] = by0;
+      bounds[usedBounds++] = bx1;
+      bounds[usedBounds++] = by1;
+      bounds[usedBounds++] = i / 24;
+      count += (bx1 - bx0 + 1) * (by1 - by0 + 1);
+      for (let y = by0; y <= by1; y++)
+        for (let x = bx0; x <= bx1; x++) counts[y * this.tilesX + x]++;
     }
     if (left >= right || bottom >= top) return;
-    let count = 0;
-    for (const list of bins.values()) count += list.length;
-    const indices = new Uint32Array(count);
+    if (count > this.maxTextureSize * 1024)
+      throw Error("Ordered raster batch exceeds texture capacity");
+    if (this.indicesScratch.length < count)
+      this.indicesScratch = new Uint32Array(
+        2 ** Math.ceil(Math.log2(Math.max(1, count))),
+      );
+    const indices = this.indicesScratch.subarray(0, count);
     const tileLeft = left >> 3,
       tileBottom = bottom >> 3,
       tileWidth = ((right - 1) >> 3) - tileLeft + 1,
@@ -429,19 +456,23 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     if (this.headerScratch.length < headerLength)
       this.headerScratch = new Uint32Array(headerLength);
     const headers = this.headerScratch.subarray(0, headerLength);
-    headers.fill(0);
-    let offset = 0;
-    for (const [key, list] of bins) {
-      const local =
-        ((Math.floor(key / this.tilesX) - tileBottom) * tileWidth +
-          (key % this.tilesX) -
-          tileLeft) *
-        2;
-      headers[local] = offset;
-      headers[local + 1] = list.length;
-      indices.set(list, offset);
-      offset += list.length;
-    }
+    let offset = 0,
+      header = 0;
+    for (let y = tileBottom; y < tileBottom + tileHeight; y++)
+      for (let x = tileLeft; x < tileLeft + tileWidth; x++) {
+        const key = y * this.tilesX + x,
+          size = counts[key];
+        headers[header++] = offset;
+        headers[header++] = size;
+        counts[key] = offset;
+        offset += size;
+      }
+    // Scatter primitives in submission order into the prefix-summed ranges.
+    // Reuse typed storage instead of allocating a Map and one Array per tile.
+    for (let at = 0; at < usedBounds; at += 5)
+      for (let y = bounds[at + 1]; y <= bounds[at + 3]; y++)
+        for (let x = bounds[at]; x <= bounds[at + 2]; x++)
+          indices[counts[y * this.tilesX + x]++] = bounds[at + 4];
     this.dataTexture("vertexData", vertexWords, 4);
     this.dataTexture("indexData", indices, 1);
     gl.activeTexture(gl.TEXTURE0 + 12);
@@ -558,6 +589,12 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     this.programs.clear();
     this.uniforms.clear();
     this.targetSets.clear();
+    this.boundsScratch =
+      this.indicesScratch =
+      this.headerScratch =
+      this.tileCounts =
+        null;
+    this.activeTargetSet = null;
   }
 }
 

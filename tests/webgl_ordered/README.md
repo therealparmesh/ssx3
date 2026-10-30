@@ -116,7 +116,10 @@ batch, and resolves color/depth back to the host. It preserves external object
 ownership and exposes `destroy()` for its own resources. The host must restore
 its GL state, check errors at frame boundaries, and split batches at hazards.
 The bridge caches programs, uniforms, and framebuffer attachments and uploads
-only populated vertex/list rows and the affected tile rectangle.
+only populated vertex/list rows and the affected tile rectangle. Tile lists use
+reusable typed arrays with count/prefix/scatter passes; submission order is
+preserved without per-tile Maps or Arrays. Target-size cache entries retain their
+own tile counts, and destruction releases scratch buffers.
 
 Run the bridge matrix with:
 
