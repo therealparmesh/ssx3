@@ -177,7 +177,7 @@
 <div id="overlay"><div id="panel">
   <h1>SSX 3</h1>
   <p id="prototype">Experimental browser port. Device compatibility is still being validated.</p>
-  <p id="instructions">Gamepad and touch controls supported.<span class="keyboard-help"><br>WASD / arrows: move · Space / K: jump / select · I: back<br>J: □ · L: ○ · Q / E: L1 / R1 · 1 / 3: L2 / R2<br>Enter: game Start · Esc: pause / resume · Alt+Enter: fullscreen</span></p>
+  <p id="instructions">Gamepad and touch controls supported.<span class="keyboard-help"><br>WASD: left stick · Arrows: D-pad · Space / K: jump / select · I: back<br>J: □ · L: ○ · Q / E: L1 / R1 · 1 / 3: L2 / R2<br>Enter: game Start · Esc: pause / resume · Alt+Enter: fullscreen</span></p>
   <p id="help" role="status" hidden></p><button id="start" disabled>Loading…</button>
   <button id="overlay-options" type="button">Options</button>
   <button id="recovery-export" type="button" hidden>Export memory card</button>
@@ -910,8 +910,9 @@ function pollPlayer(port, gamepad, own) {
   if (own) {
     buttons |= touchPad.buttons;
     for (const k of keys) if (k in keyMap) buttons |= 1 << keyMap[k];
-    lx = keyboardAxis(keys.has('KeyA') || keys.has('ArrowLeft'), keys.has('KeyD') || keys.has('ArrowRight'));
-    ly = keyboardAxis(keys.has('KeyW') || keys.has('ArrowUp'), keys.has('KeyS') || keys.has('ArrowDown'));
+    // Keep stick adjustment independent of D-pad spins and prewind.
+    lx = keyboardAxis(keys.has('KeyA'), keys.has('KeyD'));
+    ly = keyboardAxis(keys.has('KeyW'), keys.has('KeyS'));
     rx = keyboardAxis(keys.has('KeyF'), keys.has('KeyH'));
     ry = keyboardAxis(keys.has('KeyT'), keys.has('KeyG'));
     if (touchPad.stick) {

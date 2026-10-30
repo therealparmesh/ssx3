@@ -77,7 +77,7 @@ let browser, page;
     Module._ps2web_pad = (...args) => { qaPads.push(args); return pad(...args); };
   });
   await page.keyboard.down('ArrowLeft'); await page.keyboard.down('z');
-  await page.waitForFunction(() => qaPads.some(x => x[0] === 0 && (x[1] & 0x4080) === 0x4080 && x[2] === 0));
+  await page.waitForFunction(() => qaPads.some(x => x[0] === 0 && (x[1] & 0x4080) === 0x4080 && x[2] === 128));
   await page.keyboard.up('z'); await page.keyboard.up('ArrowLeft');
   await page.evaluate(() => {
     const pad = index => ({ index, id: 'QA standard controller', mapping: 'standard', connected: true,
@@ -106,6 +106,10 @@ let browser, page;
   };
   for (const [key, mask] of [[' ',0x4000],['k',0x4000],['i',0x1000],['j',0x8000],['l',0x2000],['q',0x400],['e',0x800],['1',0x100],['3',0x200],['2',2],['4',4],['Enter',8],['Backspace',1]]) await assertKey(key,mask);
   for (const [key, axes] of [['w',[128,0,128,128]],['a',[0,128,128,128]],['s',[128,255,128,128]],['d',[255,128,128,128]],['t',[128,128,128,0]],['f',[128,128,0,128]],['g',[128,128,128,255]],['h',[128,128,255,128]]]) await assertKey(key,0,axes);
+  for (const [key, mask] of [['ArrowUp',0x10],['ArrowRight',0x20],['ArrowDown',0x40],['ArrowLeft',0x80]]) await assertKey(key,mask);
+  await page.keyboard.down('a'); await page.keyboard.down('ArrowRight');
+  await page.waitForFunction(() => { const p=qaPads.filter(x=>x[0]===0).at(-1); return p?.[1]===0x20 && p[2]===0; });
+  await page.keyboard.up('a'); await page.keyboard.up('ArrowRight');
   assert.equal(await page.evaluate(() => fullscreen),false);
   await page.keyboard.down('a'); await page.keyboard.down('d');
   await page.waitForFunction(() => qaPads.filter(x => x[0] === 0).at(-1)?.[2] === 128);

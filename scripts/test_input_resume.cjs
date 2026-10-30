@@ -84,6 +84,9 @@ function fixture() {
     unblock() { blocked = false; },
     blur() { windowEvents.get('blur')(); },
     focus() { windowEvents.get('focus')(); },
+    key(code, down = true) {
+      windowEvents.get(down ? 'keydown' : 'keyup')({ code, target: { closest: () => false }, preventDefault() {} });
+    },
     beginResume() { return element('start').listeners.get('click')(); },
     resolveAudio(index = audioRequests.length - 1, state = 'running') { context.audio.state = state; audioRequests[index].resolve(); },
     rejectAudio(index = audioRequests.length - 1) { audioRequests[index].reject(Error('Audio interrupted')); },
@@ -108,6 +111,19 @@ async function resume(f) {
 }
 
 (async () => {
+  {
+    const f = fixture(); f.play();
+    f.key('KeyA'); f.key('ArrowRight');
+    assert.deepEqual(f.nativePads[0], [0x20, 0, 128, 128, 128], 'D-pad right must not cancel left-stick left');
+    f.key('KeyW'); f.key('ArrowDown');
+    assert.deepEqual(f.nativePads[0], [0x60, 0, 0, 128, 128], 'D-pad down must not cancel left-stick up');
+    f.key('KeyD'); f.key('KeyS');
+    assert.deepEqual(f.nativePads[0], [0x60, 128, 128, 128, 128], 'Only opposing stick keys cancel the stick');
+    for (const code of ['KeyA', 'KeyW', 'KeyD', 'KeyS']) f.key(code, false);
+    assert.deepEqual(f.nativePads[0], [0x60, 128, 128, 128, 128], 'D-pad alone leaves both sticks neutral');
+    f.key('ArrowRight', false); f.key('ArrowDown', false);
+    assert.deepEqual(f.nativePads[0], [0, 128, 128, 128, 128], 'Releasing all keys retires both channels');
+  }
   {
     const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
     f.play(); f.setPauseReady(false); const begin = f.calls.length; f.pause();
@@ -352,5 +368,5 @@ async function resume(f) {
     f.setPauseReady(true); await task; f.poll(); assert.equal(f.resumes.length, 0);
     f.focus(); const state = await resume(f); assert.equal(state.pads[0][0], 0x4000);
   }
-  console.log('Input pause/resume: 30 regression scenarios passed');
+  console.log('Input channels and pause/resume: 31 regression scenarios passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

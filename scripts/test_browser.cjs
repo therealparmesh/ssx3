@@ -131,7 +131,7 @@ let qaBrowser;
   Module._ps2web_pressure=(...args)=>{pressureEvents.push(args);return pressure(...args)};
  });
  await page.keyboard.down('ArrowLeft');await page.keyboard.down('KeyZ');
- await page.waitForFunction(()=>padEvents.some(x=>x[0]===0&&(x[1]&0x4080)===0x4080&&x[2]===0));
+ await page.waitForFunction(()=>padEvents.some(x=>x[0]===0&&(x[1]&0x4080)===0x4080&&x[2]===128));
  await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
  await page.waitForFunction(()=>Module.paused&&Module._ps2web_pause_ready()&&padEvents.filter(x=>x[0]===0).at(-1)[1]===0);
  assert.deepEqual(await page.evaluate(()=>padEvents.filter(x=>x[0]===0).at(-1)),[0,0,128,128,128,128]);
@@ -170,9 +170,13 @@ let qaBrowser;
  assert.deepEqual(await page.evaluate(()=>plugEvents.filter(x=>x[0]===1).at(-1)),[1,1]);
  // Keyboard remains player one while the surviving controller stays player two.
  await page.keyboard.down('ArrowRight');
- await page.waitForFunction(()=>padEvents.filter(x=>x[0]===0).at(-1)[2]===255);
+ await page.waitForFunction(()=>padEvents.filter(x=>x[0]===0).at(-1)[1]===0x20&&padEvents.filter(x=>x[0]===0).at(-1)[2]===128);
  assert.deepEqual(await page.evaluate(()=>padEvents.filter(x=>x[0]===1).at(-1)),[1,8,128,128,128,128]);
  await page.keyboard.up('ArrowRight');
+ await page.keyboard.down('KeyA');await page.keyboard.down('ArrowRight');
+ await page.waitForFunction(()=>{const p=padEvents.filter(x=>x[0]===0).at(-1);return p[1]===0x20&&p[2]===0});
+ assert.deepEqual(await page.evaluate(()=>padEvents.filter(x=>x[0]===1).at(-1)),[1,8,128,128,128,128]);
+ await page.keyboard.up('KeyA');await page.keyboard.up('ArrowRight');
  // Reconnecting on a new browser index fills the empty port; array order is irrelevant.
  await page.evaluate(()=>{qaFirstPad.index=4;qaPads=[qaPads[1],null,null,null,qaFirstPad];pollInput()});
  assert.equal(await page.evaluate(()=>padEvents.filter(x=>x[0]===0).at(-1)[1]),0x4100);
@@ -193,7 +197,7 @@ let qaBrowser;
  await page.keyboard.down('KeyZ');await page.waitForFunction(()=>padEvents.filter(x=>x[0]===0).at(-1)[1]&0x4000);await page.keyboard.up('KeyZ');
  // Restricted controller APIs cannot break keyboard input or the frame loop.
  await page.evaluate(()=>Object.defineProperty(navigator,'getGamepads',{configurable:true,value:()=>{throw new DOMException('QA restriction','SecurityError')}}));
- await page.keyboard.down('ArrowRight');await page.waitForFunction(()=>padEvents.filter(x=>x[0]===0).at(-1)[2]===255);await page.keyboard.up('ArrowRight');
+ await page.keyboard.down('ArrowRight');await page.waitForFunction(()=>padEvents.filter(x=>x[0]===0).at(-1)[1]===0x20&&padEvents.filter(x=>x[0]===0).at(-1)[2]===128);await page.keyboard.up('ArrowRight');
  await page.evaluate(()=>Object.defineProperty(navigator,'getGamepads',{configurable:true,value:()=>[]}));
  await page.locator('#settings summary').click();assert.equal(await page.locator('#scale').isVisible(),true);
  await page.screenshot({path:artifact('desktop-options.png')});
