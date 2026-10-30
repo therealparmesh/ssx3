@@ -58,7 +58,9 @@ Save career progress in the game first: **Mcomm → Options → Save game**, or 
 
 ## Status and testing
 
-Version 67 is deployed privately. It avoids redundant FPS status updates and passed separate five-minute Chromium and Firefox hosted race/results checks at 120 Hz: approximately 60 fresh game images per second, no image/audio loss or application errors, and worst actual submission intervals of 21.860 ms and 23.380 ms respectively. All 50 asset-free CI suites pass. Keyboard navigation, simulated controllers and earlier save/recovery flows have been exercised. See [current release status](docs/release-status.md) for exact builds, measurement scope and remaining sign-off, and [validation scope](docs/validation.md) for historical evidence and limitations.
+Version 67 is deployed privately. It avoids redundant FPS status updates and passed separate five-minute Chromium and Firefox hosted single-player race/results checks at 120 Hz: approximately 60 fresh game images per second, no image/audio loss or application errors, and worst actual submission intervals of 21.860 ms and 23.380 ms respectively. All 50 asset-free CI suites pass. Keyboard navigation, simulated controllers and earlier save/recovery flows have been exercised. See [current release status](docs/release-status.md) for exact builds, measurement scope and remaining sign-off, and [validation scope](docs/validation.md) for historical evidence and limitations.
+
+Current-worker two-player racing also works with independent keyboard/controller input. Chromium passed its separate timing check; Firefox recorded three intervals over the 25 ms limit, with a 26.60 ms maximum, and remains open for timing qualification.
 
 Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
 
