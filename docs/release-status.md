@@ -1,8 +1,19 @@
 # Release status
 
-As of 2026-10-29, saved version 65 is running on the owner-private hosted site. Its keyboard stick/D-pad correction passed 44 staged/live native input checks across Chromium and Firefox. The default desktop native assets retain version 64's band-limited audio implementation and four passing normal local/live race windows; version 65's shell update has functional coverage, not a new performance window. The retained standalone primary/compatibility assets also keep their earlier passing desktop windows. Full production sign-off remains open; phones, physical controllers/audio and full-game progression are not qualified.
+As of 2026-10-29, saved version 65 is running on the owner-private hosted site. Its keyboard stick/D-pad correction passed 44 staged/live native input checks across Chromium and Firefox. The default desktop native assets retain version 64's band-limited audio implementation and four passing normal local/live race windows. The exact deployed version 65 shell now also passes separate five-minute hosted Chromium and Firefox race/results windows. The retained standalone primary/compatibility assets also keep their earlier passing desktop windows. Full production sign-off remains open; phones, physical controllers/audio and full-game progression are not qualified.
 
 The desktop worker was rebuilt from source `43fb1f0b293353a4880d26c0302deaec1ebaf69e`; the current shell is from source `5f24ba527003033c5effcb14c7dd5c0e5ba067bd`, with hosting source `4a9690f794a27bfaf8cc314dd82080980625f44c`. Its immutable asset release is `289893fc3b9a64e8759a0a6bd222b1e9680ab048a95e555ed582098248f0a275`, with native SHA-256 `b8cf5dfe41f9cab9fbd5ca85907515737224f8659e99300887a65d880d2935f4`. Version 64 remains available for rollback. Standalone host source remains `9a095ab3f08e1ba378112f882462e12d3016203f`. Game assets and private access credentials are excluded from this repository.
+
+## Version65 current hosted desktop performance
+
+The exact deployed version 65 application document and its original immutable native assets passed two new normal five-minute race/results windows, run sequentially on headed Chromium 156 and Firefox 158.0.1 on Linux at 60 Hz, 1280×800 and DPR 1. Each run used a cold start, UI memory-card import, keyboard navigation and simulated standard-controller race input. Actual hosted HTML matched the current packaged document exactly, allowing only the two previously reviewed Cloudflare JSD templates. No document/asset response replacement, capture, profiling, per-frame completion diagnostic or worker QA RPC ran inside either measurement window.
+
+| Hosted browser | Seconds | Fresh submissions/s | Worst submission interval, ms | Missing images | Missing stereo frames |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Chromium | 300.626 | 60.002516 | 21.215 | 0 | 0 |
+| Firefox | 300.926 | 59.999908 | 20.280 | 0 | 0 |
+
+Both passed the unchanged 25 ms submission-interval and 50 ms audio/emulation-clock limits, with clock differences 20.667 ms and 5.333 ms respectively. Both recorded zero overwritten images, producer replacements, presentation-pool underflows, actual clipped frames, full-scale PCM frames or application errors/warnings. Firefox's 15 known hosting-cookie warnings were recorded separately. Rendered Snow Jam results confirmed ordinary finishes: Zoe fifth at 03:43 in Chromium and sixth at 03:51 in Firefox. Both native pauses were acknowledged and both browsers closed with exit 0. These windows qualify the current desktop candidate within this environment; physical phones/controllers/audio/display delivery and complete progression remain unqualified.
 
 ## Version64 default desktop worker audio
 
