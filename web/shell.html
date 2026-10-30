@@ -1265,7 +1265,8 @@ var Module = {
   noSurface: params.has('nosurface'),
   noCard: params.has('nocard'),
   presentCopy: preferFrameCopy(),
-  prepareCopyFrames: '@PS2_WEB_ASYNC@' === 'jspi',
+  // Synchronous WebGL readbacks need the copy queue to supply browser waits.
+  prepareCopyFrames: webglBackend || '@PS2_WEB_ASYNC@' === 'jspi',
   fullEffects: effects === 'original',
   fastBoot: bootMode === 'quick',
   onHalt: (reason) => {

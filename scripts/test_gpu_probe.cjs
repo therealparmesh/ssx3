@@ -47,10 +47,11 @@ for (const webglBackend of [false, true]) for (const [query, saved, expected] of
 console.log('Resolution settings: 8 backend/preference/URL cases passed');
 const copyPreparation = shell.match(/prepareCopyFrames:\s*([^,\n]+)/)?.[1];
 assert(copyPreparation, 'The browser build must declare its copy preparation policy');
-for (const mode of ['jspi', 'asyncify']) {
-  assert.equal(vm.runInNewContext(copyPreparation.replaceAll('@PS2_WEB_ASYNC@', mode)), mode === 'jspi',
-    'Only the qualified primary build enables prepared copy frames');
+for (const webglBackend of [false, true]) for (const mode of ['jspi', 'asyncify']) {
+  assert.equal(vm.runInNewContext(copyPreparation.replaceAll('@PS2_WEB_ASYNC@', mode), { webglBackend }),
+    webglBackend || mode === 'jspi', 'WebGL and the primary build must pace their prepared copy queues');
 }
+console.log('Prepared copy pacing: 4 backend/suspension cases passed');
 const first = shell.indexOf('async function canPresent(');
 const last = shell.indexOf('\nfunction webgpuHelp', first);
 assert(first >= 0 && last > first);
