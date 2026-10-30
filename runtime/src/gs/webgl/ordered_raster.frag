@@ -1,0 +1,265 @@
+#version 300 es
+// Experimental ordered triangle rasterizer. The host must preserve resource
+// lifetimes and split batches at feedback/VRAM hazards. See the asset-free
+// protocol and qualification limits in tests/webgl_ordered/README.md.
+// GS shading follows raster.cpp and gpu/gs.wgsl; distributed under LICENSE.
+precision highp float;
+precision highp int;
+uniform highp usampler2D initialColor;
+uniform highp usampler2D initialDepth;
+uniform highp usampler2D vertices;
+uniform highp usampler2D bins;
+uniform highp usampler2D lists;
+uniform highp usampler2D sourceTexture;
+uniform sampler2D normalizedTexture;
+uniform sampler2D paletteTexture;
+uniform uvec4 settings[8];
+layout(location = 0) out uvec4 outputColor;
+layout(location = 1) out uint outputDepth;
+uint cfg(int i) { return settings[i >> 2][i & 3]; }
+uvec4 loadVertex(uint i) {
+  return texelFetch(vertices, ivec2(int(i % 1024u), int(i / 1024u)), 0);
+}
+uint loadIndex(uint i) {
+  return texelFetch(lists, ivec2(int(i % 1024u), int(i / 1024u)), 0).r;
+}
+vec2 position(uvec4 v) { return uintBitsToFloat(v.xy); }
+vec4 rgba(uint c) {
+  return vec4(float(c & 255u), float((c >> 8) & 255u), float((c >> 16) & 255u),
+              float(c >> 24));
+}
+bool edgeIn(float e, float gx, float gy) {
+  return e > 0.0 || (e == 0.0 && (gx > 0.0 || (gx == 0.0 && gy > 0.0)));
+}
+uint packed(uvec4 v) { return v.r | (v.g << 8) | (v.b << 16) | (v.a << 24); }
+uvec4 unpacked(uint c) { return uvec4(c, c >> 8, c >> 16, c >> 24) & 255u; }
+uint pack16(uint c) {
+  return ((c >> 3) & 31u) | (((c >> 11) & 31u) << 5) |
+         (((c >> 19) & 31u) << 10) | ((c & 0x80000000u) != 0u ? 0x8000u : 0u);
+}
+uint expand16(uint c) {
+  return ((c & 31u) << 3) | (((c >> 5) & 31u) << 11) |
+         (((c >> 10) & 31u) << 19) | ((c & 0x8000u) != 0u ? 0x80000000u : 0u);
+}
+bool alphaPass(int alpha, uint test) {
+  int ref = int((test >> 4) & 255u);
+  switch ((test >> 1) & 7u) {
+  case 0u:
+    return false;
+  case 1u:
+    return true;
+  case 2u:
+    return alpha < ref;
+  case 3u:
+    return alpha <= ref;
+  case 4u:
+    return alpha == ref;
+  case 5u:
+    return alpha >= ref;
+  case 6u:
+    return alpha > ref;
+  default:
+    return alpha != ref;
+  }
+}
+int wrapCoord(int v, int axis) {
+  uint mode = (cfg(16) >> uint(axis * 2)) & 3u;
+  int lo = int(cfg(axis == 0 ? 17 : 19)), hi = int(cfg(axis == 0 ? 18 : 20));
+  int size = int(cfg(axis == 0 ? 22 : 23));
+  if (mode == 0u)
+    return v & (size - 1);
+  if (mode == 1u)
+    return clamp(v, 0, size - 1);
+  if (mode == 2u)
+    return clamp(v, lo, hi);
+  return (v & lo) | hi;
+}
+vec4 sampleTexel(ivec2 at) {
+  at = ivec2(wrapCoord(at.x, 0), wrapCoord(at.y, 1));
+  if (cfg(25) == 0u)
+    return vec4(texelFetch(sourceTexture, at, 0));
+  vec4 value = texelFetch(normalizedTexture, at, 0);
+  if (cfg(25) >= 2u)
+    value = texelFetch(
+        paletteTexture,
+        ivec2(int(floor((cfg(25) == 4u ? value.a : value.r) * 255.0 + 0.5)), 0),
+        0);
+  vec4 decoded = floor(value * 255.0 + vec4(0.5));
+  uint format = cfg(29) & 3u;
+  if (format == 1u)
+    decoded.rgb = floor(value.rgb * 31.0 + vec3(0.5)) * 8.0;
+  if (format != 0u) {
+    uint ta0 = cfg(28) & 255u, ta1 = (cfg(28) >> 8) & 255u;
+    bool transparent =
+        (cfg(28) & 65536u) != 0u && all(equal(decoded.rgb, vec3(0)));
+    decoded.a = format == 1u && value.a >= 0.5 ? float(ta1)
+                : transparent                  ? 0.0
+                                               : float(ta0);
+  }
+  return decoded;
+}
+ivec4 sampleTexture(vec2 uv) {
+  if ((cfg(15) & 1u) == 0u)
+    return ivec4(sampleTexel(ivec2(floor(uv))));
+  uv -= vec2(0.5);
+  ivec2 at = ivec2(floor(uv));
+  vec2 f = uv - vec2(at);
+  vec4 a = sampleTexel(at), b = sampleTexel(at + ivec2(1, 0)),
+       c = sampleTexel(at + ivec2(0, 1)), d = sampleTexel(at + ivec2(1));
+  vec4 top = a + (b - a) * f.x, bottom = c + (d - c) * f.x;
+  return ivec4(
+      clamp(top + (bottom - top) * f.y + vec4(0.5), vec4(0), vec4(255)));
+}
+void main() {
+  ivec2 pixel = ivec2(gl_FragCoord.xy);
+  vec2 p = vec2(pixel);
+  uvec4 dst = texelFetch(initialColor, pixel, 0);
+  uint depth = texelFetch(initialDepth, pixel, 0).r & cfg(24);
+  uint sx = cfg(11), sy = cfg(12);
+  bool pixelEnabled = pixel.x >= int(sx & 65535u) && pixel.x <= int(sx >> 16) &&
+                      pixel.y >= int(sy & 65535u) && pixel.y <= int(sy >> 16);
+  uint scan = cfg(10) & 3u;
+  if ((scan == 2u && (pixel.y & 1) == 0) || (scan == 3u && (pixel.y & 1) != 0))
+    pixelEnabled = false;
+  uvec2 range = texelFetch(bins, pixel / 8, 0).rg;
+  if (pixelEnabled)
+    for (uint entry = range.x; entry < range.x + range.y; entry++) {
+      uint i = loadIndex(entry) * 6u;
+      uvec4 v0 = loadVertex(i), v1 = loadVertex(i + 2u),
+            v2 = loadVertex(i + 4u);
+      vec2 a = position(v0), b = position(v1), c = position(v2);
+      if (any(lessThan(p, ceil(min(a, min(b, c))))) ||
+          any(greaterThanEqual(p, ceil(max(a, max(b, c))))))
+        continue;
+      float area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+      if (area == 0.0)
+        continue;
+      float sg = area > 0.0 ? 1.0 : -1.0;
+      float e0 = (b.x - p.x) * (c.y - p.y) - (c.x - p.x) * (b.y - p.y),
+            e1 = (c.x - p.x) * (a.y - p.y) - (a.x - p.x) * (c.y - p.y),
+            e2 = (a.x - p.x) * (b.y - p.y) - (b.x - p.x) * (a.y - p.y);
+      if (!edgeIn(e0 * sg, (b.y - c.y) * sg, (c.x - b.x) * sg) ||
+          !edgeIn(e1 * sg, (c.y - a.y) * sg, (a.x - c.x) * sg) ||
+          !edgeIn(e2 * sg, (a.y - b.y) * sg, (b.x - a.x) * sg))
+        continue;
+      float inverseArea = 1.0 / area;
+      float w0 = e0 * inverseArea, w1 = e1 * inverseArea, w2 = 1.0 - w0 - w1;
+      uint test = cfg(1);
+      if ((test & 16384u) != 0u && (((((cfg(26) == 1u ? 128u : dst.a) & 128u) !=
+                                      0u)) != ((test & 32768u) != 0u)))
+        continue;
+      float dz1 = v1.z >= v0.z ? float(v1.z - v0.z) : -float(v0.z - v1.z),
+            dz2 = v2.z >= v0.z ? float(v2.z - v0.z) : -float(v0.z - v2.z);
+      float step = floor(dz1 * w1 + dz2 * w2);
+      uint z = step >= 0.0 ? v0.z + uint(min(step, float(0xffffffffu - v0.z)))
+                           : v0.z - uint(min(-step, float(v0.z)));
+      z = min(z, cfg(24));
+      bool zte = (test & 65536u) != 0u;
+      uint ztst = (test >> 17) & 3u;
+      if (zte && (ztst == 0u || (ztst == 2u && z < depth) ||
+                  (ztst == 3u && z <= depth)))
+        continue;
+      vec4 src = rgba(v2.a);
+      if ((cfg(0) & 8u) != 0u)
+        src = rgba(v0.a) * w0 + rgba(v1.a) * w1 + rgba(v2.a) * w2;
+      ivec4 source = ivec4(src);
+      uvec4 t0 = loadVertex(i + 1u), t1 = loadVertex(i + 3u),
+            t2 = loadVertex(i + 5u);
+      vec3 tex = uintBitsToFloat(t0.xyz) * w0 + uintBitsToFloat(t1.xyz) * w1 +
+                 uintBitsToFloat(t2.xyz) * w2;
+      if ((cfg(0) & 16u) != 0u) {
+        vec2 uv;
+        if ((cfg(0) & 256u) != 0u)
+          uv = tex.xy / 16.0;
+        else
+          uv = tex.xy / (tex.z == 0.0 ? 1.0 : tex.z) *
+               vec2(float(cfg(22)), float(cfg(23)));
+        ivec4 t = sampleTexture(uv);
+        int originalAlpha = source.a;
+        uint textureFunction = cfg(14) & 3u;
+        bool tcc = (cfg(14) & 4u) != 0u;
+        if (textureFunction == 0u) {
+          source.rgb = clamp((t.rgb * source.rgb) >> 7, ivec3(0), ivec3(255));
+          if (tcc)
+            source.a = clamp((t.a * source.a) >> 7, 0, 255);
+        } else if (textureFunction == 1u) {
+          source.rgb = t.rgb;
+          if (tcc)
+            source.a = t.a;
+        } else {
+          source.rgb = clamp(((t.rgb * source.rgb) >> 7) + ivec3(originalAlpha),
+                             ivec3(0), ivec3(255));
+          if (tcc)
+            source.a = textureFunction == 2u
+                           ? clamp(t.a + originalAlpha, 0, 255)
+                           : t.a;
+        }
+      }
+      if ((cfg(0) & 32u) != 0u) {
+        int f = int(float(t0.a) * w0 + float(t1.a) * w1 + float(t2.a) * w2);
+        ivec3 fog = ivec3(unpacked(cfg(21)).rgb);
+        source.rgb = (f * source.rgb + (255 - f) * fog) >> 8;
+      }
+      bool writeColor = true, writeAlpha = true, writeDepth = cfg(13) == 0u;
+      if ((test & 1u) != 0u && !alphaPass(source.a, test)) {
+        switch ((test >> 12) & 3u) {
+        case 0u:
+          continue;
+        case 1u:
+          writeDepth = false;
+          break;
+        case 2u:
+          writeColor = false;
+          break;
+        default:
+          writeDepth = false;
+          writeAlpha = false;
+          break;
+        }
+      }
+      if (writeColor) {
+        ivec3 color = source.rgb;
+        if ((cfg(0) & 64u) != 0u && (cfg(5) == 0u || (source.a & 128) != 0)) {
+          uint blend = cfg(2);
+          uint aa = blend & 3u, bb = (blend >> 2) & 3u, cc = (blend >> 4) & 3u,
+               dd = (blend >> 6) & 3u;
+          ivec3 av = aa == 0u   ? source.rgb
+                     : aa == 1u ? ivec3(dst.rgb)
+                                : ivec3(0),
+                bv = bb == 0u   ? source.rgb
+                     : bb == 1u ? ivec3(dst.rgb)
+                                : ivec3(0),
+                dv = dd == 0u   ? source.rgb
+                     : dd == 1u ? ivec3(dst.rgb)
+                                : ivec3(0);
+          int factor = cc == 0u   ? source.a
+                       : cc == 1u ? int(cfg(26) == 1u ? 128u : dst.a)
+                                  : int(cfg(3) & 255u);
+          color = (((av - bv) * factor) >> 7) + dv;
+        }
+        color = cfg(7) != 0u ? clamp(color, ivec3(0), ivec3(255))
+                             : (color & ivec3(255));
+        uint alpha = uint(source.a) & 255u;
+        if (cfg(6) != 0u)
+          alpha |= 128u;
+        uint mask = cfg(4);
+        if (!writeAlpha)
+          mask |= 0xff000000u;
+        uint outputValue = uint(color.r) | (uint(color.g) << 8) |
+                           (uint(color.b) << 16) | (alpha << 24);
+        if (cfg(26) == 2u || cfg(26) == 10u) {
+          uint m = pack16(mask);
+          dst = unpacked(
+              expand16((pack16(outputValue) & ~m) | (pack16(packed(dst)) & m)));
+        } else {
+          if (cfg(26) == 1u)
+            mask |= 0xff000000u;
+          dst = unpacked((outputValue & ~mask) | (packed(dst) & mask));
+        }
+      }
+      if (writeDepth && zte)
+        depth = z;
+    }
+  outputColor = dst;
+  outputDepth = depth;
+}
