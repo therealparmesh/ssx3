@@ -268,7 +268,7 @@
       timerQueries = [];
     const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2");
     const started = performance.now();
-    function run(name, config, input) {
+    function run(name, config, input, analyticExpected = null) {
       if (
         bridgeMode &&
         (config[24] > 0xffffff || name === "depth32-precision")
@@ -402,13 +402,26 @@
         Math.max(1, Math.ceil((input.length * 2) / 1024)) * 1024 * 4,
       );
       verticesData.set(vu);
+      const line = [1, 2].includes(config[0] & 7);
       const tileLists = Array.from({ length: 64 }, () => []);
       for (let i = 0; i < input.length; i += 3) {
         const a = input.slice(i, i + 3),
-          minX = Math.max(0, Math.ceil(Math.min(...a.map((v) => v[0])))),
-          minY = Math.max(0, Math.ceil(Math.min(...a.map((v) => v[1])))),
-          maxX = Math.min(63, Math.ceil(Math.max(...a.map((v) => v[0]))) - 1),
-          maxY = Math.min(63, Math.ceil(Math.max(...a.map((v) => v[1]))) - 1);
+          minX = Math.max(
+            0,
+            Math.ceil(Math.min(...a.map((v) => v[0]))) - (line ? 1 : 0),
+          ),
+          minY = Math.max(
+            0,
+            Math.ceil(Math.min(...a.map((v) => v[1]))) - (line ? 1 : 0),
+          ),
+          maxX = Math.min(
+            63,
+            Math.ceil(Math.max(...a.map((v) => v[0]))) + (line ? 1 : -1),
+          ),
+          maxY = Math.min(
+            63,
+            Math.ceil(Math.max(...a.map((v) => v[1]))) + (line ? 1 : -1),
+          );
         if (minX > maxX || minY > maxY) continue;
         for (let y = minY >> 3; y <= maxY >> 3; y++)
           for (let x = minX >> 3; x <= maxX >> 3; x++)
@@ -596,10 +609,9 @@
         )
       )
         throw Error("CPU reference rejected input");
-      const expected = reference.HEAPU32.subarray(
-        outputPtr / 4,
-        outputPtr / 4 + 8192,
-      );
+      const expected =
+        analyticExpected ||
+        reference.HEAPU32.subarray(outputPtr / 4, outputPtr / 4 + 8192);
       let colorMismatches = 0,
         depthMismatches = 0,
         changedColorPixels = 0,
@@ -636,7 +648,7 @@
         changedColorPixels,
         changedDepthPixels,
         pixels: 4096,
-        triangles: input.length / 3,
+        primitives: input.length / 3,
         glError: 0,
         samples,
       };
@@ -1012,6 +1024,69 @@
           }
           run("expanded-gs16-" + ta + "-" + aem + "-" + filter, c, v);
         }
+    // Non-power-of-two lengths, endpoint exclusion, subpixel rounding,
+    // reversed directions, clipping, zero-length and fractional short lines.
+    const lineEndpoints = [
+      [3, 5, 59, 22],
+      [3, 5, 22, 59],
+      [3, 7, 58, 7],
+      [9, 4, 9, 57],
+      [8.5, 8.5, 40.5, 24.5],
+      [-0.5, 8.5, 17.5, 11.5],
+      [-8, -3, 63, 30],
+      [8, 8, 8, 8],
+      [8.25, 8.25, 8.75, 8.75],
+      [62.5, 2, 64.5, 62],
+      [4.5, 63.5, 60.5, 63.5],
+      [10, 10, 26, 42],
+    ];
+    for (let n = 0; n < lineEndpoints.length; n++)
+      for (const reversed of [false, true]) {
+        const c = baseConfig();
+        c[0] = n & 1 ? 2 : 1;
+        const [x0, y0, x1, y1] = lineEndpoints[n];
+        // Zero attributes isolate coverage from the CPU reference's known
+        // weighted-sum rounding of constant attributes at arbitrary lengths.
+        c[1] = 0x30000;
+        const a = [x0, y0, 0, 0];
+        const b = [x1, y1, 0, 0];
+        const ends = reversed ? [b, a] : [a, b];
+        run("line-coverage-" + n + "-" + reversed, c, [...ends, ends[1]]);
+      }
+    for (let mode = 0; mode < 16; mode++) {
+      const c = baseConfig();
+      c[0] =
+        1 |
+        8 |
+        (mode & 1 ? 16 | 256 : 0) |
+        (mode & 2 ? 64 : 0) |
+        (mode & 4 ? 32 : 0);
+      c[15] = mode & 8 ? 1 : 0;
+      c[14] = 4;
+      c[25] = mode & 8 ? 2 : 1;
+      const a = [8, 8, 128, pack(32, 64, 128, 64), 8, 8, 1, 128];
+      const b = [40, 24, 256, pack(128, 32, 64, 128), 504, 504, 1, 192];
+      const d = [24, 8, 224, pack(64, 128, 32, 96), 8, 504, 1, 160];
+      const e = [24, 40, 160, pack(32, 64, 128, 64), 504, 8, 1, 224];
+      run("line-attributes-" + mode, c, [a, b, b, d, e, e]);
+    }
+    {
+      // Independent oracle: a horizontal 56-pixel flat line must keep its
+      // last vertex's color and constant depth, without weighted-sum drift.
+      const c = baseConfig();
+      c[0] = 1;
+      const color = pack(128, 64, 32, 128);
+      const expected = new Uint32Array(8192);
+      expected.fill(c[8], 0, 4096);
+      expected.fill(c[9], 4096);
+      for (let x = 3; x < 59; x++) {
+        expected[7 * 64 + x] = color;
+        expected[4096 + 7 * 64 + x] = 200;
+      }
+      const a = [3, 7, 200, pack(12, 34, 56, 78)];
+      const b = [59, 7, 200, color];
+      run("line-constant-independent", c, [a, b, b], expected);
+    }
     if (bridge) {
       for (const size of [8, 16, 24, 32, 48]) bridge.targets(size, size);
       const c = baseConfig();
@@ -1038,7 +1113,7 @@
       milliseconds: performance.now() - started,
       errors: [],
       scope:
-        "Ordered WebGL2 triangles versus unchanged CPU GS reference:32/24/16-bit color/depth, PSMT4/8/8H and32/24/16-bit textures, alpha/blend/masks/fog/clamp/filtering.64x64 controlled cases only; no full-game or performance qualification.",
+        "Ordered WebGL2 triangles/lines versus CPU GS reference plus an independent constant-line oracle:32/24/16-bit color/depth, PSMT4/8/8H and32/24/16-bit textures, alpha/blend/masks/fog/clamp/filtering.64x64 controlled cases only; no full-game or performance qualification.",
     };
     if (bridge) {
       bridge.destroy();

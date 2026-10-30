@@ -77,7 +77,7 @@ async function main() {
         assert(!result.error, result.error);
         assert.equal(
           result.passed,
-          bridge ? 692 : 724,
+          bridge ? 733 : 765,
           "Run the complete fixture matrix",
         );
         assert.equal(logs.length, 0, "No browser or graphics warnings");

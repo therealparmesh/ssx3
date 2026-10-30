@@ -1,5 +1,5 @@
 #version 300 es
-// Experimental ordered triangle rasterizer. The host must preserve resource
+// Experimental ordered triangle/line rasterizer. The host must preserve resource
 // lifetimes and split batches at feedback/VRAM hazards. See the asset-free
 // protocol and qualification limits in tests/webgl_ordered/README.md.
 // GS shading follows raster.cpp and gpu/gs.wgsl; distributed under LICENSE.
@@ -130,22 +130,60 @@ void main() {
       uvec4 v0 = loadVertex(i), v1 = loadVertex(i + 2u),
             v2 = loadVertex(i + 4u);
       vec2 a = position(v0), b = position(v1), c = position(v2);
-      if (any(lessThan(p, ceil(min(a, min(b, c))))) ||
-          any(greaterThanEqual(p, ceil(max(a, max(b, c))))))
-        continue;
-      float area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
-      if (area == 0.0)
-        continue;
-      float sg = area > 0.0 ? 1.0 : -1.0;
-      float e0 = (b.x - p.x) * (c.y - p.y) - (c.x - p.x) * (b.y - p.y),
-            e1 = (c.x - p.x) * (a.y - p.y) - (a.x - p.x) * (c.y - p.y),
-            e2 = (a.x - p.x) * (b.y - p.y) - (b.x - p.x) * (a.y - p.y);
-      if (!edgeIn(e0 * sg, (b.y - c.y) * sg, (c.x - b.x) * sg) ||
-          !edgeIn(e1 * sg, (c.y - a.y) * sg, (a.x - c.x) * sg) ||
-          !edgeIn(e2 * sg, (a.y - b.y) * sg, (b.x - a.x) * sg))
-        continue;
-      float inverseArea = 1.0 / area;
-      float w0 = e0 * inverseArea, w1 = e1 * inverseArea, w2 = 1.0 - w0 - w1;
+      float w0 = 1.0, w1 = 0.0, w2 = 0.0;
+      uint kind = cfg(0) & 7u;
+      if (kind == 1u || kind == 2u) {
+        // GS reference DDA: exclude the final endpoint and round ties away
+        // from zero. The dominant-axis increment is at least one pixel, so
+        // only nearby step indices can hit this pixel.
+        vec2 delta = b - a;
+        int steps = int(max(abs(delta.x), abs(delta.y)));
+        bool horizontal = abs(delta.x) >= abs(delta.y);
+        float dominant = horizontal ? delta.x : delta.y;
+        float along = horizontal ? p.x - a.x : p.y - a.y;
+        int guess = steps > 0 ? int(floor(along / dominant * float(steps))) : 0;
+        bool hit = false;
+        for (int candidate = guess - 2; candidate <= guess + 2; candidate++) {
+          if (candidate < 0 || candidate >= max(steps, 1))
+            continue;
+          float t = steps > 0 ? float(candidate) / float(steps) : 0.0;
+          // GS positions are 12.4 fixed point. Integer rational coverage
+          // avoids a reciprocal approximation moving an exact half-pixel
+          // tie to its neighboring pixel on a particular GPU driver.
+          int denominator = 16 * max(steps, 1);
+          ivec2 numerator =
+              ivec2(a * 16.0) * max(steps, 1) + ivec2(delta * 16.0) * candidate;
+          ivec2 rounded = ((abs(numerator) + denominator / 2) / denominator) *
+                          sign(numerator);
+          if (all(equal(rounded, pixel))) {
+            w1 = t;
+            hit = true;
+            break;
+          }
+        }
+        if (!hit)
+          continue;
+        w0 = 1.0 - w1;
+      } else {
+        if (any(lessThan(p, ceil(min(a, min(b, c))))) ||
+            any(greaterThanEqual(p, ceil(max(a, max(b, c))))))
+          continue;
+        float area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+        if (area == 0.0)
+          continue;
+        float sg = area > 0.0 ? 1.0 : -1.0;
+        float e0 = (b.x - p.x) * (c.y - p.y) - (c.x - p.x) * (b.y - p.y),
+              e1 = (c.x - p.x) * (a.y - p.y) - (a.x - p.x) * (c.y - p.y),
+              e2 = (a.x - p.x) * (b.y - p.y) - (b.x - p.x) * (a.y - p.y);
+        if (!edgeIn(e0 * sg, (b.y - c.y) * sg, (c.x - b.x) * sg) ||
+            !edgeIn(e1 * sg, (c.y - a.y) * sg, (a.x - c.x) * sg) ||
+            !edgeIn(e2 * sg, (a.y - b.y) * sg, (b.x - a.x) * sg))
+          continue;
+        float inverseArea = 1.0 / area;
+        w0 = e0 * inverseArea;
+        w1 = e1 * inverseArea;
+        w2 = 1.0 - w0 - w1;
+      }
       uint test = cfg(1);
       if ((test & 16384u) != 0u && (((((cfg(26) == 1u ? 128u : dst.a) & 128u) !=
                                       0u)) != ((test & 32768u) != 0u)))

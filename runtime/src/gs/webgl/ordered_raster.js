@@ -13,7 +13,14 @@ class Ps2OrderedRaster {
     this.targetSets = new Map();
     this.width = 0;
     this.height = 0;
-    this.stats = { batches: 0, triangles: 0, rasterDraws: 0, readbacks: 0 };
+    this.stats = {
+      batches: 0,
+      primitives: 0,
+      triangles: 0,
+      lines: 0,
+      rasterDraws: 0,
+      readbacks: 0,
+    };
     try {
       this.vao = gl.createVertexArray();
       this.sampler = gl.createSampler();
@@ -341,11 +348,25 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     if (![0, 1, 2, 10].includes(settings[26]) || settings[24] > 0xffffff)
       throw Error("Unsupported transitional color/depth view");
     this.targets(width, height);
+    const kind = settings[0] & 7;
+    if (![1, 2, 3, 4, 5].includes(kind))
+      throw Error("Unsupported ordered raster primitive");
+    const line = kind === 1 || kind === 2;
     const positions = new Float32Array(
       vertexWords.buffer,
       vertexWords.byteOffset,
       vertexWords.length,
     );
+    if (line) {
+      for (let at = 0; at < positions.length; at += 8)
+        for (const coordinate of [positions[at], positions[at + 1]])
+          if (
+            !Number.isFinite(coordinate) ||
+            Math.abs(coordinate) > 4096 ||
+            !Number.isInteger(coordinate * 16)
+          )
+            throw Error("Line coordinates must use the GS 12.4 domain");
+    }
     const bins = new Map();
     let left = width,
       bottom = height,
@@ -357,27 +378,28 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       const x0 = Math.max(
         0,
         scissorX & 65535,
-        Math.ceil(Math.min(positions[i], positions[i + 8], positions[i + 16])),
+        Math.ceil(Math.min(positions[i], positions[i + 8], positions[i + 16])) -
+          (line ? 1 : 0),
       );
       const y0 = Math.max(
         0,
         scissorY & 65535,
         Math.ceil(
           Math.min(positions[i + 1], positions[i + 9], positions[i + 17]),
-        ),
+        ) - (line ? 1 : 0),
       );
       const x1 = Math.min(
         width - 1,
         scissorX >>> 16,
-        Math.ceil(Math.max(positions[i], positions[i + 8], positions[i + 16])) -
-          1,
+        Math.ceil(Math.max(positions[i], positions[i + 8], positions[i + 16])) +
+          (line ? 1 : -1),
       );
       const y1 = Math.min(
         height - 1,
         scissorY >>> 16,
         Math.ceil(
           Math.max(positions[i + 1], positions[i + 9], positions[i + 17]),
-        ) - 1,
+        ) + (line ? 1 : -1),
       );
       if (![x0, y0, x1, y1].every(Number.isFinite))
         throw Error("Invalid ordered raster coordinates");
@@ -514,7 +536,8 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     // The host checks errors at its frame boundary; querying after every batch
     // would force repeated GL command round trips. The fixture checks each case.
     this.stats.batches++;
-    this.stats.triangles += vertexWords.length / 24;
+    this.stats.primitives += vertexWords.length / 24;
+    this.stats[line ? "lines" : "triangles"] += vertexWords.length / 24;
     this.stats.rasterDraws += 3;
   }
 

@@ -4,7 +4,7 @@ This is an asset-free verification harness for an experimental WebGL2 GS
 rasterizer. It is **not connected to the game renderer** and does not establish
 that SSX 3 is playable or meets its frame-time target on this backend.
 
-The fragment shader processes each tile's triangles in submission order. Each
+The fragment shader processes each tile's primitives in submission order. Each
 fragment keeps its current color and integer depth locally, including alpha-test
 failures that write color without writing depth. The batch needs one raster draw
 instead of a destination snapshot and separate passes for every primitive.
@@ -46,9 +46,12 @@ used by this harness. WebGL2 is required.
 
 ## What the checks prove
 
-Each browser runs **724 controlled cases**, comparing all 4,096 color pixels and
-all 4,096 integer depth values with the software renderer. The matrix covers:
+Each browser runs **765 controlled cases**, comparing all 4,096 color pixels and
+all 4,096 integer depth values. Of these, 764 use the software renderer and one
+uses an independent expected image for a constant-color/depth horizontal line. The matrix covers:
 
+- Line coverage: endpoint exclusion, reversal, clipping, fractional/zero-length
+  lines, fixed-point rounding, and interpolated color/depth/texture/fog.
 - 81 blend equations and factors, alpha comparisons, and all four failure modes.
 - Overlapping triangles, depth comparisons and masks, destination alpha, PABE,
   FBA, partial framebuffer masks, clamp/wrap and scanline masks.
@@ -70,7 +73,7 @@ an FPS measurement.
 
 ## Data layout and remaining work
 
-Each triangle has three 32-byte vertices: `float x, y; uint32 z, rgba; float s, t,
+Each primitive occupies three 32-byte vertices (a line stores A, B, B): `float x, y; uint32 z, rgba; float s, t,
 q; uint32 fog`. Vertex data is uploaded to RGBA32UI, two texels per vertex.
 Eight-pixel tile headers contain the ordered list offset and count. Color and
 depth inputs are RGBA8UI and R32UI; separate integer attachments receive outputs.
@@ -95,7 +98,7 @@ The uniform block contains eight `uvec4` values. Its word layout is:
 Integration still needs real GS command batching, texture and palette lifetimes,
 physical VRAM alias coherence, presentation and context-loss recovery. The
 GPU bridge below supplies transfers and owned-resource cleanup, but still needs
-those renderer-level integrations. The fixture does not implement points, lines,
+those renderer-level integrations. The fixture does not implement points,
 sprites, dithering, mip LOD or general framebuffer feedback. Region coordinates
 in these tests stay within the supplied texture storage. Full-game fidelity,
 sustained performance, audio, saves, controls and physical phone testing remain
@@ -119,11 +122,12 @@ NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.c
 NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.cjs firefox bridge
 ```
 
-This mode exercises **692 cases per browser**, comparing the actual resolved
-color and depth with the CPU renderer. It also checks both negative controls.
+This mode exercises **733 cases per browser**, comparing the actual resolved
+color and depth with the CPU renderer and the independent constant-line image.
+It also checks both negative controls.
 The bridge accepts the supported 32/24/16-bit color views and a 24-bit-or-smaller
 depth domain; D32F cannot reconstruct all 32-bit integer depth values. The raw integer kernel
-matrix retains its 724-case coverage. Unsupported bridge cases are explicitly
+matrix retains its 765-case coverage. Unsupported bridge cases are explicitly
 listed as skipped, rather than counted as passes. No tests are removed from the
 raw kernel matrix.
 
@@ -139,3 +143,12 @@ The expanded GS16 framebuffer source adapter distinguishes a normalized RGBA8
 view containing already-expanded 5-bit color and a raw alpha high bit from an
 RGB5_A1 texture. Reapplying RGB5_A1 normalization to the former would lose color
 precision and interpret its alpha incorrectly.
+
+Line positions must stay within the GS 12.4 coordinate domain (±4096 screen
+pixels). Integer rational coverage prevents GPU reciprocal approximations from
+moving exact half-pixel ties. Coverage-only cases use zero attributes to isolate
+them from weighted-sum rounding in the unchanged CPU line reference; interpolated
+attribute cases use power-of-two lengths. The independent horizontal-line image
+checks that the last vertex's flat color and constant depth survive a
+non-power-of-two length. Arbitrary line attributes still need broader fidelity
+checks. Bridge counters distinguish lines, triangles, and total primitives.

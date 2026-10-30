@@ -25,6 +25,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE int reference(const unsigned *config,
   State s{};
   s.prmodecont = 1;
   s.prim = config[0];
+  s.ctx[0].xyoffset = 16384ull | (16384ull << 32);
   s.ctx[0].test = config[1];
   s.ctx[0].alpha = config[2] | (uint64_t(config[3]) << 32);
   s.ctx[0].frame =
@@ -96,8 +97,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE int reference(const unsigned *config,
     for (unsigned j = 0; j < 3; j++) {
       const auto &p = data[i * 3 + j];
       auto &q = v[j];
-      q.x = std::lround(p.x * 16);
-      q.y = std::lround(p.y * 16);
+      q.x = std::lround(p.x * 16) + 16384;
+      q.y = std::lround(p.y * 16) + 16384;
       q.z = p.z;
       q.r = p.rgba;
       q.g = p.rgba >> 8;
