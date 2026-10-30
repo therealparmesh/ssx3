@@ -1,7 +1,7 @@
 # Experimental WebGL backend fixtures
 
 This builds the actual upstream-backed GS candidate without game assets. It
-makes the command-drain, framebuffer upload/readback and restored-memory fixes
+makes the command-drain, framebuffer upload/readback, memory export and restored-memory fixes
 reproducible from this repository. It does **not** connect this backend to the
 shipping game or qualify full-game fidelity, saves, performance or phones.
 
@@ -23,7 +23,7 @@ prepared files change, use a fresh output directory, passed as the first build
 script argument. `EMCMAKE`, `CMAKE` and `WEBGL_BUILD_JOBS` override build tools and
 parallelism. Build products and downloads stay under the ignored `build/` tree.
 
-Open `http://127.0.0.1:8264/?fixture=restore`, or select `population` or `readback`
+Open `http://127.0.0.1:8264/?fixture=restore`, or select `population`, `readback` or `export`
 through the `fixture` query parameter. Each page reports its own result.
 
 For automated checks, use the same external `puppeteer-core@25.16.0` installation
@@ -53,17 +53,38 @@ testing; these fixtures do not measure performance.
 - **Restore:** 24 cases, 1,572,864 pixels per browser. Replacing RAM must discard
   stale framebuffers and pending draws. Repeated invalidation preserves loaded
   RAM, registers and CLUT contents, and the next surface observes restored data.
+- **Export:** 21 cases in each rendering mode (native and hybrid), including
+  real color/depth draws for four color and three depth layouts, full 4 MB RAM
+  comparisons, clean-export readback counts, disjoint and overlapping-page CPU
+  uploads, and 65,536 values per depth layout. Guard cases reject ambiguous
+  ownership and Z32 before RAM mutation. Padded direct/indexed uploads preserve
+  outside pixels; chunked RGB24 uploads retain partial-pixel bytes. Two omitted
+  synchronization controls must fail through RAM mismatches with no GL errors.
+  The hybrid run must actually execute the ordered renderer.
+
+Native depth caches initialize from RAM, including untouched pixels. Before a
+CPU upload, physical-page overlap determines whether pending GPU writes must
+be exported. Disjoint uploads do not cause readback. Copy/alias operations also
+mark dirty targets; dropping an unresolved dirty view prevents a later export
+from silently succeeding. These guards expose unsupported states rather than
+establishing general alias coherence.
 
 The restore hook is `WriteBackMemoryCache` (CPU RAM to GPU caches). It discards
 cached GPU resources without rendering old pending work into restored memory.
-The save hook, `SyncMemoryCache` (GPU to CPU RAM), still needs dirty color/depth
-ownership and physical alias coherence. The restore fixture is not an end-to-end
-save/load test. The runtime adapter must also invalidate its register cache and
-restore the CLUT when importing a snapshot.
+The save hook, `SyncMemoryCache` (GPU to CPU RAM), tracks conservative dirty
+surface rectangles and stages disjoint color/depth views into a temporary RAM
+image. Physical ownership is checked before readback; RAM and dirty metadata
+are committed only after all reads succeed. An empty export performs no reads.
+Overlapping cached views, a view wrapping onto itself, lossy floating-point Z32,
+scaled storage and multisampling are rejected. General physical alias
+reconciliation remains unfinished. The restore/export fixtures are not an
+end-to-end save/load test. The runtime adapter must also invalidate its register
+cache and restore the CLUT when importing a snapshot.
 
 The patch includes the hybrid ordered/hardware raster integration and native
-GS fixes tested in the private candidate, with asset-free probes. The three
-fixtures here check uploads, readback and restore. They do not exercise the
+GS fixes tested in the private candidate, with asset-free probes. These
+fixtures check uploads, readback, restore and memory export. The hybrid export
+check loads the shared shader/bridge, but does not replace the full
 ordered/hardware rendering matrix; use `tests/webgl_ordered/README.md` for that
 separate coverage. Captured-game fidelity differences, mip LOD, dithering,
 feedback/alias coherence, context recovery, live worker/presentation integration,

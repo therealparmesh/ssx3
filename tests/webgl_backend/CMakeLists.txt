@@ -30,11 +30,12 @@ add_library(gs_core STATIC
     "${PLAY}/Source/states/XmlStateFile.cpp")
 target_include_directories(gs_core PUBLIC "${PLAY}/Source" "${PLAY}/deps/CodeGen/include")
 target_link_libraries(gs_core PUBLIC app_shared)
-foreach(fixture population readback restore)
+foreach(fixture population readback restore export)
     add_executable(${fixture} "${fixture}.cpp")
     target_link_libraries(${fixture} PRIVATE gsh_opengl gs_core)
     target_include_directories(${fixture} PRIVATE "${PLAY}/Source")
     target_link_options(${fixture} PRIVATE -fexceptions -sDISABLE_EXCEPTION_CATCHING=0
         -sALLOW_MEMORY_GROWTH=1 -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2
-        -sASSERTIONS=1 -sEXIT_RUNTIME=0)
+        -sASSERTIONS=1 -sEXIT_RUNTIME=0
+        -sEXPORTED_RUNTIME_METHODS=addRunDependency,removeRunDependency)
 endforeach()
