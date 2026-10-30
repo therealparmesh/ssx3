@@ -52,15 +52,13 @@ Opening logos, the timed legal screen and startup movies are skipped by default.
 
 **Performance** visual effects are the default. **Original (lens flares)** restores the translated decorative effects and can reduce frame rate. Resolution and aspect ratio are also selectable. Settings save the current memory card before reloading; a failed save leaves the old setting intact.
 
-GPU timestamp queries and their asynchronous readbacks are disabled during normal browser play. Add `?debug` to the player URL to enable detailed statistics and GPU timings when the adapter supports them.
+Live FPS/statistics and GPU timestamp queries are opt-in. Add `?debug` to the player URL to show diagnostics and GPU timings when supported. Normal play leaves the HUD inactive: repainting it caused native canvas snapshot waits in Firefox. Debug mode adds measurement overhead.
 
 Save career progress in the game first: **Mcomm → Options → Save game**, or the lodge's **Save Game** command. Saves use the browser's storage for the current origin. Then use the player's **Options → Export card** before changing browser, device or host. Import restores that `.ps2` card on the destination; load the career through the game's normal menus. Concurrent tabs cannot independently overwrite the same origin's card.
 
 ## Status and testing
 
-Version 67 is deployed privately. It avoids redundant FPS status updates and passed separate five-minute Chromium and Firefox hosted single-player race/results checks at 120 Hz: approximately 60 fresh game images per second, no image/audio loss or application errors, and worst actual submission intervals of 21.860 ms and 23.380 ms respectively. All 50 asset-free CI suites pass. Keyboard navigation, simulated controllers and earlier save/recovery flows have been exercised. See [current release status](docs/release-status.md) for exact builds, measurement scope and remaining sign-off, and [validation scope](docs/validation.md) for historical evidence and limitations.
-
-Current-worker two-player racing also works with independent keyboard/controller input. Chromium passed its separate timing check; Firefox recorded three intervals over the 25 ms limit, with a 26.60 ms maximum, and remains open for timing qualification.
+Version 68 is deployed privately with live statistics moved to the existing `?debug` mode. Separate five-minute hosted two-player Snow Jam windows passed at 120 Hz: Firefox 60.000005 fresh submissions/s with a 19.180 ms maximum interval; Chromium 60.002325 with a 20.080 ms maximum. Both riders finished in each run. There was no image/audio loss, clipping or application error. All 50 asset-free CI suites pass. See [current release status](docs/release-status.md) for exact builds, scope and retained earlier failures, and [validation scope](docs/validation.md) for historical evidence and limitations.
 
 Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
 
