@@ -461,9 +461,11 @@ function failPlayer(message, error) {
   stopCompiler();
   clearTimeout(noteTimer);
   noteTimer = 0;
-  releaseInput();
   if (Module.running) Module._ps2web_pause(1);
   Module.running = false;
+  // Failure is terminal: clear local controls without releasing a held jump
+  // into the guest while its asynchronous pause is still being acknowledged.
+  releaseInput();
   if (audio) audio.suspend().catch(() => {});
   flushCard();
   statusEl.textContent = 'Player stopped';

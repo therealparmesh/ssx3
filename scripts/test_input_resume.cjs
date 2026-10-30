@@ -368,5 +368,19 @@ async function resume(f) {
     f.setPauseReady(true); await task; f.poll(); assert.equal(f.resumes.length, 0);
     f.focus(); const state = await resume(f); assert.equal(state.pads[0][0], 0x4000);
   }
-  console.log('Input channels and pause/resume: 31 regression scenarios passed');
+  {
+    const f = fixture(), pad = f.pads[0] = controller(0); hold(pad, 0);
+    f.key('Space'); f.play(); f.setPauseReady(false); const begin = f.calls.length;
+    f.fail();
+    assert.deepEqual(f.calls.slice(begin).map(c => c.name), ['pause'],
+      'Terminal failure must stop the guest without releasing a held jump before pause acknowledgement');
+    assert.equal(f.Module.running, false);
+    assert.equal(f.Module.failed, true);
+    assert.equal(vm.runInContext('keys.size', f.context), 0, 'Terminal failure must still clear local input');
+    f.setPauseReady(true); f.poll();
+    assert.deepEqual(f.calls.slice(begin).map(c => c.name), ['pause'],
+      'A failed player must not dispatch later input');
+    assert.equal(f.start.textContent, 'Reload player');
+  }
+  console.log('Input channels and pause/resume: 32 regression scenarios passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
