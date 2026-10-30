@@ -107,6 +107,32 @@ in these tests stay within the supplied texture storage. Full-game fidelity,
 sustained performance, audio, saves, controls and physical phone testing remain
 separate release requirements.
 
+## Runtime state adapter
+
+`runtime/src/gs/webgl/register_stream.hpp` converts the runtime's borrowed
+`State` and completed `Vertex` packets into GS register writes through a caller
+supplied `(uint8_t register_id, uint64_t value)` sink. It resolves PRMODE,
+normalizes strips/fans into independent primitives, and caches unchanged setup
+registers using the caller's setup revision. Pass a new revision whenever a
+non-vertex GS register changes; the live runtime's `g_setup_generation` supplies
+that contract. Vertex attributes are checked on every draw.
+
+Repeated XYZ2 kicks, TRXDIR transfers, CLUT loads and TEXFLUSH writes remain
+actions even when their values match. Setup replay masks TEX0's CLD field so it
+cannot duplicate an explicit palette load. TEX2 is already resolved into the
+runtime context's TEX0. Call `invalidate()` after backend reset or register
+mutations outside this adapter. The sink owns its queue and must copy writes
+before returning; state and vertices are not retained. If a sink throws after
+partially accepting commands, recover/reset the backend and invalidate the
+adapter before resuming.
+
+The asset-free `webgl-register-stream` CTest target checks register packing,
+context/mode selection, revision caching, repeated actions and invalidation.
+CI also compiles and runs the same test under Emscripten/Node. This adapter is
+an integration boundary, not a complete backend: it does not own VRAM, transfer
+payloads, readback, presentation, save state or context recovery. The shipping
+game still does not select this WebGL renderer.
+
 ## GPU bridge validation
 
 `runtime/src/gs/webgl/ordered_raster.js` is a synchronous GPU-only bridge around

@@ -1,0 +1,132 @@
+#include "gs/webgl/register_stream.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <iostream>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+using namespace ps2::gs;
+using Event = std::pair<std::uint8_t, std::uint64_t>;
+void expect(bool condition, const char *message) {
+  if (!condition)
+    throw std::runtime_error(message);
+}
+
+int main() {
+  try {
+    webgl::RegisterStream stream;
+    State s{};
+    s.prim = 4;
+    s.prmodecont = 0;
+    s.prmode = 0x358;
+    s.ctx[0].frame = 0x1111222233334444ull;
+    s.ctx[1].frame = 0x5555666677778888ull;
+    s.ctx[0].tex0 = 0xE000000012345678ull;
+    s.colclamp = 1;
+    Vertex v{0xfffe, 0xffff, 0xabcdef, 0x12,   0x34,   0x56, 0x78,
+             0.5f,   -3.25f, 14.5f,    0x1234, 0x1abc, 0xa5};
+    std::array<Vertex, 3> vertices{v, v, v};
+    std::array<unsigned char, sizeof(s)> before{};
+    std::memcpy(before.data(), &s, sizeof(s));
+    std::vector<Event> events;
+    auto sink = [&](std::uint8_t id, std::uint64_t value) {
+      events.emplace_back(id, value);
+    };
+    auto has = [&](unsigned id, std::uint64_t value) {
+      return std::find(events.begin(), events.end(), Event{id, value}) !=
+             events.end();
+    };
+    auto count = [&](unsigned id) {
+      return std::count_if(events.begin(), events.end(),
+                           [&](auto e) { return e.first == id; });
+    };
+    stream.draw(s, vertices.data(), 3, 1, sink);
+    expect(has(0x1A, 1) && has(0, (s.prmode & ~7ull) | 3),
+           "Resolved context/mode or strip normalization changed");
+    expect(has(0x4C, s.ctx[0].frame) && has(0x4D, s.ctx[1].frame),
+           "GS contexts were conflated");
+    expect(has(6, 0x12345678), "Setup replay must not reload CLUT");
+    expect(has(1, 0x3f00000078563412ull), "RGBA/Q bit packing changed");
+    expect(has(2, 0x41680000c0500000ull), "ST bit packing changed");
+    expect(has(3, 0x1abc1234) && has(0x0A, 0xa500000000000000ull),
+           "UV/fog bit packing changed");
+    expect(count(5) == 3, "Repeated XYZ kicks were dropped");
+    expect(has(5, 0x00abcdeffffffffeull), "XYZ bit packing changed");
+    expect(std::memcmp(before.data(), &s, sizeof(s)) == 0,
+           "Borrowed GS state was mutated");
+    events.clear();
+    stream.draw(s, vertices.data(), 3, 1, sink);
+    expect(events.size() == 3 && count(5) == 3,
+           "Unchanged setup/attributes were replayed or vertices lost");
+    s.ctx[1].test = 0x515cd;
+    events.clear();
+    stream.draw(s, vertices.data(), 3, 2, sink);
+    expect(has(0x48, 0x515cd) && count(5) == 3,
+           "Setup revision did not update context1");
+    events.clear();
+    stream.load_clut(s.ctx[0].tex0, 7, sink);
+    stream.load_clut(s.ctx[0].tex0, 7, sink);
+    expect(count(6) == 2 && has(6, 0x2000000012345678ull),
+           "Repeated palette loads were suppressed");
+    events.clear();
+    stream.draw(s, vertices.data(), 3, 2, sink);
+    expect(has(6, 0x12345678) && has(0x1C, 0),
+           "Palette side effects were not restored to draw state");
+    s.bitbltbuf = 0x123456789abcdef0ull;
+    s.trxpos = 9;
+    s.trxreg = 0x200000001ull;
+    events.clear();
+    stream.image_begin(s, sink);
+    stream.image_begin(s, sink);
+    stream.local_copy(s, sink);
+    stream.local_copy(s, sink);
+    expect(count(0x50) == 1 && count(0x53) == 4 && has(0x53, 0) && has(0x53, 2),
+           "Transfer actions were cached away");
+    events.clear();
+    stream.texflush(sink);
+    stream.texflush(sink);
+    expect(events.size() == 2 && count(0x3F) == 2,
+           "Texture invalidation actions were dropped");
+    stream.invalidate();
+    events.clear();
+    stream.draw(s, vertices.data(), 3, 2, sink);
+    expect(has(0x4D, s.ctx[1].frame),
+           "Invalidation did not restore full setup");
+    for (unsigned kind : {0u, 1u, 2u, 3u, 4u, 5u, 6u}) {
+      stream.invalidate();
+      events.clear();
+      s.prim = kind;
+      s.prmodecont = 1;
+      const int n = kind == 0                               ? 1
+                    : (kind == 1 || kind == 2 || kind == 6) ? 2
+                                                            : 3;
+      stream.draw(s, vertices.data(), n, 3, sink);
+      expect(has(0, kind == 6   ? 6
+                    : kind <= 2 ? (kind == 0 ? 0 : 1)
+                                : 3),
+             "Primitive normalization changed");
+      expect(count(5) == n, "Primitive vertex count changed");
+    }
+    events.clear();
+    s.prim = 7;
+    stream.draw(s, nullptr, 0, 4, sink);
+    expect(events.empty(), "Reserved primitive rasterized");
+    s.prim = 3;
+    bool rejected = false;
+    try {
+      stream.draw(s, vertices.data(), 2, 5, sink);
+    } catch (const std::invalid_argument &) {
+      rejected = true;
+    }
+    expect(rejected && events.empty(),
+           "Malformed draw partially emitted commands");
+    std::cout << "PASS GS register stream: modes, contexts, packing, caching, "
+                 "side effects, invalidation\n";
+  } catch (const std::exception &error) {
+    std::cerr << error.what() << '\n';
+    return 1;
+  }
+}

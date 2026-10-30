@@ -69,6 +69,14 @@ jobs:
           node --check runtime/src/gs/webgl/ordered_raster.js
           node --check tests/webgl_ordered/verify.js
           node --check scripts/test_webgl_ordered.cjs
+      - name: Verify the WebGL GS register adapter in Wasm
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          em++ -std=c++20 -O2 -DNDEBUG -fexceptions \
+            -Iruntime/src -Iruntime/include tests/webgl_register_stream.cpp \
+            -sSINGLE_FILE=1 -sENVIRONMENT=node -sDISABLE_EXCEPTION_CATCHING=0 \
+            -o build/webgl-register-stream.cjs
+          node build/webgl-register-stream.cjs
       - name: Compile and execute an unseen VU program on host and worker
         run: |
           source tools/emsdk/emsdk_env.sh
