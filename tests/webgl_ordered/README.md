@@ -46,8 +46,8 @@ used by this harness. WebGL2 is required.
 
 ## What the checks prove
 
-Each browser runs **971 controlled cases**, comparing all 4,096 color pixels and
-all 4,096 integer depth values. Of these, 970 use the software renderer and one
+Each browser runs **1,094 controlled cases**, comparing all 4,096 color pixels and
+all 4,096 integer depth values. Of these, 1,093 use the software renderer and one
 uses an independent expected image for a constant-color/depth horizontal line. The matrix covers:
 
 - Line coverage: endpoint exclusion, reversal, clipping, fractional/zero-length
@@ -128,12 +128,12 @@ NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.c
 NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.cjs firefox bridge
 ```
 
-This mode exercises **939 cases per browser**, comparing the actual resolved
+This mode exercises **1,062 cases per browser**, comparing the actual resolved
 color and depth with the CPU renderer and the independent constant-line image.
 It also checks both negative controls.
 The bridge accepts the supported 32/24/16-bit color views and a 24-bit-or-smaller
 depth domain; D32F cannot reconstruct all 32-bit integer depth values. The raw integer kernel
-matrix retains its 971-case coverage. Unsupported bridge cases are explicitly
+matrix retains its 1,094-case coverage. Unsupported bridge cases are explicitly
 listed as skipped, rather than counted as passes. No tests are removed from the
 raw kernel matrix.
 
@@ -186,9 +186,10 @@ shader shares the ordered path's coverage, integer depth, texture, fog and color
 functions. It does not use interpolated hardware depth. Fixed-function depth
 comparison/writes preserve Z24 order without input copies, tile lists or resolve.
 
-Eligibility is deliberately explicit: triangles/strips/fans, PSMCT32, full color
-writes, Z24 with the full 24-bit domain, no destination-alpha test, alpha testing
-disabled or ALWAYS, and blending disabled or an exact source-color identity.
+Eligibility is deliberately explicit: triangles/strips/fans, PSMCT32/16/16S, full
+color writes, Z24 with the full 24-bit domain, no destination-alpha test, and
+blending disabled or an exact source-color identity. Alpha testing must be
+disabled, ALWAYS, or FBONLY with depth writes prevented by ZMSK or disabled ZTE.
 Source/palette feedback is excluded. Other batches retain ordered rendering.
 FBA, scanline masks, scissoring and depth masks remain active.
 
@@ -204,3 +205,18 @@ path does not allocate intermediate integer targets. Counters distinguish
 `opaqueBatches`/`opaqueTriangles`; depth copy/bypass counters describe ordered
 batches only. This path still requires captured-game, sustained performance,
 context recovery and full-game qualification before release.
+
+Logical 16-bit hardware outputs use the same pack/expand operations as the
+ordered renderer. Their host RGBA8 target view must contain expanded GS16 values
+(RGB five bits shifted left three; alpha 0 or 128), including untouched pixels.
+Hosts must normalize other storage representations before exposing that view.
+The current captured shadow targets are cleared before drawing.
+
+An additional 123 cases prove masked-depth FBONLY equivalence across all alpha
+comparisons, PABE/FBA and PSMCT32/16/16S, including disabled ZTE. Explicit guards
+require the ordered path for depth-writing FBONLY and other nontrivial failure
+modes. Depth comparisons remain active where required. A separate hardware
+shader omits depth entirely only with disabled ZTE or ALWAYS plus masked writes.
+It also skips coordinate normalization for flat, untextured, unfogged draws whose
+attributes need no interpolation. `depthFreeOpaqueBatches` counts that subset;
+tests require both depth-free and depth-tested hardware programs to run.

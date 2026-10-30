@@ -168,7 +168,8 @@ ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
   }
   return source;
 }
-bool triangleWeights(vec2 p, vec2 a, vec2 b, vec2 c, out vec3 weights) {
+bool triangleWeights(vec2 p, vec2 a, vec2 b, vec2 c, bool interpolate,
+                     out vec3 weights) {
   if (any(lessThan(p, ceil(min(a, min(b, c))))) ||
       any(greaterThanEqual(p, ceil(max(a, max(b, c))))))
     return false;
@@ -183,10 +184,13 @@ bool triangleWeights(vec2 p, vec2 a, vec2 b, vec2 c, out vec3 weights) {
       !edgeIn(e1 * sg, (c.y - a.y) * sg, (a.x - c.x) * sg) ||
       !edgeIn(e2 * sg, (a.y - b.y) * sg, (b.x - a.x) * sg))
     return false;
-  float inverseArea = 1.0 / area;
-  weights.x = e0 * inverseArea;
-  weights.y = e1 * inverseArea;
-  weights.z = 1.0 - weights.x - weights.y;
+  weights = vec3(0, 0, 1);
+  if (interpolate) {
+    float inverseArea = 1.0 / area;
+    weights.x = e0 * inverseArea;
+    weights.y = e1 * inverseArea;
+    weights.z = 1.0 - weights.x - weights.y;
+  }
 
   return true;
 }
@@ -218,7 +222,12 @@ void main() {
   uvec4 v0 = loadVertex(i), v1 = loadVertex(i + 2u), v2 = loadVertex(i + 4u);
   vec2 a = position(v0), b = position(v1), c = position(v2);
   vec3 weights;
-  if (!triangleWeights(p, a, b, c, weights))
+#ifdef ORDERED_HARDWARE_NO_DEPTH
+  bool interpolate = (cfg(0) & 56u) != 0u;
+#else
+  const bool interpolate = true;
+#endif
+  if (!triangleWeights(p, a, b, c, interpolate, weights))
     discard;
   ivec4 source = shade(i, v0, v1, v2, p, a, b, 3u, weights);
   ivec3 color = cfg(7) != 0u ? clamp(source.rgb, ivec3(0), ivec3(255))
@@ -226,8 +235,13 @@ void main() {
   uint alpha = uint(source.a) & 255u;
   if (cfg(6) != 0u)
     alpha |= 128u;
-  outputColor = vec4(vec3(color), float(alpha)) / 255.0;
+  uvec4 result = uvec4(color, int(alpha));
+  if (cfg(26) == 2u || cfg(26) == 10u)
+    result = unpacked(expand16(pack16(packed(result))));
+  outputColor = vec4(result) / 255.0;
+#ifndef ORDERED_HARDWARE_NO_DEPTH
   gl_FragDepth = float(triangleDepth(v0.z, v1.z, v2.z, weights)) / 4294967296.0;
+#endif
 }
 #else
 void main() {
@@ -291,7 +305,7 @@ void main() {
         w1 = 1.0;
       } else {
         vec3 weights;
-        if (!triangleWeights(p, a, b, c, weights))
+        if (!triangleWeights(p, a, b, c, true, weights))
           continue;
         w0 = weights.x;
         w1 = weights.y;

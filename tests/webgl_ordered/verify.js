@@ -681,8 +681,10 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
           });
       }
       const hardware = bridgeMode && bridge.stats.opaqueBatches > opaqueBefore;
-      if (bridgeMode && expectedHardware && !hardware)
+      if (bridgeMode && expectedHardware === true && !hardware)
         throw Error(name + ": hardware route not exercised");
+      if (bridgeMode && expectedHardware === "ordered" && hardware)
+        throw Error(name + ": unsafe hardware routing");
       const result = {
         name,
         hardware,
@@ -1340,6 +1342,66 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
       ];
       run("hardware-wide-z-" + rising, c, v, null, true);
     }
+    for (const format of [0, 2, 10])
+      for (let method = 0; method < 8; method++)
+        for (const pabe of [0, 1])
+          for (const fba of [0, 1]) {
+            const c = baseConfig();
+            c[0] = 3 | 64;
+            c[2] = 0x2a;
+            c[26] = format;
+            c[1] =
+              (method & 1 ? 0x50000 : 0x30000) |
+              1 |
+              (method << 1) |
+              (128 << 4) |
+              (1 << 12);
+            c[9] = method & 1 ? 175 : 0x123456;
+            c[13] = 1;
+            c[5] = pabe;
+            c[6] = fba;
+            run(
+              "hardware-masked-alpha-" +
+                format +
+                "-" +
+                method +
+                "-" +
+                pabe +
+                "-" +
+                fba,
+              c,
+              geometry(64),
+              null,
+              true,
+            );
+          }
+    for (const format of [0, 2, 10]) {
+      const c = baseConfig();
+      c[0] = 3 | 64;
+      c[2] = 0x2a;
+      c[26] = format;
+      c[1] = 1 | (6 << 1) | (128 << 4) | (1 << 12);
+      c[13] = 0;
+      c[9] = 0x123456;
+      run("hardware-alpha-no-zte-" + format, c, geometry(64), null, true);
+    }
+    for (const format of [0, 2, 10])
+      for (let failure = 0; failure < 4; failure++)
+        for (const mask of [0, 1]) {
+          const c = baseConfig();
+          c[0] = 3 | 64;
+          c[2] = 0x2a;
+          c[26] = format;
+          c[1] = 0x50000 | 1 | (6 << 1) | (128 << 4) | (failure << 12);
+          c[13] = mask;
+          run(
+            "hardware-alpha-guard-" + format + "-" + failure + "-" + mask,
+            c,
+            geometry(64),
+            null,
+            failure === 1 && mask === 1 ? true : "ordered",
+          );
+        }
     if (bridge) {
       for (const size of [8, 16, 24, 32, 48]) bridge.targets(size, size);
       const c = baseConfig();
@@ -1369,6 +1431,13 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
         "Ordered WebGL2 triangles/lines/sprites versus CPU GS reference plus an independent constant-line oracle:32/24/16-bit color/depth, PSMT4/8/8H and32/24/16-bit textures, alpha/blend/masks/fog/clamp/filtering.64x64 controlled cases only; no full-game or performance qualification.",
     };
     if (bridge) {
+      if (
+        !bridge.stats.depthFreeOpaqueBatches ||
+        bridge.stats.depthFreeOpaqueBatches >= bridge.stats.opaqueBatches
+      )
+        throw Error(
+          "Depth-free and depth-tested hardware paths were not both exercised",
+        );
       if (!bridge.stats.opaqueBatches)
         throw Error("Hardware path not exercised");
       if (

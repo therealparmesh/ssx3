@@ -25,6 +25,7 @@ class Ps2OrderedRaster {
       depthBypasses: 0,
       opaqueBatches: 0,
       opaqueTriangles: 0,
+      depthFreeOpaqueBatches: 0,
     };
     try {
       this.vao = gl.createVertexArray();
@@ -36,15 +37,23 @@ class Ps2OrderedRaster {
       const vertexSource = `#version 300 es
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0,1);}`;
       this.kernel = this.program(vertexSource, fragmentSource);
-      this.opaque = this.program(
-        `#version 300 es
+      const opaqueVertexSource = `#version 300 es
 precision highp float;precision highp int;
 uniform highp usampler2D vertices;uniform vec2 targetSize;
 flat out uint primitiveIndex;
-void main(){uint at=uint(gl_VertexID)*2u;uvec4 v=texelFetch(vertices,ivec2(int(at%1024u),int(at/1024u)),0);vec2 p=uintBitsToFloat(v.xy);primitiveIndex=uint(gl_VertexID)/3u;gl_Position=vec4((p+vec2(0.5))/targetSize*2.0-1.0,0,1);}`,
+void main(){uint at=uint(gl_VertexID)*2u;uvec4 v=texelFetch(vertices,ivec2(int(at%1024u),int(at/1024u)),0);vec2 p=uintBitsToFloat(v.xy);primitiveIndex=uint(gl_VertexID)/3u;gl_Position=vec4((p+vec2(0.5))/targetSize*2.0-1.0,0,1);}`;
+      this.opaque = this.program(
+        opaqueVertexSource,
         fragmentSource.replace(
           "#version 300 es",
           "#version 300 es\n#define ORDERED_OPAQUE_HARDWARE 1",
+        ),
+      );
+      this.opaqueNoDepth = this.program(
+        opaqueVertexSource,
+        fragmentSource.replace(
+          "#version 300 es",
+          "#version 300 es\n#define ORDERED_OPAQUE_HARDWARE 1\n#define ORDERED_HARDWARE_NO_DEPTH 1",
         ),
       );
       // Z24 values are exact dyadic D32F values. Adding 0.5 after scaling
@@ -386,16 +395,21 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       blend = settings[2];
     const identityBlend =
       (blend & 3) === ((blend >>> 2) & 3) && ((blend >>> 6) & 3) === 0;
-    const alphaAlways =
-      (settings[1] & 1) === 0 || ((settings[1] >>> 1) & 7) === 1;
+    // FBONLY pass/fail results coincide when depth cannot be written.
+    // Depth comparison remains active; only the alpha decision is redundant.
+    const depthWrites = (settings[1] & 65536) !== 0 && settings[13] === 0;
+    const alphaNoEffect =
+      (settings[1] & 1) === 0 ||
+      ((settings[1] >>> 1) & 7) === 1 ||
+      (((settings[1] >>> 12) & 3) === 1 && !depthWrites);
     if (
       [3, 4, 5].includes(primitiveKind) &&
-      settings[26] === 0 &&
+      [0, 2, 10].includes(settings[26]) &&
       settings[27] === 1 &&
       settings[24] === 0xffffff &&
       settings[4] === 0 &&
       (settings[1] & 16384) === 0 &&
-      alphaAlways &&
+      alphaNoEffect &&
       ((settings[0] & 64) === 0 || identityBlend) &&
       texture !== colorTexture &&
       palette !== colorTexture &&
@@ -676,29 +690,28 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     gl.colorMask(true, true, true, true);
     gl.bindVertexArray(this.vao);
     const zte = (settings[1] & 65536) !== 0;
-    if (zte) {
+    const depthFree =
+      !zte || (((settings[1] >>> 17) & 3) === 1 && settings[13] !== 0);
+    const program = depthFree ? this.opaqueNoDepth : this.opaque;
+    if (zte && !depthFree) {
       gl.enable(gl.DEPTH_TEST);
       gl.depthFunc(
         [gl.NEVER, gl.ALWAYS, gl.GEQUAL, gl.GREATER][(settings[1] >>> 17) & 3],
       );
     } else gl.disable(gl.DEPTH_TEST);
     gl.depthMask(zte && settings[13] === 0);
-    gl.useProgram(this.opaque);
+    gl.useProgram(program);
     for (const [name, unit, input] of [
       ["vertices", 2, this.vertexData],
       ["sourceTexture", 5, integerTexture || this.dummyInteger],
       ["normalizedTexture", 7, texture || this.dummyNormalized],
       ["paletteTexture", 8, palette || this.dummyNormalized],
     ])
-      this.bind(this.opaque, name, unit, input);
+      this.bind(program, name, unit, input);
     gl.bindSampler(7, this.sampler);
     gl.bindSampler(8, this.sampler);
-    gl.uniform2f(
-      this.uniform(this.opaque, "targetSize").location,
-      width,
-      height,
-    );
-    gl.uniform4uiv(this.uniform(this.opaque, "settings[0]").location, settings);
+    gl.uniform2f(this.uniform(program, "targetSize").location, width, height);
+    gl.uniform4uiv(this.uniform(program, "settings[0]").location, settings);
     gl.drawArrays(gl.TRIANGLES, 0, vertexWords.length / 8);
     gl.bindSampler(7, null);
     gl.bindSampler(8, null);
@@ -708,6 +721,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     this.stats.triangles += count;
     this.stats.rasterDraws++;
     this.stats.opaqueBatches++;
+    if (depthFree) this.stats.depthFreeOpaqueBatches++;
     this.stats.opaqueTriangles += count;
   }
 
