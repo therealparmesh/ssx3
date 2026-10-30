@@ -23,6 +23,8 @@ class Ps2OrderedRaster {
       readbacks: 0,
       depthBlits: 0,
       depthBypasses: 0,
+      opaqueBatches: 0,
+      opaqueTriangles: 0,
     };
     try {
       this.vao = gl.createVertexArray();
@@ -34,6 +36,17 @@ class Ps2OrderedRaster {
       const vertexSource = `#version 300 es
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0,1);}`;
       this.kernel = this.program(vertexSource, fragmentSource);
+      this.opaque = this.program(
+        `#version 300 es
+precision highp float;precision highp int;
+uniform highp usampler2D vertices;uniform vec2 targetSize;
+flat out uint primitiveIndex;
+void main(){uint at=uint(gl_VertexID)*2u;uvec4 v=texelFetch(vertices,ivec2(int(at%1024u),int(at/1024u)),0);vec2 p=uintBitsToFloat(v.xy);primitiveIndex=uint(gl_VertexID)/3u;gl_Position=vec4((p+vec2(0.5))/targetSize*2.0-1.0,0,1);}`,
+        fragmentSource.replace(
+          "#version 300 es",
+          "#version 300 es\n#define ORDERED_OPAQUE_HARDWARE 1",
+        ),
+      );
       // Z24 values are exact dyadic D32F values. Adding 0.5 after scaling
       // would round odd values near 0xffffff up to the next integer.
       this.initialize = this.program(
@@ -354,11 +367,52 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     // accepts a 24-bit or smaller depth domain and supported normalized GS color views.
     if (![0, 1, 2, 10].includes(settings[26]) || settings[24] > 0xffffff)
       throw Error("Unsupported transitional color/depth view");
+    if (
+      !Number.isInteger(width) ||
+      !Number.isInteger(height) ||
+      width <= 0 ||
+      height <= 0 ||
+      width > this.maxTextureSize ||
+      height > this.maxTextureSize
+    )
+      throw Error("Unsupported ordered raster target size");
+    if (!vertexWords.length) return;
     // Depth can affect neither comparison nor writes when ZTE is off, or
     // when ZTST is ALWAYS and ZMSK prevents writes. Preserve the host buffer.
     const depthRequired =
       (settings[1] & 65536) !== 0 &&
       (((settings[1] >>> 17) & 3) >= 2 || settings[13] === 0);
+    const primitiveKind = settings[0] & 7,
+      blend = settings[2];
+    const identityBlend =
+      (blend & 3) === ((blend >>> 2) & 3) && ((blend >>> 6) & 3) === 0;
+    const alphaAlways =
+      (settings[1] & 1) === 0 || ((settings[1] >>> 1) & 7) === 1;
+    if (
+      [3, 4, 5].includes(primitiveKind) &&
+      settings[26] === 0 &&
+      settings[27] === 1 &&
+      settings[24] === 0xffffff &&
+      settings[4] === 0 &&
+      (settings[1] & 16384) === 0 &&
+      alphaAlways &&
+      ((settings[0] & 64) === 0 || identityBlend) &&
+      texture !== colorTexture &&
+      palette !== colorTexture &&
+      integerTexture !== colorTexture
+    ) {
+      this.renderOpaque({
+        targetFramebuffer,
+        width,
+        height,
+        settings,
+        vertexWords,
+        texture,
+        palette,
+        integerTexture,
+      });
+      return;
+    }
     this.targets(width, height);
     const kind = settings[0] & 7;
     if (![1, 2, 3, 4, 5, 6].includes(kind))
@@ -586,6 +640,75 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     this.stats[line ? "lines" : kind === 6 ? "sprites" : "triangles"] +=
       vertexWords.length / 24;
     this.stats.rasterDraws += 3;
+  }
+
+  renderOpaque({
+    targetFramebuffer,
+    width,
+    height,
+    settings,
+    vertexWords,
+    texture,
+    palette,
+    integerTexture,
+  }) {
+    const gl = this.gl;
+    const positions = new Float32Array(
+      vertexWords.buffer,
+      vertexWords.byteOffset,
+      vertexWords.length,
+    );
+    for (let at = 0; at < positions.length; at += 8)
+      if (
+        !Number.isFinite(positions[at]) ||
+        !Number.isFinite(positions[at + 1])
+      )
+        throw Error("Invalid ordered raster coordinates");
+    this.dataTexture("vertexData", vertexWords, 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFramebuffer);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.viewport(0, 0, width, height);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.STENCIL_TEST);
+    gl.disable(gl.CULL_FACE);
+    gl.disable(gl.DITHER);
+    gl.colorMask(true, true, true, true);
+    gl.bindVertexArray(this.vao);
+    const zte = (settings[1] & 65536) !== 0;
+    if (zte) {
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(
+        [gl.NEVER, gl.ALWAYS, gl.GEQUAL, gl.GREATER][(settings[1] >>> 17) & 3],
+      );
+    } else gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(zte && settings[13] === 0);
+    gl.useProgram(this.opaque);
+    for (const [name, unit, input] of [
+      ["vertices", 2, this.vertexData],
+      ["sourceTexture", 5, integerTexture || this.dummyInteger],
+      ["normalizedTexture", 7, texture || this.dummyNormalized],
+      ["paletteTexture", 8, palette || this.dummyNormalized],
+    ])
+      this.bind(this.opaque, name, unit, input);
+    gl.bindSampler(7, this.sampler);
+    gl.bindSampler(8, this.sampler);
+    gl.uniform2f(
+      this.uniform(this.opaque, "targetSize").location,
+      width,
+      height,
+    );
+    gl.uniform4uiv(this.uniform(this.opaque, "settings[0]").location, settings);
+    gl.drawArrays(gl.TRIANGLES, 0, vertexWords.length / 8);
+    gl.bindSampler(7, null);
+    gl.bindSampler(8, null);
+    const count = vertexWords.length / 24;
+    this.stats.batches++;
+    this.stats.primitives += count;
+    this.stats.triangles += count;
+    this.stats.rasterDraws++;
+    this.stats.opaqueBatches++;
+    this.stats.opaqueTriangles += count;
   }
 
   destroy() {

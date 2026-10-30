@@ -46,8 +46,8 @@ used by this harness. WebGL2 is required.
 
 ## What the checks prove
 
-Each browser runs **863 controlled cases**, comparing all 4,096 color pixels and
-all 4,096 integer depth values. Of these, 862 use the software renderer and one
+Each browser runs **971 controlled cases**, comparing all 4,096 color pixels and
+all 4,096 integer depth values. Of these, 970 use the software renderer and one
 uses an independent expected image for a constant-color/depth horizontal line. The matrix covers:
 
 - Line coverage: endpoint exclusion, reversal, clipping, fractional/zero-length
@@ -128,12 +128,12 @@ NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.c
 NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.cjs firefox bridge
 ```
 
-This mode exercises **831 cases per browser**, comparing the actual resolved
+This mode exercises **939 cases per browser**, comparing the actual resolved
 color and depth with the CPU renderer and the independent constant-line image.
 It also checks both negative controls.
 The bridge accepts the supported 32/24/16-bit color views and a 24-bit-or-smaller
 depth domain; D32F cannot reconstruct all 32-bit integer depth values. The raw integer kernel
-matrix retains its 863-case coverage. Unsupported bridge cases are explicitly
+matrix retains its 971-case coverage. Unsupported bridge cases are explicitly
 listed as skipped, rather than counted as passes. No tests are removed from the
 raw kernel matrix.
 
@@ -177,3 +177,30 @@ selecting the source: `(A-A)*C+Cs` equals Cs. The cases cover all valid equal
 selectors, both PABE states, partial masks and 16-bit color. Each bridge case
 also verifies that the host GS packet was not mutated. These checks support
 future optimizations; the current bridge retains the general blend calculation.
+
+## Hardware opaque triangles
+
+Eligible batches use a hardware triangle draw directly into the host RGBA8/D32F
+framebuffer. The vertex shader shifts GS coordinates by half a pixel; the fragment
+shader shares the ordered path's coverage, integer depth, texture, fog and color
+functions. It does not use interpolated hardware depth. Fixed-function depth
+comparison/writes preserve Z24 order without input copies, tile lists or resolve.
+
+Eligibility is deliberately explicit: triangles/strips/fans, PSMCT32, full color
+writes, Z24 with the full 24-bit domain, no destination-alpha test, alpha testing
+disabled or ALWAYS, and blending disabled or an exact source-color identity.
+Source/palette feedback is excluded. Other batches retain ordered rendering.
+FBA, scanline masks, scissoring and depth masks remain active.
+
+The matrix includes 108 additional cases that require hardware routing in bridge
+mode: winding, fractional coordinates, viewport clipping, scissoring, direct and
+indexed textures, filtering, clamp modes, texture functions, FBA/PABE, fog and
+depth modes. Wide-u32 depth inputs also test saturation before conversion;
+rounding a full-range delta to 2^32 must not wrap the interpolated depth.
+Both raster paths share this corrected saturation.
+
+The fixture allocates its snapshot resources after a hardware draw because that
+path does not allocate intermediate integer targets. Counters distinguish
+`opaqueBatches`/`opaqueTriangles`; depth copy/bypass counters describe ordered
+batches only. This path still requires captured-game, sustained performance,
+context recovery and full-game qualification before release.

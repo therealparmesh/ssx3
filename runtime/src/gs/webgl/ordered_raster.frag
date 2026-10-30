@@ -15,8 +15,13 @@ uniform highp usampler2D sourceTexture;
 uniform sampler2D normalizedTexture;
 uniform sampler2D paletteTexture;
 uniform uvec4 settings[8];
+#ifdef ORDERED_OPAQUE_HARDWARE
+flat in uint primitiveIndex;
+layout(location = 0) out vec4 outputColor;
+#else
 layout(location = 0) out uvec4 outputColor;
 layout(location = 1) out uint outputDepth;
+#endif
 uint cfg(int i) { return settings[i >> 2][i & 3]; }
 uvec4 loadVertex(uint i) {
   return texelFetch(vertices, ivec2(int(i % 1024u), int(i / 1024u)), 0);
@@ -113,6 +118,118 @@ ivec4 sampleTexture(vec2 uv) {
   return ivec4(
       clamp(top + (bottom - top) * f.y + vec4(0.5), vec4(0), vec4(255)));
 }
+ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
+            uint kind, vec3 weights) {
+  float w0 = weights.x, w1 = weights.y, w2 = weights.z;
+  vec4 src = rgba(v2.a);
+  if ((cfg(0) & 8u) != 0u)
+    src = rgba(v0.a) * w0 + rgba(v1.a) * w1 + rgba(v2.a) * w2;
+  ivec4 source = ivec4(src);
+  uvec4 t0 = loadVertex(i + 1u), t1 = loadVertex(i + 3u),
+        t2 = loadVertex(i + 5u);
+  vec3 tex = uintBitsToFloat(t0.xyz) * w0 + uintBitsToFloat(t1.xyz) * w1 +
+             uintBitsToFloat(t2.xyz) * w2;
+  if (kind == 6u) {
+    vec3 first = uintBitsToFloat(t0.xyz), last = uintBitsToFloat(t1.xyz);
+    vec2 fraction = (p - a) / (b - a);
+    tex = vec3(first.xy + (last.xy - first.xy) * fraction, last.z);
+  }
+  if ((cfg(0) & 16u) != 0u) {
+    vec2 uv;
+    if ((cfg(0) & 256u) != 0u)
+      uv = tex.xy / 16.0;
+    else
+      uv = tex.xy / (tex.z == 0.0 ? 1.0 : tex.z) *
+           vec2(float(cfg(22)), float(cfg(23)));
+    ivec4 t = sampleTexture(uv);
+    int originalAlpha = source.a;
+    uint textureFunction = cfg(14) & 3u;
+    bool tcc = (cfg(14) & 4u) != 0u;
+    if (textureFunction == 0u) {
+      source.rgb = clamp((t.rgb * source.rgb) >> 7, ivec3(0), ivec3(255));
+      if (tcc)
+        source.a = clamp((t.a * source.a) >> 7, 0, 255);
+    } else if (textureFunction == 1u) {
+      source.rgb = t.rgb;
+      if (tcc)
+        source.a = t.a;
+    } else {
+      source.rgb = clamp(((t.rgb * source.rgb) >> 7) + ivec3(originalAlpha),
+                         ivec3(0), ivec3(255));
+      if (tcc)
+        source.a =
+            textureFunction == 2u ? clamp(t.a + originalAlpha, 0, 255) : t.a;
+    }
+  }
+  if ((cfg(0) & 32u) != 0u) {
+    int f = int(float(t0.a) * w0 + float(t1.a) * w1 + float(t2.a) * w2);
+    ivec3 fog = ivec3(unpacked(cfg(21)).rgb);
+    source.rgb = (f * source.rgb + (255 - f) * fog) >> 8;
+  }
+  return source;
+}
+bool triangleWeights(vec2 p, vec2 a, vec2 b, vec2 c, out vec3 weights) {
+  if (any(lessThan(p, ceil(min(a, min(b, c))))) ||
+      any(greaterThanEqual(p, ceil(max(a, max(b, c))))))
+    return false;
+  float area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+  if (area == 0.0)
+    return false;
+  float sg = area > 0.0 ? 1.0 : -1.0;
+  float e0 = (b.x - p.x) * (c.y - p.y) - (c.x - p.x) * (b.y - p.y),
+        e1 = (c.x - p.x) * (a.y - p.y) - (a.x - p.x) * (c.y - p.y),
+        e2 = (a.x - p.x) * (b.y - p.y) - (b.x - p.x) * (a.y - p.y);
+  if (!edgeIn(e0 * sg, (b.y - c.y) * sg, (c.x - b.x) * sg) ||
+      !edgeIn(e1 * sg, (c.y - a.y) * sg, (a.x - c.x) * sg) ||
+      !edgeIn(e2 * sg, (a.y - b.y) * sg, (b.x - a.x) * sg))
+    return false;
+  float inverseArea = 1.0 / area;
+  weights.x = e0 * inverseArea;
+  weights.y = e1 * inverseArea;
+  weights.z = 1.0 - weights.x - weights.y;
+
+  return true;
+}
+uint triangleDepth(uint z0, uint z1, uint z2, vec3 weights) {
+  float dz1 = z1 >= z0 ? float(z1 - z0) : -float(z0 - z1),
+        dz2 = z2 >= z0 ? float(z2 - z0) : -float(z0 - z2);
+  float step = floor(dz1 * weights.y + dz2 * weights.z);
+  // A full-range u32 delta rounds to 2^32 in float. Converting that to
+  // uint is undefined; clamp the magnitude and unsigned room explicitly.
+  float magnitude = abs(step);
+  uint delta = magnitude >= 4294967296.0 ? 0xffffffffu : uint(magnitude);
+  uint z =
+      step >= 0.0 ? z0 + min(delta, 0xffffffffu - z0) : z0 - min(delta, z0);
+  z = min(z, cfg(24));
+
+  return z;
+}
+#ifdef ORDERED_OPAQUE_HARDWARE
+void main() {
+  ivec2 pixel = ivec2(gl_FragCoord.xy);
+  vec2 p = vec2(pixel);
+  uint sx = cfg(11), sy = cfg(12), scan = cfg(10) & 3u;
+  if (pixel.x < int(sx & 65535u) || pixel.x > int(sx >> 16) ||
+      pixel.y < int(sy & 65535u) || pixel.y > int(sy >> 16))
+    discard;
+  if ((scan == 2u && (pixel.y & 1) == 0) || (scan == 3u && (pixel.y & 1) != 0))
+    discard;
+  uint i = primitiveIndex * 6u;
+  uvec4 v0 = loadVertex(i), v1 = loadVertex(i + 2u), v2 = loadVertex(i + 4u);
+  vec2 a = position(v0), b = position(v1), c = position(v2);
+  vec3 weights;
+  if (!triangleWeights(p, a, b, c, weights))
+    discard;
+  ivec4 source = shade(i, v0, v1, v2, p, a, b, 3u, weights);
+  ivec3 color = cfg(7) != 0u ? clamp(source.rgb, ivec3(0), ivec3(255))
+                             : (source.rgb & ivec3(255));
+  uint alpha = uint(source.a) & 255u;
+  if (cfg(6) != 0u)
+    alpha |= 128u;
+  outputColor = vec4(vec3(color), float(alpha)) / 255.0;
+  gl_FragDepth = float(triangleDepth(v0.z, v1.z, v2.z, weights)) / 4294967296.0;
+}
+#else
 void main() {
   ivec2 pixel = ivec2(gl_FragCoord.xy);
   vec2 p = vec2(pixel);
@@ -173,86 +290,24 @@ void main() {
         w0 = 0.0;
         w1 = 1.0;
       } else {
-        if (any(lessThan(p, ceil(min(a, min(b, c))))) ||
-            any(greaterThanEqual(p, ceil(max(a, max(b, c))))))
+        vec3 weights;
+        if (!triangleWeights(p, a, b, c, weights))
           continue;
-        float area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
-        if (area == 0.0)
-          continue;
-        float sg = area > 0.0 ? 1.0 : -1.0;
-        float e0 = (b.x - p.x) * (c.y - p.y) - (c.x - p.x) * (b.y - p.y),
-              e1 = (c.x - p.x) * (a.y - p.y) - (a.x - p.x) * (c.y - p.y),
-              e2 = (a.x - p.x) * (b.y - p.y) - (b.x - p.x) * (a.y - p.y);
-        if (!edgeIn(e0 * sg, (b.y - c.y) * sg, (c.x - b.x) * sg) ||
-            !edgeIn(e1 * sg, (c.y - a.y) * sg, (a.x - c.x) * sg) ||
-            !edgeIn(e2 * sg, (a.y - b.y) * sg, (b.x - a.x) * sg))
-          continue;
-        float inverseArea = 1.0 / area;
-        w0 = e0 * inverseArea;
-        w1 = e1 * inverseArea;
-        w2 = 1.0 - w0 - w1;
+        w0 = weights.x;
+        w1 = weights.y;
+        w2 = weights.z;
       }
       uint test = cfg(1);
       if ((test & 16384u) != 0u && (((((cfg(26) == 1u ? 128u : dst.a) & 128u) !=
                                       0u)) != ((test & 32768u) != 0u)))
         continue;
-      float dz1 = v1.z >= v0.z ? float(v1.z - v0.z) : -float(v0.z - v1.z),
-            dz2 = v2.z >= v0.z ? float(v2.z - v0.z) : -float(v0.z - v2.z);
-      float step = floor(dz1 * w1 + dz2 * w2);
-      uint z = step >= 0.0 ? v0.z + uint(min(step, float(0xffffffffu - v0.z)))
-                           : v0.z - uint(min(-step, float(v0.z)));
-      z = min(z, cfg(24));
+      uint z = triangleDepth(v0.z, v1.z, v2.z, vec3(w0, w1, w2));
       bool zte = (test & 65536u) != 0u;
       uint ztst = (test >> 17) & 3u;
       if (zte && (ztst == 0u || (ztst == 2u && z < depth) ||
                   (ztst == 3u && z <= depth)))
         continue;
-      vec4 src = rgba(v2.a);
-      if ((cfg(0) & 8u) != 0u)
-        src = rgba(v0.a) * w0 + rgba(v1.a) * w1 + rgba(v2.a) * w2;
-      ivec4 source = ivec4(src);
-      uvec4 t0 = loadVertex(i + 1u), t1 = loadVertex(i + 3u),
-            t2 = loadVertex(i + 5u);
-      vec3 tex = uintBitsToFloat(t0.xyz) * w0 + uintBitsToFloat(t1.xyz) * w1 +
-                 uintBitsToFloat(t2.xyz) * w2;
-      if (kind == 6u) {
-        vec3 first = uintBitsToFloat(t0.xyz), last = uintBitsToFloat(t1.xyz);
-        vec2 fraction = (p - a) / (b - a);
-        tex = vec3(first.xy + (last.xy - first.xy) * fraction, last.z);
-      }
-      if ((cfg(0) & 16u) != 0u) {
-        vec2 uv;
-        if ((cfg(0) & 256u) != 0u)
-          uv = tex.xy / 16.0;
-        else
-          uv = tex.xy / (tex.z == 0.0 ? 1.0 : tex.z) *
-               vec2(float(cfg(22)), float(cfg(23)));
-        ivec4 t = sampleTexture(uv);
-        int originalAlpha = source.a;
-        uint textureFunction = cfg(14) & 3u;
-        bool tcc = (cfg(14) & 4u) != 0u;
-        if (textureFunction == 0u) {
-          source.rgb = clamp((t.rgb * source.rgb) >> 7, ivec3(0), ivec3(255));
-          if (tcc)
-            source.a = clamp((t.a * source.a) >> 7, 0, 255);
-        } else if (textureFunction == 1u) {
-          source.rgb = t.rgb;
-          if (tcc)
-            source.a = t.a;
-        } else {
-          source.rgb = clamp(((t.rgb * source.rgb) >> 7) + ivec3(originalAlpha),
-                             ivec3(0), ivec3(255));
-          if (tcc)
-            source.a = textureFunction == 2u
-                           ? clamp(t.a + originalAlpha, 0, 255)
-                           : t.a;
-        }
-      }
-      if ((cfg(0) & 32u) != 0u) {
-        int f = int(float(t0.a) * w0 + float(t1.a) * w1 + float(t2.a) * w2);
-        ivec3 fog = ivec3(unpacked(cfg(21)).rgb);
-        source.rgb = (f * source.rgb + (255 - f) * fog) >> 8;
-      }
+      ivec4 source = shade(i, v0, v1, v2, p, a, b, kind, vec3(w0, w1, w2));
       bool writeColor = true, writeAlpha = true, writeDepth = cfg(13) == 0u;
       if ((test & 1u) != 0u && !alphaPass(source.a, test)) {
         switch ((test >> 12) & 3u) {
@@ -316,3 +371,5 @@ void main() {
   outputColor = dst;
   outputDepth = depth;
 }
+
+#endif

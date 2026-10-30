@@ -294,7 +294,14 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
       timerQueries = [];
     const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2");
     const started = performance.now();
-    function run(name, config, input, analyticExpected = null) {
+    function run(
+      name,
+      config,
+      input,
+      analyticExpected = null,
+      expectedHardware = false,
+    ) {
+      const opaqueBefore = bridge?.stats.opaqueBatches || 0;
       if (
         bridgeMode &&
         (config[24] > 0xffffff || name === "depth32-precision")
@@ -548,6 +555,9 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
         });
         if (gpuConfig.some((word, i) => word !== packetBefore[i]))
           throw Error("Bridge mutated the host GS packet");
+        // The hardware path needs no integer targets. Allocate verification
+        // snapshot resources explicitly, outside the production render call.
+        bridge.targets(64, 64);
         // Inspect the actual resolved target/depth, not only temporary outputs.
         // This additional GPU snapshot and readback belongs to verification.
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, bridgeFramebuffer);
@@ -670,8 +680,12 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
             expectedDepth: ez,
           });
       }
+      const hardware = bridgeMode && bridge.stats.opaqueBatches > opaqueBefore;
+      if (bridgeMode && expectedHardware && !hardware)
+        throw Error(name + ": hardware route not exercised");
       const result = {
         name,
+        hardware,
         colorMismatches,
         depthMismatches,
         changedColorPixels,
@@ -1214,6 +1228,118 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
         if (selector === 2) c[26] = 2;
         run("identity-blend-" + selector + "-" + pabe, c, geometry(64));
       }
+    const hardwareShapes = [
+      [8, 8, 32, 32],
+      [8.5, 8.5, 32, 32],
+      [8.0625, 8.9375, 32, 32],
+      [-8, -4, 32, 32],
+      [48, 40, 32, 32],
+      [-16, 8, 64, 32],
+      [8, 8, 16, 32],
+      [8, 8, 32, 16],
+    ];
+    for (let n = 0; n < hardwareShapes.length; n++)
+      for (const reversed of [false, true]) {
+        const c = baseConfig();
+        c[0] = 3 | (n & 1 ? 8 : 0);
+        const v = quad(...hardwareShapes[n], 200, pack(128, 64, 32, 128));
+        if (reversed)
+          for (let i = 0; i < v.length; i += 3)
+            [v[i + 1], v[i + 2]] = [v[i + 2], v[i + 1]];
+        if (n & 2) {
+          c[11] = 3 | (52 << 16);
+          c[12] = 7 | (55 << 16);
+        }
+        run("hardware-coverage-" + n + "-" + reversed, c, v, null, true);
+      }
+    for (let kind = 0; kind < 5; kind++)
+      for (let fn = 0; fn < 4; fn++)
+        for (const filter of [0, 1])
+          for (const fst of [false, true]) {
+            const c = baseConfig();
+            c[0] =
+              3 |
+              16 |
+              64 |
+              (fst ? 256 : 0) |
+              (kind & 1 ? 8 : 0) |
+              (fn === 2 ? 32 : 0);
+            c[2] = 0x2a;
+            c[5] = kind & 1;
+            c[7] = (kind + fn + filter) & 1;
+            c[25] = kind;
+            c[15] = filter;
+            c[14] = fn | 4;
+            if (kind === 1) c[29] = fn % 3;
+            c[28] = 64 | (192 << 8);
+            c[6] = fn & 1;
+            c[10] = fst ? (filter ? 2 : 3) : 0;
+            if (fn & 1) c[1] |= 3;
+            c[16] = fn | (fn << 2);
+            c[17] = 5;
+            c[18] = 40;
+            c[19] = 7;
+            c[20] = 35;
+            if (fn === 3) {
+              c[17] = 15;
+              c[18] = 16;
+              c[19] = 15;
+              c[20] = 32;
+            }
+            const v = geometry(128);
+            for (let i = 0; i < v.length; i++) {
+              const p = v[i];
+              p[4] = (p[0] - 8) * 16 + 8;
+              p[5] = (p[1] - 8) * 16 + 8;
+              p[6] = 1;
+              p[7] = 64 + (i % 3) * 64;
+              if (!fst) {
+                p[4] /= 1024;
+                p[5] /= 1024;
+              }
+            }
+            run(
+              "hardware-texture-" + kind + "-" + fn + "-" + filter + "-" + fst,
+              c,
+              v,
+              null,
+              true,
+            );
+          }
+    for (let mode = 0; mode < 9; mode++) {
+      const c = baseConfig();
+      c[0] = 3 | 8;
+      c[1] = mode === 8 ? 0 : 65536 | (mode % 4 << 17);
+      c[13] = (mode >> 2) & 1;
+      const v = geometry(128);
+      for (let i = 0; i < v.length; i++) v[i][2] = 128 + (i % 3) * 64;
+      run("hardware-depth-mode-" + mode, c, v, null, true);
+    }
+    {
+      const c = baseConfig();
+      c[0] = 3;
+      c[24] = 0xffffff;
+      c[27] = 1;
+      c[9] = 0xfffffc;
+      const v = geometry(128);
+      for (let i = 0; i < v.length; i++)
+        v[i][2] = i < 6 ? 0xffffff : i < 12 ? 0xfffffd : 0xfffffe;
+      run("hardware-depth24-maximum", c, v, null, true);
+    }
+    for (const rising of [false, true]) {
+      const c = baseConfig();
+      c[0] = 3;
+      c[24] = 0xffffff;
+      c[27] = 1;
+      c[9] = 0;
+      const color = pack(128, 64, 32, 128);
+      const v = [
+        [40, 8, rising ? 257 : 0xffffffff, color],
+        [8, 8, rising ? 0xffffffff : 0, color],
+        [8, 40, rising ? 0xffffffff : 0, color],
+      ];
+      run("hardware-wide-z-" + rising, c, v, null, true);
+    }
     if (bridge) {
       for (const size of [8, 16, 24, 32, 48]) bridge.targets(size, size);
       const c = baseConfig();
@@ -1243,10 +1369,14 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
         "Ordered WebGL2 triangles/lines/sprites versus CPU GS reference plus an independent constant-line oracle:32/24/16-bit color/depth, PSMT4/8/8H and32/24/16-bit textures, alpha/blend/masks/fog/clamp/filtering.64x64 controlled cases only; no full-game or performance qualification.",
     };
     if (bridge) {
+      if (!bridge.stats.opaqueBatches)
+        throw Error("Hardware path not exercised");
       if (
         !bridge.stats.depthBlits ||
         !bridge.stats.depthBypasses ||
-        bridge.stats.depthBlits + bridge.stats.depthBypasses !==
+        bridge.stats.depthBlits +
+          bridge.stats.depthBypasses +
+          bridge.stats.opaqueBatches !==
           bridge.stats.batches
       )
         throw Error("Depth copy/bypass paths were not both exercised");
