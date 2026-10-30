@@ -392,6 +392,7 @@ void render_reset() {
     std::memset(g_memory, 0, sizeof g_memory);
     ++g_setup_generation;
     g_transfer = Transfer{};
+    g_carried = 0;
     g_primitives = 0;
     raster::reset();
 }
@@ -632,7 +633,9 @@ void read_image(std::uint8_t *data, std::uint32_t qwords) {
 void render_read_image(std::uint8_t *data, std::uint32_t qwords) {
     const std::size_t bytes = static_cast<std::size_t>(qwords) * 16;
     std::memset(data, 0, bytes);
-    if (!g_transfer.active || (g_state.trxdir & 3u) != 1) return;
+    // Fetching the final RGB24 pixel can finish the rectangle while one or two
+    // of its bytes still await the next quadword read.
+    if ((!g_transfer.active && !g_carried) || (g_state.trxdir & 3u) != 1) return;
     const std::uint64_t buf = g_state.bitbltbuf, pos = g_state.trxpos, reg = g_state.trxreg;
     const std::uint32_t sbp = static_cast<std::uint32_t>(buf) & 0x3FFFu, sbw = static_cast<std::uint32_t>(buf >> 16) & 0x3Fu;
     const std::uint32_t spsm = static_cast<std::uint32_t>(buf >> 24) & 0x3Fu;

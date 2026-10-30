@@ -133,6 +133,12 @@ an integration boundary, not a complete backend: it does not own VRAM, transfer
 payloads, readback, presentation, save state or context recovery. The shipping
 game still does not select this WebGL renderer.
 
+The separate `gs-readback` CTest target exercises the current runtime's RGB24
+and Z24 local-to-host transfers. Its 162 cases compare bulk reads with quadword
+chunks, check output guards and completion padding, and restore a snapshot with
+pending final-pixel bytes. CI also runs this fixture in Wasm/Node. These transfer
+checks do not establish GPU cache coherence or full-backend save correctness.
+
 ## GPU bridge validation
 
 `runtime/src/gs/webgl/ordered_raster.js` is a synchronous GPU-only bridge around
