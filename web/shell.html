@@ -1355,21 +1355,27 @@ var Module = {
         shown = presented - lastWorkerShown; frames = nativeFrame - lastWorkerFrame;
         lastWorkerShown = presented; lastWorkerFrame = nativeFrame;
       }
-      const gpu = Module._ps2web_gpu_ms();
-      const memory = (Module.HEAPU8.length / 1048576).toFixed(0);
-      const emuIdle = Module._ps2web_idle_ms(0), renderIdle = Module._ps2web_idle_ms(1), vuIdle = Module._ps2web_idle_ms(2), span = now - last;
-      const interpreted = Module._ps2web_vu_interpreted();
-      statsEl.textContent = 'frame ' + Module._ps2web_frames() + '   ' + (frames * 1000 / span).toFixed(1) + ' fps (' + (shown * 1000 / span).toFixed(0) + ' on screen)   GPU ' + ((gpu - lastGpu) / span * 100).toFixed(0) +
-                            '%   idle emu ' + ((emuIdle - lastEmuIdle) / span * 100).toFixed(0) + '% vu ' + ((vuIdle - lastVuIdle) / span * 100).toFixed(0) +
-                            '% gs ' + ((renderIdle - lastRenderIdle) / span * 100).toFixed(0) +
-                            '%   heap ' + memory + ' MB   audio ' + Module.audioQueuedMs().toFixed(0) + ' ms' +
-                            (interpreted > lastInterpreted ? '   vu1 interpreted ' + Math.round((interpreted - lastInterpreted) * 1000 / span) + '/s' : '');
-      if (!params.has('debug')) statsEl.textContent = (shown * 1000 / span).toFixed(0) + ' fps';
-      lastInterpreted = interpreted;
-      lastEmuIdle = emuIdle;
-      lastRenderIdle = renderIdle;
-      lastVuIdle = vuIdle;
-      lastGpu = gpu;
+      const span = now - last;
+      let text = (shown * 1000 / span).toFixed(0) + ' fps';
+      if (params.has('debug')) {
+        const gpu = Module._ps2web_gpu_ms();
+        const memory = (Module.HEAPU8.length / 1048576).toFixed(0);
+        const emuIdle = Module._ps2web_idle_ms(0), renderIdle = Module._ps2web_idle_ms(1), vuIdle = Module._ps2web_idle_ms(2);
+        const interpreted = Module._ps2web_vu_interpreted();
+        text = 'frame ' + Module._ps2web_frames() + '   ' + (frames * 1000 / span).toFixed(1) + ' fps (' + (shown * 1000 / span).toFixed(0) + ' on screen)   GPU ' + ((gpu - lastGpu) / span * 100).toFixed(0) +
+               '%   idle emu ' + ((emuIdle - lastEmuIdle) / span * 100).toFixed(0) + '% vu ' + ((vuIdle - lastVuIdle) / span * 100).toFixed(0) +
+               '% gs ' + ((renderIdle - lastRenderIdle) / span * 100).toFixed(0) +
+               '%   heap ' + memory + ' MB   audio ' + Module.audioQueuedMs().toFixed(0) + ' ms' +
+               (interpreted > lastInterpreted ? '   vu1 interpreted ' + Math.round((interpreted - lastInterpreted) * 1000 / span) + '/s' : '');
+        lastInterpreted = interpreted;
+        lastEmuIdle = emuIdle;
+        lastRenderIdle = renderIdle;
+        lastVuIdle = vuIdle;
+        lastGpu = gpu;
+      }
+      // Replacing even equal text invalidates the toolbar and can cause an
+      // otherwise unchanged canvas to participate in another paint.
+      if (statsEl.textContent !== text) statsEl.textContent = text;
       frames = 0;
       shown = 0;
       last = now;
