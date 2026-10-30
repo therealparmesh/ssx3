@@ -164,3 +164,10 @@ The final endpoint supplies flat color, depth, Q and fog regardless of IIP.
 S and T interpolate independently along X and Y before division by the final Q
 (or Q=1 when zero); FST uses fixed UV coordinates instead. A host adapter must
 preserve those inputs before any legacy perspective division or tessellation.
+
+The resolved-target check uses its own conversion shader and verifies raw color
+bytes without applying framebuffer-format quantization. That prevents the
+verification step from hiding incorrect low color bits. The bridge skips its
+depth copy/sample when ZTE is disabled, or when ZTST is ALWAYS and ZMSK prevents
+writes, and disables depth writes during resolve for those batches. Its depth
+blit/bypass counters exclude verification-only copies.

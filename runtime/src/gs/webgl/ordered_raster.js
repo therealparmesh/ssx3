@@ -21,6 +21,8 @@ class Ps2OrderedRaster {
       sprites: 0,
       rasterDraws: 0,
       readbacks: 0,
+      depthBlits: 0,
+      depthBypasses: 0,
     };
     try {
       this.vao = gl.createVertexArray();
@@ -38,9 +40,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
         vertexSource,
         `#version 300 es
 precision highp float;precision highp int;
-uniform sampler2D colorSource;uniform highp sampler2D depthSource;uniform uint frameFormat;
+uniform sampler2D colorSource;uniform highp sampler2D depthSource;uniform uint frameFormat;uniform bool depthRequired;
 layout(location=0) out uvec4 colorOutput;layout(location=1) out uint depthOutput;
-void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(colorSource,p,0)*255.0+vec4(0.5)));if(frameFormat==2u||frameFormat==10u){colorOutput.rgb=(colorOutput.rgb>>3u)<<3u;colorOutput.a=(colorOutput.a&128u)!=0u?128u:0u;}float d=texelFetch(depthSource,p,0).r;depthOutput=d>=1.0?0xffffffffu:uint(d*4294967296.0);}`,
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(colorSource,p,0)*255.0+vec4(0.5)));if(frameFormat==2u||frameFormat==10u){colorOutput.rgb=(colorOutput.rgb>>3u)<<3u;colorOutput.a=(colorOutput.a&128u)!=0u?128u:0u;}if(!depthRequired){depthOutput=0u;return;}float d=texelFetch(depthSource,p,0).r;depthOutput=d>=1.0?0xffffffffu:uint(d*4294967296.0);}`,
       );
       this.resolve = this.program(
         vertexSource,
@@ -352,6 +354,11 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     // accepts a 24-bit or smaller depth domain and supported normalized GS color views.
     if (![0, 1, 2, 10].includes(settings[26]) || settings[24] > 0xffffff)
       throw Error("Unsupported transitional color/depth view");
+    // Depth can affect neither comparison nor writes when ZTE is off, or
+    // when ZTST is ALWAYS and ZMSK prevents writes. Preserve the host buffer.
+    const depthRequired =
+      (settings[1] & 65536) !== 0 &&
+      (((settings[1] >>> 17) & 3) >= 2 || settings[13] === 0);
     this.targets(width, height);
     const kind = settings[0] & 7;
     if (![1, 2, 3, 4, 5, 6].includes(kind))
@@ -497,37 +504,44 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     gl.depthMask(false);
     gl.colorMask(true, true, true, true);
     gl.bindVertexArray(this.vao);
-    if (this.sourceDepthRenderbuffer !== depthRenderbuffer) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.depthReadFramebuffer);
-      gl.framebufferRenderbuffer(
-        gl.FRAMEBUFFER,
-        gl.DEPTH_ATTACHMENT,
-        gl.RENDERBUFFER,
-        depthRenderbuffer,
+    if (depthRequired) {
+      if (this.sourceDepthRenderbuffer !== depthRenderbuffer) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.depthReadFramebuffer);
+        gl.framebufferRenderbuffer(
+          gl.FRAMEBUFFER,
+          gl.DEPTH_ATTACHMENT,
+          gl.RENDERBUFFER,
+          depthRenderbuffer,
+        );
+        gl.drawBuffers([gl.NONE]);
+        gl.readBuffer(gl.NONE);
+        this.complete();
+        this.sourceDepthRenderbuffer = depthRenderbuffer;
+      }
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.depthReadFramebuffer);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.depthCopyFramebuffer);
+      gl.blitFramebuffer(
+        left,
+        bottom,
+        right,
+        top,
+        left,
+        bottom,
+        right,
+        top,
+        gl.DEPTH_BUFFER_BIT,
+        gl.NEAREST,
       );
-      gl.drawBuffers([gl.NONE]);
-      gl.readBuffer(gl.NONE);
-      this.complete();
-      this.sourceDepthRenderbuffer = depthRenderbuffer;
-    }
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.depthReadFramebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.depthCopyFramebuffer);
-    gl.blitFramebuffer(
-      left,
-      bottom,
-      right,
-      top,
-      left,
-      bottom,
-      right,
-      top,
-      gl.DEPTH_BUFFER_BIT,
-      gl.NEAREST,
-    );
+      this.stats.depthBlits++;
+    } else this.stats.depthBypasses++;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.inputFramebuffer);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
     gl.viewport(left, bottom, right - left, top - bottom);
     gl.useProgram(this.initialize);
+    gl.uniform1i(
+      this.uniform(this.initialize, "depthRequired").location,
+      depthRequired ? 1 : 0,
+    );
     this.bind(this.initialize, "colorSource", 0, colorTexture);
     this.bind(this.initialize, "depthSource", 1, this.depthCopy);
     gl.uniform1ui(
@@ -563,7 +577,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     this.bind(this.resolve, "depthSource", 1, this.outputDepth);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.ALWAYS);
-    gl.depthMask(true);
+    gl.depthMask(depthRequired);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     // The host checks errors at its frame boundary; querying after every batch
     // would force repeated GL command round trips. The fixture checks each case.

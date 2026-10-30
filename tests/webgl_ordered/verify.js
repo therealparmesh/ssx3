@@ -173,6 +173,32 @@
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.DITHER);
     const bridge = bridgeMode ? new Ps2OrderedRaster(gl, kernelSource) : null;
+    let verifyResolved;
+    if (bridgeMode) {
+      // Verification owns this conversion; it is not a production bridge pass.
+      verifyResolved = gl.createProgram();
+      gl.attachShader(
+        verifyResolved,
+        compile(
+          gl.VERTEX_SHADER,
+          "#version 300 es\nvoid main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0,1);}",
+        ),
+      );
+      gl.attachShader(
+        verifyResolved,
+        compile(
+          gl.FRAGMENT_SHADER,
+          `#version 300 es
+precision highp float;precision highp int;
+uniform sampler2D colorSource;uniform highp sampler2D depthSource;
+layout(location=0) out uvec4 colorOutput;layout(location=1) out uint depthOutput;
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(colorSource,p,0)*255.0+vec4(0.5)));float d=texelFetch(depthSource,p,0).r;depthOutput=d>=1.0?0xffffffffu:uint(d*4294967296.0);}`,
+        ),
+      );
+      gl.linkProgram(verifyResolved);
+      if (!gl.getProgramParameter(verifyResolved, gl.LINK_STATUS))
+        throw Error(gl.getProgramInfoLog(verifyResolved));
+    }
     let bridgeColor, bridgeDepth, bridgeFramebuffer;
     if (bridgeMode) {
       bridgeColor = texture(
@@ -535,14 +561,14 @@
           gl.DEPTH_BUFFER_BIT,
           gl.NEAREST,
         );
-        gl.bindFramebuffer(gl.FRAMEBUFFER, bridge.inputFramebuffer);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
         gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
         gl.disable(gl.DEPTH_TEST);
         gl.depthMask(false);
         gl.viewport(0, 0, 64, 64);
-        gl.useProgram(bridge.initialize);
-        bridge.bind(bridge.initialize, "colorSource", 0, bridgeColor);
-        bridge.bind(bridge.initialize, "depthSource", 1, bridge.depthCopy);
+        gl.useProgram(verifyResolved);
+        bridge.bind(verifyResolved, "colorSource", 0, bridgeColor);
+        bridge.bind(verifyResolved, "depthSource", 1, bridge.depthCopy);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.readBuffer(gl.COLOR_ATTACHMENT0);
         gl.readPixels(
@@ -1204,6 +1230,13 @@
         "Ordered WebGL2 triangles/lines/sprites versus CPU GS reference plus an independent constant-line oracle:32/24/16-bit color/depth, PSMT4/8/8H and32/24/16-bit textures, alpha/blend/masks/fog/clamp/filtering.64x64 controlled cases only; no full-game or performance qualification.",
     };
     if (bridge) {
+      if (
+        !bridge.stats.depthBlits ||
+        !bridge.stats.depthBypasses ||
+        bridge.stats.depthBlits + bridge.stats.depthBypasses !==
+          bridge.stats.batches
+      )
+        throw Error("Depth copy/bypass paths were not both exercised");
       bridge.destroy();
       bridge.destroy();
       if (
