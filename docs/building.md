@@ -64,6 +64,35 @@ The split presenter submits empty GPU work only while a readback mapping is pend
 
 Normal browser play disables GPU timestamp queries; `?debug` enables them when supported. Native runs retain timing collection by default. `PS2_GPU_TIMESTAMPS=0` disables native timing collection, while an explicit `PS2_GPU_PROFILE` still requests the timestamps needed for its profile. Native environment variables are not arbitrary URL options.
 
+## Experimental live WebGL runtime
+
+The optional WebGL backend now implements the runtime GPU API, beyond the standalone captured-command fixtures. The default backend remains WebGPU. WebGL currently requires Asyncify, native internal resolution and the window-owned runtime (`PS2_WEB_WORKER=OFF`). Its private WebGL canvas supplies the existing copy presenter; a separate game/presentation worker is not integrated. It does not use WebGPU. GPU timing is unavailable: a zero GPU-time counter does not measure rendering cost.
+
+Build and run the asset-free integration probe with the pinned SDK active:
+
+```sh
+python3 scripts/prepare_webgl_backend.py build/webgl-upstream
+emcmake cmake -S . -B build/webgl-runtime -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DPS2_WEB_ASYNC=asyncify \
+  -DPS2_GPU_BACKEND=webgl -DPS2_WEB_WORKER=OFF -DPS2_GPU_TESTS=ON \
+  -DPS2_WEBGL_UPSTREAM="$PWD/build/webgl-upstream"
+cmake --build build/webgl-runtime --target gpu_copy_readback --parallel 2
+python3 scripts/serve.py build/webgl-runtime /dev/null 8723
+```
+
+In a second terminal, with Puppeteer Core available:
+
+```sh
+SSX3_TEST_BROWSER=chrome node scripts/test_webgl_runtime.cjs
+SSX3_TEST_BROWSER=firefox node scripts/test_webgl_runtime.cjs
+```
+
+The driver withholds `navigator.gpu`, uses no GPU feature flags or Firefox preferences, and verifies 64 ordered asynchronous frames, synchronous display and nonzero-offset download, actual drawing/export, uncached local copy, native snapshot round trips, partial RGB24 transfer restoration rejection of malformed snapshots without changing VRAM, and explicit host-yield requests after synchronous rendering work. `PUPPETEER_MODULE`, `SSX3_TEST_URL`, `SSX3_TEST_OUTPUT`, `CHROMIUM_EXECUTABLE` and `FIREFOX_EXECUTABLE` select local dependencies, URLs and artifacts. CI compiles this probe; the headed hardware-browser checks run separately.
+
+To build the game, use the compatibility configuration above with `-DPS2_GPU_BACKEND=webgl -DPS2_WEBGL_UPSTREAM="$PWD/build/webgl-upstream" -DPS2_WEB_WORKER=OFF`. Keep the locally generated game translation and game files private. Build-time selection is intentional; this is not an automatic fallback in the shipped WebGPU player.
+
+This remains an experimental integration. Full-game transitions, rendering accuracy, frame pacing, context loss/recovery, old snapshot interchange, audio and physical devices still require qualification. Native RAM export rejects unsupported overlapping physical layouts rather than silently overwriting them. Passing the asset-free probe does not establish a playable or performant full game.
+
 ## GPU readback regression without game assets
 
 With the pinned SDK activated, build the optional fixture against the actual GS renderer and shaders:

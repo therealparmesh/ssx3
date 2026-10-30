@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+#include <stdexcept>
 
 namespace {
 using ps2::gs::gpu::DisplaySource;
@@ -65,6 +66,49 @@ int main() {
         check(value==pixel(63,40*128+x),"Nonzero-offset synchronous VRAM readback");
     }
     ps2::gs::gpu::wait_idle();
+#ifdef PS2_GPU_WEBGL
+    using namespace ps2::gs;
+    check(gpu::flush_pending(),"Synchronous WebGL work requests a host browser yield");
+    check(!gpu::flush_pending(),"Idle WebGL polling does not request another yield");
+    std::vector<std::uint32_t> saved, palette;
+    std::uint32_t savedScale=0;
+    gpu::read_state(saved,savedScale,palette);
+    check(savedScale==1 && saved.size()>kMemorySize/4,"Native GPU snapshot carries transfer metadata");
+    gpu::write_state(saved,savedScale,palette);
+    check(gpu::display(source(64),output,width,height),"Display after native snapshot restore");
+    for(unsigned i=0;i<output.size();i++)check(output[i]==pixel(64,i),"Snapshot retains uploaded pixels");
+    State copyState{};
+    copyState.bitbltbuf=(1ull<<16)|(0x1000ull<<32)|(1ull<<48);
+    copyState.trxpos=2ull|(1ull<<16)|(4ull<<32)|(2ull<<48);
+    copyState.trxreg=8ull|(3ull<<32);
+    gpu::local_copy(copyState);
+    gpu::download(memory.data());
+    auto valueAt=[&](unsigned bp,unsigned bw,unsigned x,unsigned y){std::uint32_t value;std::memcpy(&value,memory.data()+address32(bp,bw,x,y),4);return value;};
+    for(unsigned y=0;y<3;y++)for(unsigned x=0;x<8;x++)check(valueAt(0x1000,1,4+x,2+y)==pixel(64,(1+y)*64+2+x),"Uncached local copy retains source pixels");
+    State state{};state.prim=6;state.prmodecont=1;state.colclamp=1;
+    state.ctx[0].frame=1ull<<16;state.ctx[0].zbuf=256ull|(1ull<<24);
+    state.ctx[0].test=0x30000;state.ctx[0].scissor=(63ull<<16)|(63ull<<48);
+    Vertex vertices[2]{};vertices[0].x=8*16;vertices[0].y=12*16;vertices[1].x=24*16;vertices[1].y=32*16;
+    for(auto& v:vertices){v.r=0x19;v.g=0xa9;v.b=0x41;v.a=0x9b;v.z=0x123456;v.q=1;}
+    gpu::draw(state,vertices,2);gpu::download(memory.data());
+    for(unsigned y=12;y<32;y++)for(unsigned x=8;x<24;x++)check(valueAt(0,1,x,y)==0x9b41a919,"Actual GPU draw exports correct color");
+    gpu::read_state(saved,savedScale,palette);const auto exact=saved;
+    vertices[0].r=vertices[1].r=0xe8;gpu::draw(state,vertices,2);
+    gpu::write_state(saved,savedScale,palette);gpu::download(memory.data());
+    check(std::memcmp(memory.data(),exact.data(),kMemorySize)==0,"Restore discards GPU work after snapshot");
+    State image{};image.bitbltbuf=(0x1000ull<<32)|(1ull<<48)|(1ull<<56);image.trxpos=(9ull<<32)|(13ull<<48);image.trxreg=6ull|(1ull<<32);
+    std::uint8_t payload[32]{};for(unsigned i=0;i<6;i++)for(unsigned b=0;b<3;b++)payload[i*3+b]=(0x123456+i*0x03070b)>>(8*b);
+    gpu::image_begin(image);gpu::image_data(payload,16);gpu::read_state(saved,savedScale,palette);
+    gpu::write_state(saved,savedScale,palette);gpu::image_data(payload+16,16);gpu::download(memory.data());
+    for(unsigned x=0;x<6;x++)check((valueAt(0x1000,1,9+x,13)&0xffffff)==0x123456+x*0x03070b,"Snapshot restores partial RGB24 image transfer");
+    gpu::read_state(saved,savedScale,palette);auto invalid=saved;invalid[kMemorySize/4+1]=99;
+    bool rejected=false;try{gpu::write_state(invalid,savedScale,palette);}catch(const std::invalid_argument&){rejected=true;}
+    check(rejected,"Malformed native snapshot metadata rejected");gpu::download(memory.data());
+    check(std::memcmp(memory.data(),saved.data(),kMemorySize)==0,"Rejected snapshot leaves VRAM intact");
+#endif
+#ifdef PS2_GPU_WEBGL
+    EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true});});
+#endif
     EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4});},received,pixels,hash,scale,offset);
     return 0;
 }

@@ -8,7 +8,7 @@ const policyStart = shell.indexOf('function preferFrameCopy()');
 const policyEnd = shell.indexOf('\nvar Module', policyStart);
 assert(policyStart >= 0 && policyEnd > policyStart);
 const policy = shell.slice(policyStart, policyEnd);
-for (const [mode, userAgent, query, expected] of [
+for (const [mode, userAgent, query, expected, backend = 'webgpu'] of [
   ['jspi', 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0 Safari/537.36', '', true],
   ['jspi', 'Mozilla/5.0 (X11; Linux x86_64) Chromium/156.0', '', true],
   ['jspi', 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0 Edg/156.0', '', true],
@@ -23,12 +23,28 @@ for (const [mode, userAgent, query, expected] of [
   ['asyncify', 'Mozilla/5.0 (iPhone) Version/26.0 Mobile Safari/604.1', '', false],
   ['jspi', 'Mozilla/5.0 (Windows NT 10.0) Chrome/156.0', 'copy', true],
   ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', 'copy', true],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', '', true, 'webgl'],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0', '', true, 'webgl'],
+  ['asyncify', 'Mozilla/5.0 (iPhone) Version/26.0 Mobile Safari/604.1', '', true, 'webgl'],
+  ['asyncify', 'Mozilla/5.0 (Linux; Android 16) Chrome/156.0', '', true, 'webgl'],
 ]) {
-  assert.equal(vm.runInNewContext(policy.replaceAll('@PS2_WEB_ASYNC@', mode) + '\npreferFrameCopy()', {
+  assert.equal(vm.runInNewContext(policy.replaceAll('@PS2_WEB_ASYNC@', mode).replaceAll('@PS2_GPU_BACKEND@', backend) + '\npreferFrameCopy()', {
     navigator: { userAgent }, params: new URLSearchParams(query),
   }), expected, 'Select the qualified presentation path while preserving the explicit copy request');
 }
-console.log('Presentation selection: 14 browser/build/explicit-request cases passed');
+console.log('Presentation selection: 18 browser/build/explicit-request cases passed');
+// Verify the actual settings code against both stored preferences and URL overrides.
+const scaleSettings = shell.slice(shell.indexOf("const scaleSelect ="), shell.indexOf("const aspectSelect ="));
+for (const webglBackend of [false, true]) for (const [query, saved, expected] of [
+  ['', '2', '2'], ['PS2_SCALE=3', '2', '3'], ['PS2_SCALE=9', '2', '1'], ['', null, '1'],
+]) {
+  const select = { disabled: false, addEventListener() {} };
+  vm.runInNewContext(scaleSettings, { webglBackend, params: new URLSearchParams(query),
+    document: { getElementById: () => select }, localStorage: { getItem: () => saved } });
+  assert.equal(select.value, webglBackend ? '1' : expected);
+  assert.equal(select.disabled, webglBackend);
+}
+console.log('Resolution settings: 8 backend/preference/URL cases passed');
 const copyPreparation = shell.match(/prepareCopyFrames:\s*([^,\n]+)/)?.[1];
 assert(copyPreparation, 'The browser build must declare its copy preparation policy');
 for (const mode of ['jspi', 'asyncify']) {

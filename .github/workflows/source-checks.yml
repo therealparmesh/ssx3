@@ -76,6 +76,15 @@ jobs:
           source tools/emsdk/emsdk_env.sh
           sh scripts/build_webgl_backend.sh
           node --check scripts/test_webgl_backend.cjs
+      - name: Build the asset-free live WebGL runtime probe
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          emcmake cmake -S . -B build/webgl-runtime -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DPS2_WEB_ASYNC=asyncify \
+            -DPS2_GPU_BACKEND=webgl -DPS2_GPU_TESTS=ON \
+            -DPS2_WEBGL_UPSTREAM="$PWD/build/webgl-backend/upstream"
+          cmake --build build/webgl-runtime --target gpu_copy_readback --parallel 2
+          node --check scripts/test_webgl_runtime.cjs
       - name: Verify the WebGL GS register adapter in Wasm
         run: |
           source tools/emsdk/emsdk_env.sh

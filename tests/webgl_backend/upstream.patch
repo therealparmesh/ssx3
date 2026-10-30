@@ -861,7 +861,7 @@
  		framebuffer->m_resolveNeeded = true;
  
  		CHECKGLERROR();
-@@ -2643,3 +2815,157 @@
+@@ -2643,3 +2815,162 @@
  	}
  	CHECKGLERROR();
  }
@@ -1018,6 +1018,11 @@
 + auto depth=std::make_shared<CDepthbuffer>(2<<20,128,512,psm,1,false);
 + PopulateDepthbuffer(depth);depth->m_gpuDirty.include(0,0,128,512);
 + m_depthbuffers.push_back(depth);
++}
++
++bool CGSH_OpenGL::HasCachedCopySurface(uint32 base,uint32 width,uint32 psm)const
++{
++ return std::any_of(m_framebuffers.begin(),m_framebuffers.end(),[&](const FramebufferPtr& fb){return fb->m_basePtr==base&&fb->m_width==width&&fb->m_psm==psm;});
 +}
 --- a/play/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp
 +++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp
@@ -1230,7 +1235,7 @@
  #include <unordered_map>
  #include "../GSHandler.h"
  #include "../GsDebuggerInterface.h"
-@@ -22,8 +24,21 @@
+@@ -22,8 +24,22 @@
  
  class CGSH_OpenGL : public CGSHandler, public CGsDebuggerInterface
  {
@@ -1242,6 +1247,7 @@
 + struct DepthAliasStats {uint64 draws,passes,maps;};
 + DepthAliasStats GetDepthAliasStats()const{return {m_aliasDraws,m_aliasPasses,m_aliasMaps.size()};}
 + void SeedDepthExportForValidation(uint32);
++ bool HasCachedCopySurface(uint32,uint32,uint32)const;
 + void SyncMemoryForValidation(){SyncMemoryCache();}
 + uint64 SyncReadbacksForValidation()const{return m_syncReadbacks;}
 + void SeedReadbackForValidation(uint32);
@@ -1252,7 +1258,7 @@
  	virtual ~CGSH_OpenGL();
  
  	static void RegisterPreferences();
-@@ -60,13 +75,25 @@
+@@ -60,13 +76,25 @@
  	void InitializeImpl() override;
  	void ReleaseImpl() override;
  	void ResetImpl() override;
@@ -1278,7 +1284,7 @@
  	typedef CGsTextureCache<Framework::OpenGl::CTexture> TextureCache;
  	typedef uint64 ShaderCapsInt;
  
-@@ -98,6 +125,11 @@
+@@ -98,6 +126,11 @@
  		unsigned int alphaFailMethod : 2;
  		unsigned int alphaTestDepthTest_DepthFetch : 1;
  		unsigned int alphaTestDepthTestEqual_DepthFetch : 1;
@@ -1290,7 +1296,7 @@
  
  		bool isIndexedTextureSource() const
  		{
-@@ -111,6 +143,7 @@
+@@ -111,6 +144,7 @@
  		bool isValid;
  		bool isTextureStateValid;
  		bool isFramebufferStateValid;
@@ -1298,7 +1304,7 @@
  
  		//Register State
  		uint64 primReg;
-@@ -172,9 +205,12 @@
+@@ -172,9 +206,12 @@
  		uint32 alphaRef;
  		float alphaFix;
  		float fogColor[3];
@@ -1314,7 +1320,7 @@
  
  	enum
  	{
-@@ -228,6 +264,11 @@
+@@ -228,6 +265,11 @@
  	typedef std::shared_ptr<CPalette> PalettePtr;
  	typedef std::list<PalettePtr> PaletteList;
  
@@ -1326,7 +1332,7 @@
  	class CFramebuffer
  	{
  	public:
-@@ -247,6 +288,7 @@
+@@ -247,6 +289,7 @@
  		Framework::OpenGl::CRenderbuffer m_colorBufferMs;
  
  		CGsCachedArea m_cachedArea;
@@ -1334,7 +1340,7 @@
  	};
  	typedef std::shared_ptr<CFramebuffer> FramebufferPtr;
  	typedef std::vector<FramebufferPtr> FramebufferList;
-@@ -262,8 +304,22 @@
+@@ -262,8 +305,22 @@
  		uint32 m_height;
  		uint32 m_psm;
  		Framework::OpenGl::CRenderbuffer m_depthBuffer;
@@ -1357,7 +1363,7 @@
  	typedef std::vector<DepthbufferPtr> DepthbufferList;
  
  	struct TEXTURE_INFO
-@@ -345,10 +401,15 @@
+@@ -345,10 +402,15 @@
  	void Prim_Triangle();
  	void Prim_Sprite();
  
@@ -1374,7 +1380,7 @@
  	void DrawToDepth(unsigned int, uint64);
  
  	void SetRenderingContext(uint64);
-@@ -427,6 +488,7 @@
+@@ -427,6 +489,7 @@
  	Framework::OpenGl::CVertexArray m_copyToFbVertexArray;
  	GLint m_copyToFbSrcPositionUniform = -1;
  	GLint m_copyToFbSrcSizeUniform = -1;
@@ -1382,7 +1388,7 @@
  
  	TextureCache m_textureCache;
  	PaletteList m_paletteCache;
-@@ -470,7 +532,7 @@
+@@ -470,7 +533,7 @@
  	RENDERSTATE m_renderState;
  	uint32 m_validGlState = 0;
  	VERTEXPARAMS m_vertexParams;

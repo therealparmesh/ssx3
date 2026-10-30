@@ -8,7 +8,7 @@ set(PS2_GENERATED "" CACHE PATH "Folder with the C++ generated for a game")
 option(PS2_DEVELOPER_TOOLS "Include native profiling and named Wasm profiling functions" OFF)
 option(PS2_RUNTIME_TESTS "Build asset-free runtime and code-generation regression tests" OFF)
 option(PS2_WEB_WORKER "Experimental dedicated-worker game renderer (Asyncify only)" OFF)
-option(PS2_GPU_TESTS "Build browser WebGPU regression fixtures without game assets" OFF)
+option(PS2_GPU_TESTS "Build browser GPU regression fixtures without game assets" OFF)
 
 # Keep every indirect game entry point registered. Let the linker remove only
 # host/runtime sections that have no references; playthrough coverage alone
@@ -95,8 +95,38 @@ if(EMSCRIPTEN AND PS2_WEB_ASYNC STREQUAL "asyncify")
     set_property(SOURCE runtime/src/gs/queue.cpp APPEND PROPERTY COMPILE_DEFINITIONS PS2_RENDER_PROXY_WAKE)
 endif()
 
+set(PS2_GPU_BACKEND "webgpu" CACHE STRING "GPU backend: webgpu or experimental webgl")
+set_property(CACHE PS2_GPU_BACKEND PROPERTY STRINGS webgpu webgl)
+if(NOT PS2_GPU_BACKEND MATCHES "^(webgpu|webgl)$")
+    message(FATAL_ERROR "PS2_GPU_BACKEND must be webgpu or webgl")
+endif()
+if(PS2_GPU_BACKEND STREQUAL "webgl")
+    if(NOT EMSCRIPTEN OR NOT PS2_WEB_ASYNC STREQUAL "asyncify")
+        message(FATAL_ERROR "Experimental WebGL backend requires Emscripten Asyncify")
+    endif()
+    if(PS2_WEB_WORKER)
+        message(FATAL_ERROR "Experimental WebGL currently requires PS2_WEB_WORKER=OFF; worker presentation is not integrated")
+    endif()
+    set(PS2_WEBGL_UPSTREAM "" CACHE PATH "Checksum-verified upstream GS tree")
+    include(cmake/webgl_backend.cmake)
+    ps2_add_webgl_libraries("${PS2_WEBGL_UPSTREAM}")
+    set(PS2_WEBGL_KERNEL "${CMAKE_BINARY_DIR}/webgl_kernel.cpp")
+    add_custom_command(OUTPUT "${PS2_WEBGL_KERNEL}"
+        COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/runtime/src/gs/webgl/ordered_raster.frag -DOUT=${PS2_WEBGL_KERNEL} -DNAME=kGsWebglKernel -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
+        DEPENDS runtime/src/gs/webgl/ordered_raster.frag cmake/embed.cmake)
+    target_sources(ps2runtime PRIVATE runtime/src/gs/webgl/gpu_backend.cpp "${PS2_WEBGL_KERNEL}")
+    target_compile_definitions(ps2runtime PUBLIC PS2_GPU PS2_GPU_WEBGL)
+    set_property(TARGET ps2runtime APPEND PROPERTY INTERFACE_LINK_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/web/webgl-context.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/gs/webgl/ordered_raster.js")
+    target_link_libraries(ps2runtime PUBLIC gsh_opengl ps2webgl_gs_core)
+    target_link_options(ps2runtime PUBLIC -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1
+        "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/webgl-context.js\""
+        "SHELL:--pre-js \"${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/gs/webgl/ordered_raster.js\"")
+endif()
+
 set(PS2_WGPU_DIR "${CMAKE_SOURCE_DIR}/third_party/wgpu-native" CACHE PATH "wgpu-native release folder")
-if(EMSCRIPTEN OR EXISTS "${PS2_WGPU_DIR}/lib/libwgpu_native.a")
+if(PS2_GPU_BACKEND STREQUAL "webgpu" AND (EMSCRIPTEN OR EXISTS "${PS2_WGPU_DIR}/lib/libwgpu_native.a"))
     set(PS2_GS_WGSL "${CMAKE_BINARY_DIR}/gs_wgsl.cpp")
     add_custom_command(OUTPUT "${PS2_GS_WGSL}"
         COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/runtime/src/gs/gpu/gs.wgsl -DOUT=${PS2_GS_WGSL} -DNAME=kGsShader -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake

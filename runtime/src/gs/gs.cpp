@@ -382,7 +382,7 @@ void init() {
 #ifdef PS2_GPU
     const char *backend = std::getenv("PS2_GS");
     const gpu::Mode wanted = !backend || std::strcmp(backend, "gpu") == 0 ? gpu::Mode::primary : std::strcmp(backend, "both") == 0 ? gpu::Mode::mirror : gpu::Mode::off;
-    if (wanted != gpu::Mode::off && !gpu::init(wanted)) std::fprintf(stderr, "[gs] WebGPU unavailable, using the software renderer\n");
+    if (wanted != gpu::Mode::off && !gpu::init(wanted)) std::fprintf(stderr, "[gs] GPU unavailable, using the software renderer\n");
 #endif
 }
 

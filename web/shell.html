@@ -185,6 +185,7 @@
 <script>
 const statusEl = document.getElementById('status');
 const workerPlayer = '@PS2_WEB_WORKER_ENABLED@' === 'true';
+const webglBackend = '@PS2_GPU_BACKEND@' === 'webgl';
 const cardFS = () => Module.cardFS || FS;
 const CARD_DIR = '/memcard', CARD_FILE = '/memcard/Mcd001.ps2', CARD_BYTES = 8650752;
 let noteTimer = 0, noteRestore = '';
@@ -522,7 +523,8 @@ function missingFeatures() {
   const missing = [];
   if (!window.crossOriginIsolated) missing.push('cross-origin isolation (COOP and COEP headers)');
   if (typeof SharedArrayBuffer !== 'function' || typeof Atomics !== 'object') missing.push('shared memory');
-  if (!navigator.gpu) missing.push('WebGPU');
+  if (!navigator.gpu && !webglBackend) missing.push('WebGPU');
+  if (webglBackend && typeof WebGL2RenderingContext !== 'function') missing.push('WebGL 2');
   if (workerPlayer && (typeof OffscreenCanvas !== 'function' ||
       typeof HTMLCanvasElement.prototype.transferControlToOffscreen !== 'function')) missing.push('OffscreenCanvas');
   if (usesJspi && typeof WebAssembly.Suspending !== 'function') missing.push('WebAssembly JSPI');
@@ -591,8 +593,12 @@ let scale = params.get('PS2_SCALE');
 if (!scale) {
   try { scale = localStorage.getItem('ps2web-scale'); } catch (e) {}
 }
-scale = ['1', '2', '3'].includes(scale) ? scale : '1';
+scale = !webglBackend && ['1', '2', '3'].includes(scale) ? scale : '1';
 scaleSelect.value = scale;
+if (webglBackend) {
+  scaleSelect.disabled = true;
+  scaleSelect.title = 'The experimental WebGL renderer currently supports native resolution only.';
+}
 scaleSelect.addEventListener('change', () => {
   pausePlayer();
   const selected = scaleSelect.value;
@@ -1114,6 +1120,14 @@ function webgpuHelp(onCpu) {
 }
 
 async function chooseGpu() {
+  if (webglBackend) {
+    const probe = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(1, 1) : document.createElement('canvas');
+    const gl = probe.getContext('webgl2', {failIfMajorPerformanceCaveat: true});
+    if (!gl) throw new Error('Hardware WebGL 2 is unavailable. Enable graphics acceleration, then reload.');
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    Module.presentCopy = true; Module.bufferedSurface = false;
+    return 'GPU WebGL 2';
+  }
   if (!navigator.gpu) {
     Module.gpuHelp = webgpuHelp(false);
     return 'WebGPU unavailable, software renderer';
@@ -1235,7 +1249,7 @@ function preferFrameCopy() {
   // The primary Chromium path on desktop Linux can delay direct surface
   // presentation. The existing copy presenter passed complete local and
   // private HTTPS races without those delays on the qualified desktop.
-  return params.has('copy') || ('@PS2_WEB_ASYNC@' === 'jspi' &&
+  return '@PS2_GPU_BACKEND@' === 'webgl' || params.has('copy') || ('@PS2_WEB_ASYNC@' === 'jspi' &&
     /Linux/.test(navigator.userAgent) && !/(Android|Mobile)/.test(navigator.userAgent) &&
     /Chrom(?:e|ium)\//.test(navigator.userAgent));
 }
@@ -1389,7 +1403,7 @@ updateControls();
 if (missing.length) {
   const help = document.getElementById('help');
   const firefoxLinux = navigator.userAgent.includes('Firefox/') && navigator.userAgent.includes('Linux') && !navigator.userAgent.includes('Android');
-  const update = !navigator.gpu && firefoxLinux
+  const update = !webglBackend && !navigator.gpu && firefoxLinux
     ? 'Firefox on Linux requires WebGPU. Open about:config, set dom.webgpu.enabled to true, then reload.'
     : 'Update your browser and operating system, and enable hardware graphics acceleration.';
   help.textContent = 'This browser cannot run this build. ' + update + (params.has('debug') ? ' Missing: ' + missing.join(', ') + '.' : '');
