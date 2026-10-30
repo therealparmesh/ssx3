@@ -41,11 +41,17 @@ int main() {
     if (c <= 0)
       throw std::runtime_error("No WebGL2");
     emscripten_webgl_make_context_current(c);
+    EM_ASM({
+      if (new URLSearchParams(location.search).get('mutant') === 'skip-readback-error') {
+        const original = GLctx.getError.bind(GLctx);
+        GLctx.getError = function() { original(); return 0; };
+      }
+    });
     Fixture gs;
     gs.Initialize();
     gs.Reset();
     gs.DrainPendingCalls();
-    unsigned cases = 0, pixels = 0;
+    unsigned cases = 0, pixels = 0, faults = 0;
     struct Rect {
       unsigned x, y, w, h;
     };
@@ -83,6 +89,36 @@ int main() {
         reg(0x50, (2ull << 16) | (uint64_t(psm) << 24));
         reg(0x51, rect.x | (uint64_t(rect.y) << 16));
         reg(0x52, rect.w | (uint64_t(rect.h) << 32));
+        // Set up registers without starting the transfer. Exercise the same
+        // backend method used by TRXDIR, then retry through the normal stream.
+        gs.ProcessWriteBuffer(nullptr);
+        gs.DrainPendingCalls();
+        for (unsigned fault = 0; fault < 2; ++fault) {
+          const std::vector<uint8> before(gs.GetRam(), gs.GetRam() + (4 << 20));
+          EM_ASM({
+            const original = GLctx.readPixels;
+            GLctx.readPixels = function(...args) {
+              GLctx.readPixels = original;
+              if ($0) args[2] = -1;
+              else this.enable(0xffffffff);
+              return original.apply(this, args);
+            };
+          }, fault);
+          bool rejected = false;
+          try {
+            gs.ProcessLocalToHostTransfer();
+          } catch (const std::runtime_error &) {
+            rejected = true;
+          }
+          const bool intact = !memcmp(before.data(), gs.GetRam(), before.size());
+          if (!rejected || !intact)
+            throw std::runtime_error("Failed readback was not atomic: rejected=" +
+                                     std::to_string(rejected) + " intact=" +
+                                     std::to_string(intact));
+          if (glGetError() != GL_NO_ERROR)
+            throw std::runtime_error("Failed readback did not consume GL error");
+          ++faults;
+        }
         reg(0x53, 1);
         gs.ProcessWriteBuffer(nullptr);
         gs.ReadImageData(actual.data(), bytes);
@@ -105,8 +141,9 @@ int main() {
       }
     unsigned error = glGetError();
     EM_ASM(
-        { window.fixtureResult = ({cases : $0, pixels : $1, glError : $2}); },
-        cases, pixels, error);
+        { window.fixtureResult = ({cases : $0, pixels : $1, glError : $2,
+                                   faults : $3}); },
+        cases, pixels, error, faults);
     gs.close();
     return error ? 1 : 0;
   } catch (const std::exception &e) {

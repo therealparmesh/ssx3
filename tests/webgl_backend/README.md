@@ -49,7 +49,11 @@ testing; these fixtures do not measure performance.
 - **Readback:** 16 cases, 266,488 pixels per browser across PSMCT32/24/16/16S.
   GPU storage remains authoritative while CPU RAM is poisoned. Full, offset,
   edge and page-crossing rectangles check packed output, a buffer guard and
-  the complete 4 MB RAM image. PSMCT24 preserves the unused high byte.
+  the complete 4 MB RAM image. PSMCT24 preserves the unused high byte. Each case
+  injects both an earlier GL fault and a failed `readPixels` call, for 32 faults
+  per browser. Failed transfers must throw before changing RAM, consume the GL
+  error and permit an exact retry. A control that suppresses error reporting
+  must fail the memory-atomicity assertion.
 - **Restore:** 24 cases, 1,572,864 pixels per browser. Replacing RAM must discard
   stale framebuffers and pending draws. Repeated invalidation preserves loaded
   RAM, registers and CLUT contents, and the next surface observes restored data.

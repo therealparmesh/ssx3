@@ -1,10 +1,33 @@
 # Release status
 
+**Production sign-off is pending.** The current ordinary-browser WebGL candidate
+has measured roughly 14–16 fresh images/s in short Firefox briefing/race-entry
+windows, with audio starvation. The earlier near-60 results below qualify their
+specific hosted configurations; they do not establish that the current candidate
+works at that speed in default browser settings or on phones.
+
 As of 2026-10-30, saved version 68 is running on the owner-private hosted site. Live statistics are now opt-in through the existing `?debug` mode. Normal play keeps the diagnostic HUD inactive, preventing its text updates from triggering native Firefox canvas snapshot waits. Both staged and actual hosted desktop browsers passed separate five-minute two-player race/results windows with near-60 fresh submissions/s and no actual interval over 25 ms. Full production sign-off remains open: default-browser compatibility, physical phones/controllers/audio/display delivery and complete game progression remain unqualified.
 
 The current shell is from source `f85e4af96277d92b39f272412f5d633024ac6792`, with hosting source `43e95691bdd160427bd4c195b0b24479e308c075`. Native assets are unchanged: desktop runtime source `43fb1f0b293353a4880d26c0302deaec1ebaf69e`, immutable release `289893fc3b9a64e8759a0a6bd222b1e9680ab048a95e555ed582098248f0a275`, native SHA-256 `b8cf5dfe41f9cab9fbd5ca85907515737224f8659e99300887a65d880d2935f4`. Version 67 is retained for rollback. Primary/compatibility players receive the same shell change while retaining their assets and earlier desktop qualification; there is no new standalone performance window. Game assets and private access credentials are excluded from this repository.
 
 ## Unreleased live WebGL integration
+
+Framebuffer-to-host transfers now check GL errors before copying temporary readback
+pixels into GS RAM. The preceding implementation silently changed RAM after an
+injected fault. Both desktop browsers pass 32 fault/retry cases across four pixel
+layouts and four rectangle shapes, with complete RAM comparisons and exact packed
+output after retry. The preceding implementation and a control that suppresses
+error reporting fail the new assertion. The full backend fixture matrix passes
+in both browsers. This is a correctness fix; it does not establish a speed gain.
+
+Private profiling found thousands of native fallback draws per frame in a slow
+briefing. Almost all sampled fallback passes requested mip filtering, which the
+ordered path currently rejects; the native fallback currently samples level zero.
+An explicitly approximate level-zero batching trial still submitted only about
+18 fresh images/s, so enabling that approximation would not meet the performance
+target. Sampled palettes usually contain varying alpha, ruling out a blanket
+opaque-material shortcut. Correct mip sampling, destination-dependent batching
+and frame delivery remain engineering work before performance qualification.
 
 The draft WebGL branch now implements the runtime GPU API and can build a private game player, rather than only replaying captured commands. The normal backend and hosted release are unchanged. This candidate requires Asyncify, native internal resolution and the window-owned runtime; the split game/presentation worker is not integrated.
 

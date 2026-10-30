@@ -670,7 +670,7 @@
  	if(m_trxCtx.nDirty)
  	{
  		FlushVertexBuffer();
-@@ -2130,54 +2283,46 @@
+@@ -2130,54 +2283,48 @@
  
  void CGSH_OpenGL::ProcessLocalToHostTransfer()
  {
@@ -736,6 +736,8 @@
 + glBindFramebuffer(GL_FRAMEBUFFER,m_multisampleEnabled ? fb->m_resolveFramebuffer : fb->m_framebuffer);
 + Framework::CBitmap image(rect.nRRW*m_fbScale,rect.nRRH*m_fbScale,32);
 + glReadPixels(pos.nSSAX*m_fbScale,pos.nSSAY*m_fbScale,rect.nRRW*m_fbScale,rect.nRRH*m_fbScale,GL_RGBA,GL_UNSIGNED_BYTE,image.GetPixels());
++ // Reject failed reads before copying temporary pixels into authoritative RAM.
++ if(glGetError()!=GL_NO_ERROR) throw std::runtime_error("Framebuffer transfer readback produced a GL error");
 + if(m_fbScale!=1) image=image.Resize(rect.nRRW,rect.nRRH);
 + CGsPixelFormats::CPixelIndexorPSMCT32 indexor32(m_pRAM,blt.GetSrcPtr(),blt.nSrcWidth);
 + CGsPixelFormats::CPixelIndexorPSMCT16 indexor16(m_pRAM,blt.GetSrcPtr(),blt.nSrcWidth);
@@ -761,7 +763,7 @@
  	auto bltBuf = make_convertible<BITBLTBUF>(m_nReg[GS_REG_BITBLTBUF]);
  	auto srcFramebufferIterator = std::find_if(m_framebuffers.begin(), m_framebuffers.end(),
  	                                           [&](const FramebufferPtr& framebuffer) {
-@@ -2197,6 +2342,7 @@
+@@ -2197,6 +2344,7 @@
  	{
  		FlushVertexBuffer();
  		m_renderState.isValid = false;
@@ -769,7 +771,7 @@
  
  		const auto& srcFramebuffer = (*srcFramebufferIterator);
  		const auto& dstFramebuffer = (*dstFramebufferIterator);
-@@ -2204,17 +2350,38 @@
+@@ -2204,17 +2352,38 @@
  		glBindFramebuffer(GL_FRAMEBUFFER, dstFramebuffer->m_framebuffer);
  		glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFramebuffer->m_framebuffer);
  
@@ -813,7 +815,7 @@
  		FlushVertexBuffer();
  		m_renderState.isValid = false;
  
-@@ -2231,6 +2398,7 @@
+@@ -2231,6 +2400,7 @@
  
  		auto [transferAddress, transferSize] = GsTransfer::GetDstRange(bltBuf, trxReg, trxPos);
  		m_textureCache.InvalidateRange(transferAddress, transferSize);
@@ -821,7 +823,7 @@
  
  		//Write back to RAM
  		{
-@@ -2253,6 +2421,7 @@
+@@ -2253,6 +2423,7 @@
  
  void CGSH_OpenGL::ProcessClutTransfer(uint32 csa, uint32)
  {
@@ -829,7 +831,7 @@
  	FlushVertexBuffer();
  	m_renderState.isTextureStateValid = false;
  	PalCache_Invalidate(csa);
-@@ -2512,7 +2681,8 @@
+@@ -2512,7 +2683,8 @@
  	CopyToFb(
  	    0, 0, framebuffer->m_width, framebuffer->m_height,
  	    framebuffer->m_width, framebuffer->m_height,
@@ -839,7 +841,7 @@
  	framebuffer->m_resolveNeeded = true;
  
  	CHECKGLERROR();
-@@ -2531,8 +2701,9 @@
+@@ -2531,8 +2703,9 @@
  
  			glActiveTexture(GL_TEXTURE0);
  			glBindTexture(GL_TEXTURE_2D, copyToFbTexture);
@@ -851,7 +853,7 @@
  			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
  			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
  			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-@@ -2591,7 +2762,8 @@
+@@ -2591,7 +2764,8 @@
  		CopyToFb(
  		    texX, texY, (texX + texWidth), (texY + texHeight),
  		    framebuffer->m_width, framebuffer->m_height,
@@ -861,7 +863,7 @@
  		framebuffer->m_resolveNeeded = true;
  
  		CHECKGLERROR();
-@@ -2643,3 +2815,162 @@
+@@ -2643,3 +2817,162 @@
  	}
  	CHECKGLERROR();
  }

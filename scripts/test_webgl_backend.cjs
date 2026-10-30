@@ -52,6 +52,7 @@ const puppeteer = require('puppeteer-core');
         assert.equal(result.result.aliasRejected, true);
         assert.equal(result.result.z32Rejected, true);
       }
+      if (route === 'readback') assert.equal(result.result.faults, 32);
       if (fixture.endsWith('-hybrid')) assert(result.result.orderedBatches > 0, 'Hybrid export fell back to the native path');
       assert.deepEqual(errors, []);
       await page.close();
@@ -72,7 +73,21 @@ const puppeteer = require('puppeteer-core');
       assert.equal(result.glError, 0); assert.deepEqual(errors, []);
       await page.close();
     }
-    console.log(`PASS ${kind}: population, readback, restore, native/hybrid export, bounded depth aliases and two negative controls; evidence ${artifacts}`);
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {if (message.type() === 'error') errors.push(message.text());});
+    const url = new URL(origin);
+    url.searchParams.set('fixture', 'readback');
+    url.searchParams.set('mutant', 'skip-readback-error');
+    await page.goto(url.href, {waitUntil: 'load'});
+    await page.waitForFunction(() => window.fixtureResult, {timeout: 60000});
+    const result = await page.evaluate(() => window.fixtureResult);
+    evidence.fixtures.push({fixture: 'readback-skip-error', expectedFailure: true, result, errors});
+    assert.match(result.error || '', /Failed readback was not atomic: rejected=0 intact=0/);
+    assert.deepEqual(errors, []);
+    await page.close();
+    console.log(`PASS ${kind}: population, readback with 32 GL faults, restore, native/hybrid export, bounded depth aliases and three negative controls; evidence ${artifacts}`);
   } finally {
     fs.writeFileSync(path.join(artifacts, `${kind}-backend.json`), JSON.stringify(evidence, null, 2) + '\n');
     await browser.close();
