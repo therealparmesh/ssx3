@@ -146,7 +146,7 @@
     </div>
   </div>
 </div>
-<div id="bar"><span id="status">Loading…</span><span id="stats"></span>
+<div id="bar"><span id="status">Loading…</span><span id="stats" hidden></span>
   <button id="pause" type="button" hidden>Pause</button>
   <button id="controls-toggle" type="button" hidden>Hide controls</button>
   <button id="fullscreen" type="button" title="Fullscreen (Alt+Enter or double click)">Fullscreen</button>
@@ -402,6 +402,7 @@ importInput.addEventListener('change', async () => {
 const statsEl = document.getElementById('stats');
 const canvas = document.getElementById('canvas');
 const params = new URLSearchParams(location.search);
+statsEl.hidden = !params.has('debug');
 let startupTimer = 0;
 let compilerWorker = null;
 function stopCompiler() {
@@ -1344,6 +1345,9 @@ var Module = {
         statusEl.textContent = params.has('debug') ? 'Running, ' + Module.gpuInfo : 'SSX 3';
     }
     if (hasPendingRuntimeCard()) showPendingRuntimeCard();
+    // Live DOM statistics can force a synchronous OffscreenCanvas snapshot.
+    // Keep them opt-in so normal play does not trigger those readbacks.
+    if (!params.has('debug')) return;
     ++frames;
     // The copy path queues an image for a later refresh. Count it only when
     // its presentation callback has actually copied it to the page.
@@ -1356,23 +1360,20 @@ var Module = {
         lastWorkerShown = presented; lastWorkerFrame = nativeFrame;
       }
       const span = now - last;
-      let text = (shown * 1000 / span).toFixed(0) + ' fps';
-      if (params.has('debug')) {
-        const gpu = Module._ps2web_gpu_ms();
-        const memory = (Module.HEAPU8.length / 1048576).toFixed(0);
-        const emuIdle = Module._ps2web_idle_ms(0), renderIdle = Module._ps2web_idle_ms(1), vuIdle = Module._ps2web_idle_ms(2);
-        const interpreted = Module._ps2web_vu_interpreted();
-        text = 'frame ' + Module._ps2web_frames() + '   ' + (frames * 1000 / span).toFixed(1) + ' fps (' + (shown * 1000 / span).toFixed(0) + ' on screen)   GPU ' + ((gpu - lastGpu) / span * 100).toFixed(0) +
-               '%   idle emu ' + ((emuIdle - lastEmuIdle) / span * 100).toFixed(0) + '% vu ' + ((vuIdle - lastVuIdle) / span * 100).toFixed(0) +
-               '% gs ' + ((renderIdle - lastRenderIdle) / span * 100).toFixed(0) +
-               '%   heap ' + memory + ' MB   audio ' + Module.audioQueuedMs().toFixed(0) + ' ms' +
-               (interpreted > lastInterpreted ? '   vu1 interpreted ' + Math.round((interpreted - lastInterpreted) * 1000 / span) + '/s' : '');
-        lastInterpreted = interpreted;
-        lastEmuIdle = emuIdle;
-        lastRenderIdle = renderIdle;
-        lastVuIdle = vuIdle;
-        lastGpu = gpu;
-      }
+      const gpu = Module._ps2web_gpu_ms();
+      const memory = (Module.HEAPU8.length / 1048576).toFixed(0);
+      const emuIdle = Module._ps2web_idle_ms(0), renderIdle = Module._ps2web_idle_ms(1), vuIdle = Module._ps2web_idle_ms(2);
+      const interpreted = Module._ps2web_vu_interpreted();
+      const text = 'frame ' + Module._ps2web_frames() + '   ' + (frames * 1000 / span).toFixed(1) + ' fps (' + (shown * 1000 / span).toFixed(0) + ' on screen)   GPU ' + ((gpu - lastGpu) / span * 100).toFixed(0) +
+             '%   idle emu ' + ((emuIdle - lastEmuIdle) / span * 100).toFixed(0) + '% vu ' + ((vuIdle - lastVuIdle) / span * 100).toFixed(0) +
+             '% gs ' + ((renderIdle - lastRenderIdle) / span * 100).toFixed(0) +
+             '%   heap ' + memory + ' MB   audio ' + Module.audioQueuedMs().toFixed(0) + ' ms' +
+             (interpreted > lastInterpreted ? '   vu1 interpreted ' + Math.round((interpreted - lastInterpreted) * 1000 / span) + '/s' : '');
+      lastInterpreted = interpreted;
+      lastEmuIdle = emuIdle;
+      lastRenderIdle = renderIdle;
+      lastVuIdle = vuIdle;
+      lastGpu = gpu;
       // Replacing even equal text invalidates the toolbar and can cause an
       // otherwise unchanged canvas to participate in another paint.
       if (statsEl.textContent !== text) statsEl.textContent = text;
