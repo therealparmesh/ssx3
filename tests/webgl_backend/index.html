@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>GS backend verification</title>
+<canvas id="canvas" width="128" height="512"></canvas>
+<pre id="log">GS backend fixture loading…
+</pre>
+<script>
+const fixture = new URLSearchParams(location.search).get('fixture') || 'restore';
+if (!['population', 'readback', 'restore'].includes(fixture)) throw Error('Unknown fixture');
+var Module = {
+  canvas: document.getElementById('canvas'),
+  print: text => { document.getElementById('log').textContent += text + '\n'; },
+  printErr: text => console.error(text)
+};
+const script = document.createElement('script');
+script.src = fixture + '.js';
+script.onerror = () => { window.fixtureResult = {error: 'Fixture module failed to load'}; };
+document.body.append(script);
+</script>

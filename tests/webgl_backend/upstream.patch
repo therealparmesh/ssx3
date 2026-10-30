@@ -1,0 +1,1357 @@
+--- a/play/Source/gs/GSHandler.cpp
++++ b/play/Source/gs/GSHandler.cpp
+@@ -94,6 +94,7 @@
+ 	m_transferReadHandlers[PSMCT32] = &CGSHandler::TransferReadHandlerGeneric<CGsPixelFormats::STORAGEPSMCT32>;
+ 	m_transferReadHandlers[PSMCT24] = &CGSHandler::TransferReadHandler24<CGsPixelFormats::STORAGEPSMCT32>;
+ 	m_transferReadHandlers[PSMCT16] = &CGSHandler::TransferReadHandlerGeneric<CGsPixelFormats::STORAGEPSMCT16>;
++	m_transferReadHandlers[PSMCT16S] = &CGSHandler::TransferReadHandlerGeneric<CGsPixelFormats::STORAGEPSMCT16S>;
+ 	m_transferReadHandlers[PSMT8] = &CGSHandler::TransferReadHandlerGeneric<CGsPixelFormats::STORAGEPSMT8>;
+ 	m_transferReadHandlers[PSMT8H] = &CGSHandler::TransferReadHandlerPSMT8H;
+ 	m_transferReadHandlers[PSMZ32] = &CGSHandler::TransferReadHandlerGeneric<CGsPixelFormats::STORAGEPSMZ32>;
+@@ -1209,8 +1210,9 @@
+ 		uint32 y = (m_trxCtx.nRRY + trxPos.nSSAY) % 2048;
+ 		auto pixel = indexor.GetPixel(x, y);
+ 		dst[i + 0] = (pixel >> 0) & 0xFF;
+-		dst[i + 1] = (pixel >> 8) & 0xFF;
+-		dst[i + 2] = (pixel >> 16) & 0xFF;
++		// Quadword padding can leave a partial final 24-bit pixel.
++		if(i + 1 < length) dst[i + 1] = (pixel >> 8) & 0xFF;
++		if(i + 2 < length) dst[i + 2] = (pixel >> 16) & 0xFF;
+ 		m_trxCtx.nRRX++;
+ 		if(m_trxCtx.nRRX == trxReg.nRRW)
+ 		{
+@@ -2198,6 +2200,17 @@
+ 	m_mailBox.SendCall(std::move(function));
+ }
+ 
++// Called only by the owner of a non-threaded handler. Execute all accepted
++// commands before the ring's next write buffer can be reused. This does not
++// synthesize a frame, present, or wait for GPU completion.
++void CGSHandler::DrainPendingCalls()
++{
++ assert(!m_gsThreaded);
++ ProcessWriteBuffer(nullptr);
++ FlushWriteBuffer();
++ while(m_mailBox.IsPending()) m_mailBox.ReceiveCall();
++}
++
+ void CGSHandler::ProcessSingleFrame()
+ {
+ 	assert(!m_gsThreaded);
+--- a/play/Source/gs/GSHandler.h
++++ b/play/Source/gs/GSHandler.h
+@@ -901,6 +901,7 @@
+ 	void SendGSCall(const CMailBox::FunctionType&, bool = false, bool = false);
+ 
+ 	void ProcessSingleFrame();
++	void DrainPendingCalls();
+ 
+ 	FlipCompleteEvent OnFlipComplete;
+ 	NewFrameEvent OnNewFrame;
+--- a/play/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp
++++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp
+@@ -1,4 +1,7 @@
+ #include <stdio.h>
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
+ #include <assert.h>
+ #include <cstring>
+ #include <math.h>
+@@ -76,6 +79,10 @@
+ 
+ void CGSH_OpenGL::InitializeImpl()
+ {
++#ifdef __EMSCRIPTEN__
++ m_orderedAllowLevelZero=EM_ASM_INT({return !!Module.orderedAllowLevelZero;});
++ m_orderedRasterEnabled=EM_ASM_INT({return !!(Module.orderedRasterEnabled && globalThis.Ps2OrderedRaster && Module.orderedKernelSource);});
++#endif
+ 	InitializeRC();
+ 
+ 	m_nVtxCount = 0;
+@@ -91,6 +98,9 @@
+ 
+ void CGSH_OpenGL::ReleaseImpl()
+ {
++#ifdef __EMSCRIPTEN__
++ EM_ASM({if(Module.ps2OrderedRaster){Module.ps2OrderedRaster.destroy();Module.ps2OrderedRaster=null;}});
++#endif
+ 	ResetImpl();
+ 
+ 	m_paletteCache.clear();
+@@ -106,10 +116,15 @@
+ 	m_primVertexArray.Reset();
+ 	m_vertexParamsBuffer.Reset();
+ 	m_fragmentParamsBuffer.Reset();
++ m_blendDestination.Reset();m_blendWidth=m_blendHeight=0;
+ }
+ 
+ void CGSH_OpenGL::ResetImpl()
+ {
++ m_aliasDraws=m_aliasPasses=0;
++ m_aliasRects.clear();m_aliasTarget.reset();m_aliasDepth.reset();m_aliasMaps.clear();
++ m_aliasProgram.reset();m_aliasDepthTexture.Reset();m_aliasSourceFbo.Reset();m_aliasCopyFbo.Reset();m_aliasVao.Reset();m_aliasWidth=m_aliasHeight=0;
++
+ 	LoadPreferences();
+ 	m_textureCache.Flush();
+ 	PalCache_Flush();
+@@ -207,7 +222,9 @@
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++		#ifndef __EMSCRIPTEN__
+ 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
++#endif
+ 
+ 		glUseProgram(*m_presentProgram);
+ 
+@@ -297,6 +314,7 @@
+ 	m_copyToFbVertexArray = GenerateCopyToFbVertexArray();
+ 	m_copyToFbSrcPositionUniform = glGetUniformLocation(*m_copyToFbProgram, "g_srcPosition");
+ 	m_copyToFbSrcSizeUniform = glGetUniformLocation(*m_copyToFbProgram, "g_srcSize");
++ m_copyToFbFrame16Uniform = glGetUniformLocation(*m_copyToFbProgram, "g_frame16");
+ 
+ 	m_primBuffer = Framework::OpenGl::CBuffer::Create();
+ 	m_primVertexArray = GeneratePrimVertexArray();
+@@ -540,8 +558,7 @@
+ void CGSH_OpenGL::SetRenderingContext(uint64 primReg)
+ {
+ 	auto prim = make_convertible<PRMODE>(primReg);
+-
+-	unsigned int context = prim.nContext;
++ unsigned int context = prim.nContext;
+ 
+ 	uint64 testReg = m_nReg[GS_REG_TEST_1 + context];
+ 	uint64 frameReg = m_nReg[GS_REG_FRAME_1 + context];
+@@ -562,6 +579,13 @@
+ 	FillShaderCapsFromTexture(shaderCaps, tex0Reg, tex1Reg, texAReg, clampReg);
+ 	FillShaderCapsFromTest(shaderCaps, testReg);
+ 	FillShaderCapsFromAlpha(shaderCaps, prim.nAlpha != 0, alphaReg);
++#ifdef __EMSCRIPTEN__
++ shaderCaps.colorClamp=m_nReg[GS_REG_COLCLAMP]&1;
++ shaderCaps.framebufferAlphaBit=m_nReg[GS_REG_FBA_1+context]&1;
++ shaderCaps.perPixelAlphaBlend=m_nReg[GS_REG_PABE]&1;
++ auto mask=uint32(frameReg>>32);shaderCaps.hasPixelMask=0;
++ for(unsigned byte=0;byte<4;byte++){auto bits=(mask>>(byte*8))&255;shaderCaps.hasPixelMask |= bits!=0 && bits!=255;}
++#endif
+ 
+ 	if(prim.nFog)
+ 	{
+@@ -579,7 +603,7 @@
+ 	if(m_renderState.isValid)
+ 	{
+ 		if(m_renderState.isTextureStateValid && m_renderState.isFramebufferStateValid &&
+-		   (static_cast<uint32>(m_renderState.shaderCaps) == static_cast<uint32>(shaderCaps)) &&
++		   (static_cast<ShaderCapsInt>(m_renderState.shaderCaps) == static_cast<ShaderCapsInt>(shaderCaps)) &&
+ 		   (m_renderState.primReg == primReg) &&
+ 		   (m_renderState.alphaReg == alphaReg) &&
+ 		   (m_renderState.testReg == testReg) &&
+@@ -605,7 +629,7 @@
+ 	//--------------------------------------------------------
+ 	uint64 prevPrimValue = m_renderState.isValid ? m_renderState.primReg : 0;
+ 	auto prevPrim = make_convertible<PRMODE>(prevPrimValue);
+-	bool shaderChanged = !m_renderState.isValid || (static_cast<uint32>(m_renderState.shaderCaps) != static_cast<uint32>(shaderCaps));
++	bool shaderChanged = !m_renderState.isValid || (static_cast<ShaderCapsInt>(m_renderState.shaderCaps) != static_cast<ShaderCapsInt>(shaderCaps));
+ 	bool primChanged = !m_renderState.isValid || (m_renderState.primReg != primReg);
+ 	bool blendEnableChanged = primChanged && !m_hasFramebufferFetchExtension && ((!m_renderState.isValid) || (prevPrim.nAlpha != prim.nAlpha));
+ 	bool alphaChanged = !m_renderState.isValid || (m_renderState.alphaReg != alphaReg);
+@@ -684,6 +708,8 @@
+ 
+ 	CHECKGLERROR();
+ 
++m_renderState.textureFeedback=false;
++ for(const auto& fb:m_framebuffers)if(fb->m_framebuffer==m_renderState.framebufferHandle && fb->m_texture==m_renderState.texture0Handle)m_renderState.textureFeedback=true;
+ 	m_renderState.isValid = true;
+ 	m_renderState.isTextureStateValid = true;
+ 	m_renderState.isFramebufferStateValid = true;
+@@ -703,8 +729,12 @@
+ void CGSH_OpenGL::SetupBlendingFunction(uint64 alphaReg)
+ {
+ 	auto alpha = make_convertible<ALPHA>(alphaReg);
+-
+-	if(m_hasFramebufferFetchExtension)
++#ifdef __EMSCRIPTEN__
++ m_fragmentParams.alphaFix=static_cast<float>(alpha.nFix)/255.0f;
++ m_validGlState &= ~GLSTATE_FRAGMENT_PARAMS;
++ return;
++#endif
++ if(m_hasFramebufferFetchExtension)
+ 	{
+ 		m_fragmentParams.alphaFix = (static_cast<float>(alpha.nFix) / 255.f);
+ 		m_validGlState &= ~GLSTATE_FRAGMENT_PARAMS;
+@@ -963,7 +993,10 @@
+ 	{
+ 		depthWriteEnabled = false;
+ 	}
+-	m_renderState.depthMask = depthWriteEnabled;
++#ifdef __EMSCRIPTEN__
++ depthWriteEnabled=!zbuf.nMask;
++#endif
++ m_renderState.depthMask = depthWriteEnabled;
+ 	m_validGlState &= ~GLSTATE_DEPTHMASK;
+ }
+ 
+@@ -972,14 +1005,29 @@
+ 	if(frameReg == 0) return;
+ 
+ 	auto frame = make_convertible<FRAME>(frameReg);
+-	auto zbuf = make_convertible<ZBUF>(zbufReg);
++#ifdef __EMSCRIPTEN__
++ m_fragmentParams.frameMask=frame.nMask;m_validGlState &= ~GLSTATE_FRAGMENT_PARAMS;
++#endif
++ auto zbuf = make_convertible<ZBUF>(zbufReg);
+ 	auto scissor = make_convertible<SCISSOR>(scissorReg);
+ 	auto test = make_convertible<TEST>(testReg);
+ 
+ 	bool r = (frame.nMask & 0x000000FF) == 0;
++#ifdef __EMSCRIPTEN__
++ r=(frame.nMask & 0x000000FF)!=0x000000FF;
++#endif
+ 	bool g = (frame.nMask & 0x0000FF00) == 0;
++#ifdef __EMSCRIPTEN__
++ g=(frame.nMask & 0x0000FF00)!=0x0000FF00;
++#endif
+ 	bool b = (frame.nMask & 0x00FF0000) == 0;
++#ifdef __EMSCRIPTEN__
++ b=(frame.nMask & 0x00FF0000)!=0x00FF0000;
++#endif
+ 	bool a = (frame.nMask & 0xFF000000) == 0;
++#ifdef __EMSCRIPTEN__
++ a=(frame.nMask & 0xFF000000)!=0xFF000000;
++#endif
+ 
+ 	//Don't write to alpha in PSMCT24
+ 	if(frame.nPsm == PSMCT24)
+@@ -999,7 +1047,10 @@
+ 		}
+ 	}
+ 
+-	m_renderState.colorMaskR = r;
++#ifdef __EMSCRIPTEN__
++ r=(frame.nMask&0xFF)!=0xFF;g=(frame.nMask&0xFF00)!=0xFF00;b=(frame.nMask&0xFF0000)!=0xFF0000;a=(frame.nMask&0xFF000000)!=0xFF000000 && frame.nPsm!=PSMCT24;
++#endif
++ m_renderState.colorMaskR = r;
+ 	m_renderState.colorMaskG = g;
+ 	m_renderState.colorMaskB = b;
+ 	m_renderState.colorMaskA = a;
+@@ -1207,6 +1258,10 @@
+ 		shaderCaps.hasAlphaTest = 0;
+ 	}
+ 
++#ifdef __EMSCRIPTEN__
++ shaderCaps.hasAlphaTest=test.nAlphaEnabled && m_alphaTestingEnabled;
++ shaderCaps.alphaTestMethod=test.nAlphaMethod;shaderCaps.alphaFailMethod=test.nAlphaFail;
++#endif
+ 	shaderCaps.hasDestAlphaTest = test.nDestAlphaEnabled;
+ 	shaderCaps.destAlphaTestRef = test.nDestAlphaMode;
+ }
+@@ -1214,6 +1269,13 @@
+ void CGSH_OpenGL::FillShaderCapsFromAlpha(SHADERCAPS& shaderCaps, bool alphaEnabled, const uint64& alphaReg)
+ {
+ 	if(!alphaEnabled) return;
++	shaderCaps.hasFixedFunctionAlphaBlend = !m_hasFramebufferFetchExtension;
++#ifdef __EMSCRIPTEN__
++ shaderCaps.hasFixedFunctionAlphaBlend=0;
++ auto webAlpha=make_convertible<ALPHA>(alphaReg);
++ shaderCaps.hasAlphaBlend=!((webAlpha.nA==webAlpha.nB)&&(webAlpha.nD==ALPHABLEND_ABD_CS));shaderCaps.alphaBlendA=webAlpha.nA;shaderCaps.alphaBlendB=webAlpha.nB;shaderCaps.alphaBlendC=webAlpha.nC;shaderCaps.alphaBlendD=webAlpha.nD;
++ return;
++#endif
+ 
+ 	auto alpha = make_convertible<ALPHA>(alphaReg);
+ 
+@@ -1235,6 +1297,9 @@
+ void CGSH_OpenGL::SetupTexture(uint64 primReg, uint64 tex0Reg, uint64 tex1Reg, uint64 texAReg, uint64 clampReg)
+ {
+ 	m_renderState.texture0Handle = 0;
++	m_renderState.texture0AlphaAsIndex = false;
++	m_fragmentParams.textureAlphaAsIndex = 0;
++	m_validGlState &= ~GLSTATE_FRAGMENT_PARAMS;
+ 	m_renderState.texture1Handle = 0;
+ 	m_renderState.texture0MinFilter = GL_NEAREST;
+ 	m_renderState.texture0MagFilter = GL_NEAREST;
+@@ -1260,6 +1325,9 @@
+ 	auto texInfo = PrepareTexture(tex0);
+ 	m_renderState.texture0Handle = texInfo.textureHandle;
+ 	m_renderState.texture0AlphaAsIndex = texInfo.alphaAsIndex;
++#ifdef __EMSCRIPTEN__
++	m_fragmentParams.textureAlphaAsIndex = texInfo.alphaAsIndex ? 1.0f : 0.0f;
++#endif
+ 
+ 	//Setup sampling modes
+ 	switch(tex1.nMagFilter)
+@@ -1646,6 +1714,7 @@
+ 	float nT[2] = {0, 0};
+ 
+ 	float nF = 0;
++ float orderedQ = 1;
+ 
+ 	if(m_PrimitiveMode.nFog)
+ 	{
+@@ -1683,6 +1752,9 @@
+ 
+ 			nT[0] = st[0].nT / nQ1;
+ 			nT[1] = st[1].nT / nQ2;
++   if(IsOrderedTileEligible()){
++    nS[0]=st[0].nS;nS[1]=st[1].nS;nT[0]=st[0].nT;nT[1]=st[1].nT;orderedQ=rgbaq[1].nQ;
++   }
+ 		}
+ 	}
+ 
+@@ -1693,13 +1765,13 @@
+ 	// clang-format off
+ 	PRIM_VERTEX vertices[] =
+ 	{
+-		{nX1, nY1, nZ, color, nS[0], nT[0], 1, nF},
+-		{nX2, nY1, nZ, color, nS[1], nT[0], 1, nF},
+-		{nX1, nY2, nZ, color, nS[0], nT[1], 1, nF},
+-
+-		{nX1, nY2, nZ, color, nS[0], nT[1], 1, nF},
+-		{nX2, nY1, nZ, color, nS[1], nT[0], 1, nF},
+-		{nX2, nY2, nZ, color, nS[1], nT[1], 1, nF},
++		{nX1, nY1, nZ, color, nS[0], nT[0], orderedQ, nF},
++		{nX2, nY1, nZ, color, nS[1], nT[0], orderedQ, nF},
++		{nX1, nY2, nZ, color, nS[0], nT[1], orderedQ, nF},
++
++		{nX1, nY2, nZ, color, nS[0], nT[1], orderedQ, nF},
++		{nX2, nY1, nZ, color, nS[1], nT[0], orderedQ, nF},
++		{nX2, nY2, nZ, color, nS[1], nT[1], orderedQ, nF},
+ 	};
+ 	// clang-format on
+ 
+@@ -1708,9 +1780,11 @@
+ 
+ void CGSH_OpenGL::FlushVertexBuffer()
+ {
++ FlushDepthAlias();
+ 	if(m_vertexBuffer.empty()) return;
+ 
+ 	assert(m_renderState.isValid == true);
++ if(IsOrderedTileEligible()&&RenderOrderedTileBatch()){m_vertexBuffer.clear();return;}
+ 
+ 	auto shader = GetShaderFromCaps(m_renderState.shaderCaps);
+ 	if(*shader != m_renderState.shaderHandle)
+@@ -1724,6 +1798,7 @@
+ 
+ void CGSH_OpenGL::DoRenderPass()
+ {
++ m_profilePassCount++;m_profileVertices+=m_vertexBuffer.size();
+ 	if((m_validGlState & GLSTATE_VERTEX_PARAMS) == 0)
+ 	{
+ 		glBindBuffer(GL_UNIFORM_BUFFER, m_vertexParamsBuffer);
+@@ -1762,7 +1837,11 @@
+ 
+ 	if((m_validGlState & GLSTATE_BLEND) == 0)
+ 	{
+-		m_renderState.blendEnabled ? glEnable(GL_BLEND) : glDisable(GL_BLEND);
++		#ifdef __EMSCRIPTEN__
++  glDisable(GL_BLEND);
++#else
++  m_renderState.blendEnabled ? glEnable(GL_BLEND) : glDisable(GL_BLEND);
++#endif
+ 		m_validGlState |= GLSTATE_BLEND;
+ 	}
+ 
+@@ -1790,18 +1869,26 @@
+ 	{
+ 		glActiveTexture(GL_TEXTURE0);
+ 		glBindTexture(GL_TEXTURE_2D, m_renderState.texture0Handle);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_renderState.texture0MinFilter);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, m_renderState.texture0MagFilter);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, m_renderState.texture0WrapS);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, m_renderState.texture0WrapT);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, m_renderState.texture0AlphaAsIndex ? GL_ALPHA : GL_RED);
+-
+-		glActiveTexture(GL_TEXTURE1);
+-		glBindTexture(GL_TEXTURE_2D, m_renderState.texture1Handle);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        if(m_renderState.texture0Handle != 0)
++        {
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_renderState.texture0MinFilter);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, m_renderState.texture0MagFilter);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, m_renderState.texture0WrapS);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, m_renderState.texture0WrapT);
++#ifndef __EMSCRIPTEN__
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, m_renderState.texture0AlphaAsIndex ? GL_ALPHA : GL_RED);
++
++#endif
++        }
++        glActiveTexture(GL_TEXTURE1);
++        glBindTexture(GL_TEXTURE_2D, m_renderState.texture1Handle);
++        if(m_renderState.texture1Handle != 0)
++        {
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        }
+ 
+ 		m_validGlState |= GLSTATE_TEXTURE;
+ 	}
+@@ -1841,9 +1928,57 @@
+ 		break;
+ 	}
+ 
+-	glDrawArrays(primitiveMode, 0, m_vertexBuffer.size());
+-
+-	m_drawCallCount++;
++#ifdef __EMSCRIPTEN__
++ if(m_renderState.shaderCaps.hasAlphaBlend || m_renderState.shaderCaps.hasDestAlphaTest || m_renderState.shaderCaps.hasPixelMask || m_renderState.textureFeedback) {
++  auto w=m_renderState.viewportWidth*m_fbScale,h=m_renderState.viewportHeight*m_fbScale;
++  glActiveTexture(GL_TEXTURE2);
++  if(!m_blendDestination || m_blendWidth!=w || m_blendHeight!=h) {
++   m_blendDestination=Framework::OpenGl::CTexture::Create();
++   glBindTexture(GL_TEXTURE_2D,m_blendDestination);
++   glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA8,w,h);m_blendWidth=w;m_blendHeight=h;
++   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
++   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
++  } else glBindTexture(GL_TEXTURE_2D,m_blendDestination);
++  auto x=std::max(0,m_renderState.scissorX*int(m_fbScale)),y=std::max(0,m_renderState.scissorY*int(m_fbScale));
++  auto cw=std::max(0,std::min(int(w)-x,m_renderState.scissorWidth*int(m_fbScale)));
++  auto ch=std::max(0,std::min(int(h)-y,m_renderState.scissorHeight*int(m_fbScale)));
++  if(m_renderState.textureFeedback){glCopyTexSubImage2D(GL_TEXTURE_2D,0,0,0,0,0,w,h);m_profileSnapshotPixels+=uint64(w)*h;m_profileSnapshots++;}
++  else {
++   // Destination reads occur only inside the rasterized geometry. Keep a
++   // conservative two-pixel margin for centers, points, lines, and scale.
++   float minX=m_vertexBuffer.front().x,maxX=minX,minY=m_vertexBuffer.front().y,maxY=minY;
++   for(const auto& v:m_vertexBuffer){minX=std::min(minX,v.x);maxX=std::max(maxX,v.x);minY=std::min(minY,v.y);maxY=std::max(maxY,v.y);}
++   auto ex=std::min(x+cw,int(std::ceil(maxX*m_fbScale))+2),ey=std::min(y+ch,int(std::ceil(maxY*m_fbScale))+2);
++   x=std::max(x,int(std::floor(minX*m_fbScale))-2);y=std::max(y,int(std::floor(minY*m_fbScale))-2);cw=std::max(0,ex-x);ch=std::max(0,ey-y);
++   if(cw&&ch){glCopyTexSubImage2D(GL_TEXTURE_2D,0,x,y,x,y,cw,ch);m_profileSnapshotPixels+=uint64(cw)*ch;m_profileSnapshots++;}
++  }
++  glUniform1i(glGetUniformLocation(m_renderState.shaderHandle,"g_destination"),2);
++  glActiveTexture(GL_TEXTURE0);
++  if(m_renderState.textureFeedback){
++   glBindTexture(GL_TEXTURE_2D,m_blendDestination);
++   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,m_renderState.texture0MinFilter);
++   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,m_renderState.texture0MagFilter);
++   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,m_renderState.texture0WrapS);
++   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,m_renderState.texture0WrapT);
++   m_validGlState &= ~GLSTATE_TEXTURE;
++  }
++ }
++#endif
++ glDrawArrays(primitiveMode, 0, m_vertexBuffer.size());
++#ifdef __EMSCRIPTEN__
++ if(m_renderState.shaderCaps.hasAlphaTest && m_renderState.shaderCaps.alphaTestMethod!=ALPHA_TEST_ALWAYS && m_renderState.shaderCaps.alphaFailMethod!=ALPHA_TEST_FAIL_KEEP){
++  auto failure=m_renderState.shaderCaps.alphaFailMethod;
++  m_fragmentParams.alphaPhase=1;
++  glBindBuffer(GL_UNIFORM_BUFFER,m_fragmentParamsBuffer);
++  glBufferData(GL_UNIFORM_BUFFER,sizeof(FRAGMENTPARAMS),&m_fragmentParams,GL_STREAM_DRAW);
++  glDepthMask(failure==ALPHA_TEST_FAIL_ZBONLY ? m_renderState.depthMask : GL_FALSE);
++  glColorMask(failure==ALPHA_TEST_FAIL_ZBONLY?GL_FALSE:m_renderState.colorMaskR,failure==ALPHA_TEST_FAIL_ZBONLY?GL_FALSE:m_renderState.colorMaskG,failure==ALPHA_TEST_FAIL_ZBONLY?GL_FALSE:m_renderState.colorMaskB,failure==ALPHA_TEST_FAIL_FBONLY?m_renderState.colorMaskA:GL_FALSE);
++  glDrawArrays(primitiveMode,0,m_vertexBuffer.size());m_drawCallCount++;
++  m_fragmentParams.alphaPhase=0;
++  m_validGlState &= ~(GLSTATE_FRAGMENT_PARAMS|GLSTATE_COLORMASK|GLSTATE_DEPTHMASK);
++ }
++#endif
++ m_drawCallCount++;
+ }
+ 
+ void CGSH_OpenGL::DrawToDepth(unsigned int primitiveType, uint64 primReg)
+@@ -1887,7 +2022,7 @@
+ void CGSH_OpenGL::CopyToFb(
+     int32 srcX0, int32 srcY0, int32 srcX1, int32 srcY1,
+     int32 srcWidth, int32 srcHeight,
+-    int32 dstX0, int32 dstY0, int32 dstX1, int32 dstY1)
++    int32 dstX0, int32 dstY0, int32 dstX1, int32 dstY1, bool frame16)
+ {
+ 	m_validGlState &= ~(GLSTATE_BLEND | GLSTATE_COLORMASK | GLSTATE_SCISSOR | GLSTATE_PROGRAM);
+ 	m_validGlState &= ~(GLSTATE_VIEWPORT | GLSTATE_DEPTHTEST | GLSTATE_DEPTHMASK);
+@@ -1912,6 +2047,7 @@
+ 
+ 	glUniform2f(m_copyToFbSrcPositionUniform, positionX, positionY);
+ 	glUniform2f(m_copyToFbSrcSizeUniform, sizeX, sizeY);
++ glUniform1i(m_copyToFbFrame16Uniform, frame16);
+ 	glViewport(dstX0, dstY0, dstX1 - dstX0, dstY1 - dstY0);
+ 
+ 	glBindBuffer(GL_ARRAY_BUFFER, m_copyToFbVertexBuffer);
+@@ -1932,7 +2068,10 @@
+ 
+ void CGSH_OpenGL::WriteRegisterImpl(uint8 nRegister, uint64 nData)
+ {
+-	CGSHandler::WriteRegisterImpl(nRegister, nData);
++#ifdef __EMSCRIPTEN__
++ if((nRegister==GS_REG_COLCLAMP || nRegister==GS_REG_PABE || nRegister==GS_REG_FBA_1 || nRegister==GS_REG_FBA_1+1) && m_nReg[nRegister]!=nData){FlushVertexBuffer();m_renderState.isValid=false;}
++#endif
++ CGSHandler::WriteRegisterImpl(nRegister, nData);
+ 
+ 	switch(nRegister)
+ 	{
+@@ -2023,9 +2162,17 @@
+ 			m_PrimitiveMode <<= m_nReg[GS_REG_PRMODE];
+ 		}
+ 
++        if(nDrawingKick && TryDepthAliasSprite()){m_nVtxCount=2;return;}
++        if(nDrawingKick) FlushDepthAlias();
+ 		if(nDrawingKick)
+-		{
+-			// Fast skip if nothing relevant changed since last draw
++        {
++#ifdef __EMSCRIPTEN__
++            // Each blended primitive samples the preceding destination.
++            auto currentTest=m_nReg[GS_REG_TEST_1+m_PrimitiveMode.nContext];
++            bool ordered=(m_renderState.isValid && (m_renderState.shaderCaps.hasAlphaBlend || m_renderState.shaderCaps.hasPixelMask)) || (currentTest&(1ull<<14)) || ((currentTest&1) && (((currentTest>>1)&7)!=ALPHA_TEST_ALWAYS) && ((currentTest>>12)&3));
++            if((m_renderState.isValid&&m_renderState.textureFeedback) || (ordered&&!IsOrderedTileEligible()&&PrimitiveOverlapsPending())) FlushVertexBuffer();
++#endif
++            // Fast skip if nothing relevant changed since last draw
+ 			bool needCtx = true;
+ 			if(m_renderState.isValid && m_renderState.isTextureStateValid && m_renderState.isFramebufferStateValid)
+ 			{
+@@ -2105,6 +2252,7 @@
+ 
+ void CGSH_OpenGL::ProcessHostToLocalTransfer()
+ {
++ FlushDepthAlias();
+ 	if(m_trxCtx.nDirty)
+ 	{
+ 		FlushVertexBuffer();
+@@ -2130,54 +2278,46 @@
+ 
+ void CGSH_OpenGL::ProcessLocalToHostTransfer()
+ {
+-	//This is constrained to work only with ps2autotest, will be unconstrained later
+-
+-	auto bltBuf = make_convertible<BITBLTBUF>(m_nReg[GS_REG_BITBLTBUF]);
+-	auto trxPos = make_convertible<TRXPOS>(m_nReg[GS_REG_TRXPOS]);
+-	auto trxReg = make_convertible<TRXREG>(m_nReg[GS_REG_TRXREG]);
+-
+-	if(bltBuf.nSrcPsm != PSMCT32) return;
+-
+-	uint32 transferAddress = bltBuf.GetSrcPtr();
+-	if(transferAddress != 0) return;
+-
+-	if((trxReg.nRRW != 32) || (trxReg.nRRH != 32)) return;
+-	if((trxPos.nSSAX != 0) || (trxPos.nSSAY != 0)) return;
+-
+-	auto framebufferIterator = std::find_if(m_framebuffers.begin(), m_framebuffers.end(),
+-	                                        [](const FramebufferPtr& framebuffer) {
+-		                                        return (framebuffer->m_psm == PSMCT32) && (framebuffer->m_basePtr == 0);
+-	                                        });
+-	if(framebufferIterator == std::end(m_framebuffers)) return;
+-	const auto& framebuffer = (*framebufferIterator);
+-
+-	FlushVertexBuffer();
+-	m_renderState.isValid = false;
+-
+-	auto pixels = new uint32[trxReg.nRRW * trxReg.nRRH];
+-
+-	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer->m_framebuffer);
+-	glReadPixels(trxPos.nSSAX, trxPos.nSSAY, trxReg.nRRW, trxReg.nRRH, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+-	CHECKGLERROR();
+-
+-	//Write back to RAM
+-	{
+-		CGsPixelFormats::CPixelIndexorPSMCT32 indexor(m_pRAM, bltBuf.GetSrcPtr(), bltBuf.nSrcWidth);
+-		for(uint32 y = trxPos.nSSAY; y < (trxPos.nSSAY + trxReg.nRRH); y++)
+-		{
+-			for(uint32 x = trxPos.nSSAX; x < (trxPos.nSSAX + trxReg.nRRH); x++)
+-			{
+-				uint32 pixel = pixels[x + (y * trxReg.nRRW)];
+-				indexor.SetPixel(x, y, pixel);
+-			}
+-		}
+-	}
+-
+-	delete[] pixels;
++ FlushDepthAlias();
++ auto blt=make_convertible<BITBLTBUF>(m_nReg[GS_REG_BITBLTBUF]);
++ auto pos=make_convertible<TRXPOS>(m_nReg[GS_REG_TRXPOS]);
++ auto rect=make_convertible<TRXREG>(m_nReg[GS_REG_TRXREG]);
++ auto found=std::find_if(m_framebuffers.begin(),m_framebuffers.end(),[&](const FramebufferPtr& fb){return fb->m_basePtr==blt.GetSrcPtr() && fb->m_width==blt.GetSrcWidth();});
++ if(found==m_framebuffers.end()) return; // Uncached storage is already in GS RAM.
++ if(blt.nSrcPsm!=PSMCT32 && blt.nSrcPsm!=PSMCT24 && blt.nSrcPsm!=PSMCT16 && blt.nSrcPsm!=PSMCT16S)
++  throw std::runtime_error("Rendered framebuffer readback: unsupported pixel layout");
++ if((*found)->m_psm!=blt.nSrcPsm && !((blt.nSrcPsm==PSMCT32 || blt.nSrcPsm==PSMCT24) && ((*found)->m_psm==PSMCT32 || (*found)->m_psm==PSMCT24)))
++  throw std::runtime_error("Rendered framebuffer readback requires alias resolution for this layout");
++ const auto& fb=*found;
++ if(pos.nSSAX+rect.nRRW>fb->m_width || pos.nSSAY+rect.nRRH>fb->m_height) throw std::runtime_error("Framebuffer readback exceeds cached dimensions");
++ FlushVertexBuffer();m_renderState.isValid=false;m_validGlState &= ~GLSTATE_FRAMEBUFFER;
++ CommitFramebufferDirtyPages(fb,pos.nSSAY,pos.nSSAY+rect.nRRH);
++ if(m_multisampleEnabled) ResolveFramebufferMultisample(fb,m_fbScale);
++ glBindFramebuffer(GL_FRAMEBUFFER,m_multisampleEnabled ? fb->m_resolveFramebuffer : fb->m_framebuffer);
++ Framework::CBitmap image(rect.nRRW*m_fbScale,rect.nRRH*m_fbScale,32);
++ glReadPixels(pos.nSSAX*m_fbScale,pos.nSSAY*m_fbScale,rect.nRRW*m_fbScale,rect.nRRH*m_fbScale,GL_RGBA,GL_UNSIGNED_BYTE,image.GetPixels());
++ if(m_fbScale!=1) image=image.Resize(rect.nRRW,rect.nRRH);
++ CGsPixelFormats::CPixelIndexorPSMCT32 indexor32(m_pRAM,blt.GetSrcPtr(),blt.nSrcWidth);
++ CGsPixelFormats::CPixelIndexorPSMCT16 indexor16(m_pRAM,blt.GetSrcPtr(),blt.nSrcWidth);
++ CGsPixelFormats::CPixelIndexorPSMCT16S indexor16s(m_pRAM,blt.GetSrcPtr(),blt.nSrcWidth);
++ for(unsigned y=0;y<rect.nRRH;y++)for(unsigned x=0;x<rect.nRRW;x++){
++  auto c=image.GetPixel(x,y);auto sx=pos.nSSAX+x,sy=pos.nSSAY+y;
++  if(blt.nSrcPsm==PSMCT16 || blt.nSrcPsm==PSMCT16S){
++   uint16 value=(c.r>>3)|((c.g>>3)<<5)|((c.b>>3)<<10)|((c.a>>7)<<15);
++   if(blt.nSrcPsm==PSMCT16) indexor16.SetPixel(sx,sy,value);
++   else indexor16s.SetPixel(sx,sy,value);
++  }else{
++   uint32 value=MakeColor(c.r,c.g,c.b,c.a);
++   if(blt.nSrcPsm==PSMCT24) value=(value&0xFFFFFFu)|(indexor32.GetPixel(sx,sy)&0xFF000000u);
++   indexor32.SetPixel(sx,sy,value);
++  }
++ }
++ CHECKGLERROR();
+ }
+ 
+ void CGSH_OpenGL::ProcessLocalToLocalTransfer()
+ {
++ FlushDepthAlias();
+ 	auto bltBuf = make_convertible<BITBLTBUF>(m_nReg[GS_REG_BITBLTBUF]);
+ 	auto srcFramebufferIterator = std::find_if(m_framebuffers.begin(), m_framebuffers.end(),
+ 	                                           [&](const FramebufferPtr& framebuffer) {
+@@ -2197,6 +2337,7 @@
+ 	{
+ 		FlushVertexBuffer();
+ 		m_renderState.isValid = false;
++        glDisable(GL_SCISSOR_TEST);m_validGlState &= ~GLSTATE_SCISSOR;
+ 
+ 		const auto& srcFramebuffer = (*srcFramebufferIterator);
+ 		const auto& dstFramebuffer = (*dstFramebufferIterator);
+@@ -2204,11 +2345,30 @@
+ 		glBindFramebuffer(GL_FRAMEBUFFER, dstFramebuffer->m_framebuffer);
+ 		glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFramebuffer->m_framebuffer);
+ 
+-		//Copy buffers
+-		glBlitFramebuffer(
+-		    0, 0, srcFramebuffer->m_width * m_fbScale, srcFramebuffer->m_height * m_fbScale,
+-		    0, 0, srcFramebuffer->m_width * m_fbScale, srcFramebuffer->m_height * m_fbScale,
+-		    GL_COLOR_BUFFER_BIT, GL_NEAREST);
++        auto pos=make_convertible<TRXPOS>(m_nReg[GS_REG_TRXPOS]);
++        auto rect=make_convertible<TRXREG>(m_nReg[GS_REG_TRXREG]);
++        if(pos.nSSAX+rect.nRRW>srcFramebuffer->m_width || pos.nSSAY+rect.nRRH>srcFramebuffer->m_height || pos.nDSAX+rect.nRRW>dstFramebuffer->m_width || pos.nDSAY+rect.nRRH>dstFramebuffer->m_height)
++            throw std::runtime_error("Framebuffer copy exceeds cached dimensions");
++        int sx=pos.nSSAX*m_fbScale,sy=pos.nSSAY*m_fbScale,w=rect.nRRW*m_fbScale,h=rect.nRRH*m_fbScale;
++        Framework::OpenGl::CTexture temporaryTexture;
++        Framework::OpenGl::CFramebuffer temporaryFramebuffer;
++        if(srcFramebuffer==dstFramebuffer){
++            // Snapshot overlapping regions before writing the destination.
++            temporaryTexture=Framework::OpenGl::CTexture::Create();glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,temporaryTexture);
++            glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA8,w,h);
++            temporaryFramebuffer=Framework::OpenGl::CFramebuffer::Create();glBindFramebuffer(GL_DRAW_FRAMEBUFFER,temporaryFramebuffer);
++            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,temporaryTexture,0);
++            glBlitFramebuffer(sx,sy,sx+w,sy+h,0,0,w,h,GL_COLOR_BUFFER_BIT,GL_NEAREST);
++            glBindFramebuffer(GL_READ_FRAMEBUFFER,temporaryFramebuffer);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,dstFramebuffer->m_framebuffer);
++            sx=sy=0;m_validGlState &= ~GLSTATE_TEXTURE;
++        }
++        // Respect the transfer rectangle and its X/Y direction flags.
++        glBlitFramebuffer(sx+((pos.nDIR&1)?w:0),sy+((pos.nDIR&2)?h:0),sx+((pos.nDIR&1)?0:w),sy+((pos.nDIR&2)?0:h),
++            pos.nDSAX*m_fbScale,pos.nDSAY*m_fbScale,(pos.nDSAX+rect.nRRW)*m_fbScale,(pos.nDSAY+rect.nRRH)*m_fbScale,
++            GL_COLOR_BUFFER_BIT,GL_NEAREST);
++        auto [address,bytes]=GsTransfer::GetDstRange(bltBuf,rect,pos);
++        m_textureCache.InvalidateRange(address,bytes);
++
+ 		CHECKGLERROR();
+ 
+ 		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+@@ -2253,6 +2413,7 @@
+ 
+ void CGSH_OpenGL::ProcessClutTransfer(uint32 csa, uint32)
+ {
++ FlushDepthAlias();
+ 	FlushVertexBuffer();
+ 	m_renderState.isTextureStateValid = false;
+ 	PalCache_Invalidate(csa);
+@@ -2512,7 +2673,8 @@
+ 	CopyToFb(
+ 	    0, 0, framebuffer->m_width, framebuffer->m_height,
+ 	    framebuffer->m_width, framebuffer->m_height,
+-	    0, 0, framebuffer->m_width * m_fbScale, framebuffer->m_height * m_fbScale);
++	    0, 0, framebuffer->m_width * m_fbScale, framebuffer->m_height * m_fbScale,
++     framebuffer->m_psm == PSMCT16 || framebuffer->m_psm == PSMCT16S);
+ 	framebuffer->m_resolveNeeded = true;
+ 
+ 	CHECKGLERROR();
+@@ -2531,8 +2693,9 @@
+ 
+ 			glActiveTexture(GL_TEXTURE0);
+ 			glBindTexture(GL_TEXTURE_2D, copyToFbTexture);
+-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, framebuffer->m_width, framebuffer->m_height,
+-			             0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++			auto format = CGSH_OpenGL::GetTextureFormatInfo(framebuffer->m_psm);
++            glTexImage2D(GL_TEXTURE_2D, 0, format.internalFormat, framebuffer->m_width, framebuffer->m_height,
++                         0, format.format, format.type, nullptr);
+ 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+ 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+ 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+@@ -2591,7 +2754,8 @@
+ 		CopyToFb(
+ 		    texX, texY, (texX + texWidth), (texY + texHeight),
+ 		    framebuffer->m_width, framebuffer->m_height,
+-		    texX * m_fbScale, texY * m_fbScale, (texX + texWidth) * m_fbScale, (texY + texHeight) * m_fbScale);
++		    texX * m_fbScale, texY * m_fbScale, (texX + texWidth) * m_fbScale, (texY + texHeight) * m_fbScale,
++         framebuffer->m_psm == PSMCT16 || framebuffer->m_psm == PSMCT16S);
+ 		framebuffer->m_resolveNeeded = true;
+ 
+ 		CHECKGLERROR();
+@@ -2643,3 +2807,143 @@
+ 	}
+ 	CHECKGLERROR();
+ }
++
++
++// PRIVATE VALIDATION: read the actual rendered depth, not captured expected data.
++std::vector<uint8> CGSH_OpenGL::ReadDepthForValidation(uint32 base,uint32 width,uint32 height)
++{
++ FlushVertexBuffer();
++ auto it=std::find_if(m_depthbuffers.begin(),m_depthbuffers.end(),[&](const DepthbufferPtr& depth){return depth->m_basePtr==base && depth->m_width==width && depth->m_psm==1;});
++ if(it==m_depthbuffers.end())throw std::runtime_error("Requested rendered depth buffer is missing");
++ const auto& depth=*it;
++ if(m_fbScale!=1 || height>depth->m_height)throw std::runtime_error("Depth validation expects native scale and valid bounds");
++ using namespace Framework::OpenGl;
++ auto readFbo=Framework::OpenGl::CFramebuffer::Create(),depthFbo=Framework::OpenGl::CFramebuffer::Create(),outputFbo=Framework::OpenGl::CFramebuffer::Create();
++ auto depthTexture=CTexture::Create(),outputTexture=CTexture::Create();
++ glDisable(GL_SCISSOR_TEST);glDisable(GL_BLEND);glDisable(GL_DEPTH_TEST);glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
++ glBindFramebuffer(GL_FRAMEBUFFER,readFbo);glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,depth->m_depthBuffer);
++ GLenum none=GL_NONE;glDrawBuffers(1,&none);glReadBuffer(GL_NONE);
++ if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Depth source framebuffer is incomplete");
++ glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,depthTexture);glTexStorage2D(GL_TEXTURE_2D,1,GL_DEPTH_COMPONENT32F,depth->m_width,depth->m_height);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_COMPARE_MODE,GL_NONE);
++ glBindFramebuffer(GL_FRAMEBUFFER,depthFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,depthTexture,0);glDrawBuffers(1,&none);glReadBuffer(GL_NONE);
++ if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Depth copy framebuffer is incomplete");
++ glBindFramebuffer(GL_READ_FRAMEBUFFER,readFbo);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,depthFbo);
++ glBlitFramebuffer(0,0,depth->m_width,depth->m_height,0,0,depth->m_width,depth->m_height,GL_DEPTH_BUFFER_BIT,GL_NEAREST);
++ glBindTexture(GL_TEXTURE_2D,outputTexture);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA8,width,height);
++ glBindFramebuffer(GL_FRAMEBUFFER,outputFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,outputTexture,0);GLenum color=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&color);glReadBuffer(GL_COLOR_ATTACHMENT0);
++ if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Depth packing framebuffer is incomplete");
++ const char* vs="#version 300 es\nvoid main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0,1);}";
++ const char* fs="#version 300 es\nprecision highp float;precision highp int;uniform highp sampler2D depthSource;uniform uint depthMask;out vec4 color;void main(){float d=texelFetch(depthSource,ivec2(gl_FragCoord.xy),0).r;uint z=(d>=1.0?0xffffffffu:uint(d*4294967296.0))&depthMask;color=vec4(uvec4(z,z>>8,z>>16,z>>24)&uvec4(255u))/255.0;}";
++ CShader vert(GL_VERTEX_SHADER),frag(GL_FRAGMENT_SHADER);vert.SetSource(vs);frag.SetSource(fs);vert.Compile();frag.Compile();CProgram program;program.AttachShader(vert);program.AttachShader(frag);program.Link();glUseProgram(program);
++ glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,depthTexture);glUniform1i(glGetUniformLocation(program,"depthSource"),0);glUniform1ui(glGetUniformLocation(program,"depthMask"),depth->m_psm==1?0xFFFFFFu:depth->m_psm==2?0xFFFFu:0xFFFFFFFFu);
++ auto vao=CVertexArray::Create();glBindVertexArray(vao);glViewport(0,0,width,height);glDrawArrays(GL_TRIANGLES,0,3);
++ std::vector<uint8> result(width*height*4);glReadPixels(0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,result.data());
++ auto error=glGetError();glBindFramebuffer(GL_FRAMEBUFFER,0);m_renderState.isValid=false;m_validGlState=0;
++ if(error)throw std::runtime_error("Depth validation produced a GL error: "+std::to_string(error));
++ return result;
++}
++
++#include "GSH_OpenGL_DepthAlias.inc"
++
++bool CGSH_OpenGL::PrimitiveOverlapsPending()const
++{
++ if(m_vertexBuffer.empty())return false;
++ // A conservative pixel bounding box proves destination/depth independence.
++ // Keep lines and points serialized, including their rasterization margins.
++ if(m_primitiveType!=PRIM_TRIANGLE && m_primitiveType!=PRIM_TRIANGLESTRIP && m_primitiveType!=PRIM_TRIANGLEFAN && m_primitiveType!=PRIM_SPRITE)return true;
++ if(m_vertexBuffer.size()>192)return true;
++ unsigned n=m_primitiveType==PRIM_SPRITE?2:3;
++ auto xy=make_convertible<XYOFFSET>(m_nReg[GS_REG_XYOFFSET_1+m_PrimitiveMode.nContext]);
++ float incoming[3][2]{};
++ float minX=1e9f,minY=1e9f,maxX=-1e9f,maxY=-1e9f;
++ for(unsigned i=0;i<n;i++){auto p=make_convertible<XYZ>(m_VtxBuffer[i].position);float x=p.GetX()-float(xy.nOffsetX)/16,y=p.GetY()-float(xy.nOffsetY)/16;incoming[i][0]=x;incoming[i][1]=y;minX=std::min(minX,x);maxX=std::max(maxX,x);minY=std::min(minY,y);maxY=std::max(maxY,y);}
++ int left=std::floor(minX),right=std::floor(maxX)+1,bottom=std::floor(minY),top=std::floor(maxY)+1;
++ for(size_t at=0;at<m_vertexBuffer.size();at+=3){
++  float x0=1e9f,y0=1e9f,x1=-1e9f,y1=-1e9f;
++  for(size_t i=at;i<std::min(at+3,m_vertexBuffer.size());i++){auto& v=m_vertexBuffer[i];x0=std::min(x0,v.x);x1=std::max(x1,v.x);y0=std::min(y0,v.y);y1=std::max(y1,v.y);}
++  if(left<int(std::floor(x1))+1 && right>int(std::floor(x0)) && bottom<int(std::floor(y1))+1 && top>int(std::floor(y0))){
++   bool sharedEdgeOnly=false;
++   if(n==3 && at+3<=m_vertexBuffer.size()){
++    // Identical endpoints on opposite-sided triangles share only a fill-rule
++    // edge. OpenGL gives its samples to one triangle, so destination reads
++    // remain independent even though their bounding boxes intersect.
++    for(unsigned a=0;a<3&&!sharedEdgeOnly;a++)for(unsigned b=a+1;b<3&&!sharedEdgeOnly;b++){
++     int ea=-1,eb=-1;for(unsigned j=0;j<3;j++){const auto& v=m_vertexBuffer[at+j];if(v.x==incoming[a][0]&&v.y==incoming[a][1])ea=j;if(v.x==incoming[b][0]&&v.y==incoming[b][1])eb=j;}
++     if(ea<0||eb<0||ea==eb)continue;
++     unsigned third=3-a-b,oldThird=3-ea-eb;const auto& v=m_vertexBuffer[at+oldThird];
++     double dx=double(incoming[b][0])-incoming[a][0],dy=double(incoming[b][1])-incoming[a][1];
++     double c0=dx*(double(incoming[third][1])-incoming[a][1])-dy*(double(incoming[third][0])-incoming[a][0]);
++     double c1=dx*(double(v.y)-incoming[a][1])-dy*(double(v.x)-incoming[a][0]);
++     sharedEdgeOnly=(c0>0&&c1<0)||(c0<0&&c1>0);
++    }
++   }
++   if(!sharedEdgeOnly && n==3 && at+3<=m_vertexBuffer.size()){
++    // Convex triangle interiors are disjoint if either triangle has an edge
++    // normal with disjoint projected intervals. Retain a conservative 1/8px
++    // L1 margin so subpixel rasterization cannot create a shared sample.
++    double pending[3][2];for(unsigned j=0;j<3;j++){pending[j][0]=m_vertexBuffer[at+j].x;pending[j][1]=m_vertexBuffer[at+j].y;}
++    for(unsigned side=0;side<2&&!sharedEdgeOnly;side++)for(unsigned edge=0;edge<3&&!sharedEdgeOnly;edge++){
++     unsigned next=(edge+1)%3;
++     double dx=side?pending[next][0]-pending[edge][0]:double(incoming[next][0])-incoming[edge][0];
++     double dy=side?pending[next][1]-pending[edge][1]:double(incoming[next][1])-incoming[edge][1];
++     double loA=1e30,hiA=-1e30,loB=1e30,hiB=-1e30;
++     for(unsigned j=0;j<3;j++){double a=-dy*incoming[j][0]+dx*incoming[j][1],b=-dy*pending[j][0]+dx*pending[j][1];loA=std::min(loA,a);hiA=std::max(hiA,a);loB=std::min(loB,b);hiB=std::max(hiB,b);}
++     double margin=(std::abs(dx)+std::abs(dy))*0.125;
++     sharedEdgeOnly=hiA+margin<loB || hiB+margin<loA;
++    }
++   }
++   if(!sharedEdgeOnly)return true;
++  }
++ }
++ return false;
++}
++
++#include "GSH_OpenGL_OrderedTile.inc"
++
++std::vector<uint8> CGSH_OpenGL::ReadPopulationForValidation(uint32 psm, bool dirty)
++{
++ auto fb=std::make_shared<CFramebuffer>(0,64,1024,psm,1,false);
++ PopulateFramebuffer(fb);
++ if(dirty){
++  for(uint32 i=0;i<4*1024*1024;i++) m_pRAM[i]^=255;
++  fb->m_cachedArea.Invalidate(0,4*1024*1024);
++  CommitFramebufferDirtyPages(fb,0,1024);
++ }
++ std::vector<uint8> result(64*1024*4);
++ glBindFramebuffer(GL_FRAMEBUFFER,fb->m_framebuffer);
++ glReadPixels(0,0,64,1024,GL_RGBA,GL_UNSIGNED_BYTE,result.data());
++ return result;
++}
++
++void CGSH_OpenGL::SeedReadbackForValidation(uint32 psm)
++{
++ FlushVertexBuffer();m_renderState.isValid=false;m_validGlState=0;
++ m_framebuffers.clear();
++ auto fb=std::make_shared<CFramebuffer>(0,128,512,psm,m_fbScale,false);
++ PopulateFramebuffer(fb);fb->m_cachedArea.ClearDirtyPages();
++ m_framebuffers.push_back(fb);
++}
++
++std::vector<uint8> CGSH_OpenGL::ReadCachedForValidation(uint32 psm)
++{
++ FlushVertexBuffer();
++ auto it=std::find_if(m_framebuffers.begin(),m_framebuffers.end(),[&](const FramebufferPtr& fb){return fb->m_basePtr==0 && fb->m_psm==psm && fb->m_width==128;});
++ FramebufferPtr fb;
++ if(it==m_framebuffers.end()){
++  fb=std::make_shared<CFramebuffer>(0,128,512,psm,m_fbScale,false);
++  PopulateFramebuffer(fb);fb->m_cachedArea.ClearDirtyPages();m_framebuffers.push_back(fb);
++ }else fb=*it;
++ std::vector<uint8> result(128*512*4);
++ glBindFramebuffer(GL_FRAMEBUFFER,fb->m_framebuffer);
++ glReadPixels(0,0,128,512,GL_RGBA,GL_UNSIGNED_BYTE,result.data());
++ m_renderState.isValid=false;m_validGlState=0;
++ return result;
++}
++
++// CPU memory has been replaced by a restored state. Discard every GPU cache
++// and pending primitive without flushing old work into the newly loaded RAM.
++// Register/VRAM/CLUT state is owned by CGSHandler/the runtime adapter.
++void CGSH_OpenGL::WriteBackMemoryCache()
++{
++ ResetImpl();
++}
+--- a/play/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp
++++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp
+@@ -118,7 +118,7 @@
+ 	{
+ 		shaderBuilder << "	v_fog = a_fog;" << std::endl;
+ 	}
+-	shaderBuilder << "	gl_Position = g_projMatrix * vec4(a_position, 0, 1);" << std::endl;
++	shaderBuilder << "	gl_Position = g_projMatrix * vec4(a_position + vec2(0.5), 0, 1);" << std::endl;
+ 	shaderBuilder << "}" << std::endl;
+ 
+ 	auto shaderSource = shaderBuilder.str();
+@@ -151,7 +151,7 @@
+ 		shaderBuilder << "#extension GL_ARM_shader_framebuffer_fetch_depth_stencil : require" << std::endl;
+ 	}
+ 
+-	shaderBuilder << "precision mediump float;" << std::endl;
++	shaderBuilder << "precision highp float; precision highp int;" << std::endl;
+ 
+ 	shaderBuilder << "in highp float v_depth;" << std::endl;
+ 	shaderBuilder << "in vec4 v_color;" << std::endl;
+@@ -175,7 +175,7 @@
+ #endif
+ 
+ 	shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
+-	shaderBuilder << "uniform sampler2D g_palette;" << std::endl;
++	shaderBuilder << "uniform sampler2D g_palette; uniform highp sampler2D g_destination;" << std::endl;
+ 
+ 	shaderBuilder << "layout(std140) uniform FragmentParams" << std::endl;
+ 	shaderBuilder << "{" << std::endl;
+@@ -188,6 +188,7 @@
+ 	shaderBuilder << "	uint g_alphaRef;" << std::endl;
+ 	shaderBuilder << "	float g_alphaFix;" << std::endl;
+ 	shaderBuilder << "	vec3 g_fogColor;" << std::endl;
++	shaderBuilder << "float g_textureAlphaAsIndex; uint g_frameMask;uint g_alphaPhase;" << std::endl;
+ 	shaderBuilder << "};" << std::endl;
+ 
+ 	if(caps.texClampS == TEXTURE_CLAMP_MODE_REGION_REPEAT || caps.texClampT == TEXTURE_CLAMP_MODE_REGION_REPEAT)
+@@ -196,10 +197,15 @@
+ 		shaderBuilder << s_orFunction << std::endl;
+ 	}
+ 
++ shaderBuilder << "vec2 indexCoordinate(vec2 position){highp vec3 texCoord=vec3(position,1.0);"<<std::endl;
++ shaderBuilder << GenerateTexCoordClampingSection(static_cast<TEXTURE_CLAMP_MODE>(caps.texClampS),"s");
++ shaderBuilder << GenerateTexCoordClampingSection(static_cast<TEXTURE_CLAMP_MODE>(caps.texClampT),"t");
++ shaderBuilder << "return (texCoord.st+vec2(0.5))/g_textureSize;}"<<std::endl;
++	shaderBuilder << "float sampleIndex(vec2 coord) { vec4 c = texture(g_texture, coord); return mix(c.r, c.a, g_textureAlphaAsIndex) * 255.0; }" << std::endl;
+ 	shaderBuilder << "float combineColors(float a, float b)" << std::endl;
+ 	shaderBuilder << "{" << std::endl;
+-	shaderBuilder << "	uint aInt = uint(a * 255.0);" << std::endl;
+-	shaderBuilder << "	uint bInt = uint(b * 255.0);" << std::endl;
++	shaderBuilder << "	uint aInt = uint(floor(a * 255.0 + 0.5));" << std::endl;
++	shaderBuilder << "	uint bInt = uint(floor(b * 255.0 + 0.5));" << std::endl;
+ 	shaderBuilder << "	uint result = min((aInt * bInt) >> 7, 255u);" << std::endl;
+ 	shaderBuilder << "	return float(result) / 255.0;" << std::endl;
+ 	shaderBuilder << "}" << std::endl;
+@@ -225,6 +231,12 @@
+ 	shaderBuilder << "void main()" << std::endl;
+ 	shaderBuilder << "{" << std::endl;
+ 
++#ifdef __EMSCRIPTEN__
++ if(caps.hasAlphaBlend || caps.hasDestAlphaTest || caps.hasPixelMask)
++  shaderBuilder << "highp vec4 previousColor=texelFetch(g_destination,ivec2(gl_FragCoord.xy),0);" << std::endl;
++ if(caps.hasDestAlphaTest)
++  shaderBuilder << "if((int(floor(previousColor.a*255.0+0.5))&128) " << (caps.destAlphaTestRef?"==":"!=") << " 0) discard;" <<std::endl;
++#endif
+ 	if(useFramebufferFetch && caps.hasDestAlphaTest)
+ 	{
+ 		switch(caps.destAlphaTestRef)
+@@ -241,7 +253,7 @@
+ 	shaderBuilder << "	highp vec3 texCoord = v_texCoord;" << std::endl;
+ 	shaderBuilder << "	texCoord.st /= texCoord.p;" << std::endl;
+ 
+-	if((caps.texClampS != TEXTURE_CLAMP_MODE_STD) || (caps.texClampT != TEXTURE_CLAMP_MODE_STD))
++	if(((caps.texClampS != TEXTURE_CLAMP_MODE_STD) || (caps.texClampT != TEXTURE_CLAMP_MODE_STD)) && !(caps.isIndexedTextureSource() && caps.texBilinearFilter))
+ 	{
+ 		shaderBuilder << "	texCoord.st *= g_textureSize.st;" << std::endl;
+ 		shaderBuilder << GenerateTexCoordClampingSection(static_cast<TEXTURE_CLAMP_MODE>(caps.texClampS), "s");
+@@ -254,7 +266,7 @@
+ 	{
+ 		if(!caps.texBilinearFilter)
+ 		{
+-			shaderBuilder << "	float colorIndex = texture(g_texture, texCoord.st).r * 255.0;" << std::endl;
++			shaderBuilder << "	float colorIndex = sampleIndex(texCoord.st);" << std::endl;
+ 			if(caps.texSourceMode == TEXTURE_SOURCE_MODE_IDX4)
+ 			{
+ 				shaderBuilder << "	float paletteTexelBias = 0.5 / 16.0;" << std::endl;
+@@ -268,10 +280,11 @@
+ 		}
+ 		else
+ 		{
+-			shaderBuilder << "	float tlIdx = texture(g_texture, texCoord.st                                     ).r * 255.0;" << std::endl;
+-			shaderBuilder << "	float trIdx = texture(g_texture, texCoord.st + vec2(g_texelSize.x, 0)            ).r * 255.0;" << std::endl;
+-			shaderBuilder << "	float blIdx = texture(g_texture, texCoord.st + vec2(0, g_texelSize.y)            ).r * 255.0;" << std::endl;
+-			shaderBuilder << "	float brIdx = texture(g_texture, texCoord.st + vec2(g_texelSize.x, g_texelSize.y)).r * 255.0;" << std::endl;
++            shaderBuilder << "highp vec2 indexBase=floor(texCoord.st*g_textureSize-vec2(0.5));"<<std::endl;
++            shaderBuilder << "float tlIdx=sampleIndex(indexCoordinate(indexBase));"<<std::endl;
++			shaderBuilder << "	float trIdx = sampleIndex(indexCoordinate(indexBase+vec2(1,0)));" << std::endl;
++			shaderBuilder << "	float blIdx = sampleIndex(indexCoordinate(indexBase+vec2(0,1)));" << std::endl;
++			shaderBuilder << "	float brIdx = sampleIndex(indexCoordinate(indexBase+vec2(1,1)));" << std::endl;
+ 
+ 			if(caps.texSourceMode == TEXTURE_SOURCE_MODE_IDX4)
+ 			{
+@@ -290,10 +303,10 @@
+ 				shaderBuilder << "	vec4 br = expandAlpha(texture(g_palette, vec2(brIdx / 256.0 + paletteTexelBias, 0)));" << std::endl;
+ 			}
+ 
+-			shaderBuilder << "	highp vec2 f = fract(texCoord.st * g_textureSize);" << std::endl;
+-			shaderBuilder << "	vec4 tA = mix(tl, tr, f.x);" << std::endl;
+-			shaderBuilder << "	vec4 tB = mix(bl, br, f.x);" << std::endl;
+-			shaderBuilder << "	textureColor = mix(tA, tB, f.y);" << std::endl;
++			shaderBuilder << "	highp vec2 f = fract(texCoord.st * g_textureSize - vec2(0.5));" << std::endl;
++			shaderBuilder << "	vec4 tA = mix(floor(tl*255.0+0.5),floor(tr*255.0+0.5),f.x);" << std::endl;
++			shaderBuilder << "	vec4 tB = mix(floor(bl*255.0+0.5),floor(br*255.0+0.5),f.x);" << std::endl;
++			shaderBuilder << "	textureColor = floor(mix(tA,tB,f.y)+0.5)/255.0;" << std::endl;
+ 		}
+ 	}
+ 	else if(caps.texSourceMode == TEXTURE_SOURCE_MODE_STD)
+@@ -311,7 +324,7 @@
+ 		switch(caps.texFunction)
+ 		{
+ 		case TEX0_FUNCTION_MODULATE:
+-			shaderBuilder << "	textureColor.rgb = clamp(textureColor.rgb * v_color.rgb * 2.0, 0.0, 1.0);" << std::endl;
++			shaderBuilder << "	textureColor.rgb = vec3(combineColors(textureColor.r,v_color.r),combineColors(textureColor.g,v_color.g),combineColors(textureColor.b,v_color.b));" << std::endl;
+ 			if(!caps.texHasAlpha)
+ 			{
+ 				shaderBuilder << "	textureColor.a = v_color.a;" << std::endl;
+@@ -393,11 +406,29 @@
+ 	}
+ 	else
+ 	{
+-		//This has the side effect of not writing a proper value in the framebuffer (should write alpha "as is")
+-		shaderBuilder << "	float finalAlpha = clamp(textureColor.a * 2.0, 0.0, 1.0);" << std::endl;
++		// Preserve GS alpha for unblended writes. Fixed-function source-alpha
++        // blending still requires separate alpha storage before adoption.
++        if(caps.hasFixedFunctionAlphaBlend)
++            shaderBuilder << "float finalAlpha = clamp(textureColor.a * 2.0, 0.0, 1.0);" << std::endl;
++        else
++            shaderBuilder << "float finalAlpha = textureColor.a;" << std::endl;
+ 	}
+ #endif
+ 
++#ifdef __EMSCRIPTEN__
++ if(caps.hasAlphaBlend) {
++  if(caps.perPixelAlphaBlend) shaderBuilder << "if((int(floor(finalAlpha*255.0+0.5))&128)!=0){"<<std::endl;
++  shaderBuilder << "highp ivec3 cs=ivec3(floor(finalColor*255.0+0.5)); highp vec4 dst=previousColor; highp ivec3 cd=ivec3(floor(dst.rgb*255.0+0.5));" << std::endl;
++  auto term=[](unsigned n){return n==0?"cs":n==1?"cd":"ivec3(0)";};
++  auto c=caps.alphaBlendC==0?"int(floor(finalAlpha*255.0+0.5))":caps.alphaBlendC==1?"int(floor(dst.a*255.0+0.5))":"int(floor(g_alphaFix*255.0+0.5))";
++  shaderBuilder << "highp ivec3 blended=((" <<term(caps.alphaBlendA)<<"-"<<term(caps.alphaBlendB)<<")*"<<c<<") >> 7; blended+="<<term(caps.alphaBlendD)<<"; finalColor=vec3("<<(caps.colorClamp?"clamp(blended,ivec3(0),ivec3(255))":"(blended & ivec3(255))")<<")/255.0;"<<std::endl;
++  if(caps.perPixelAlphaBlend) shaderBuilder << "}" <<std::endl;
++ }
++#endif
++#ifdef __EMSCRIPTEN__
++ if(caps.framebufferAlphaBit) shaderBuilder << "finalAlpha=float(int(floor(finalAlpha*255.0+0.5))|128)/255.0;"<<std::endl;
++ if(caps.hasPixelMask) shaderBuilder << "highp uvec4 mask=uvec4(g_frameMask,g_frameMask>>8,g_frameMask>>16,g_frameMask>>24)&uvec4(255u); highp uvec4 maskedColor=uvec4(floor(vec4(finalColor,finalAlpha)*255.0+0.5)); highp uvec4 old=uvec4(floor(previousColor*255.0+0.5)); maskedColor=(maskedColor & ~mask)|(old & mask); finalColor=vec3(maskedColor.rgb)/255.0;finalAlpha=float(maskedColor.a)/255.0;"<<std::endl;
++#endif
+ 	if(useFramebufferFetch)
+ 	{
+ 		if(caps.hasAlphaBlend)
+@@ -510,6 +541,11 @@
+ 
+ std::string CGSH_OpenGL::GenerateAlphaTestSection(ALPHA_TEST_METHOD testMethod, ALPHA_TEST_FAIL_METHOD failMethod)
+ {
++#ifdef __EMSCRIPTEN__
++ const char* comparisons[]={"false","true","alphaValue<g_alphaRef","alphaValue<=g_alphaRef","alphaValue==g_alphaRef","alphaValue>=g_alphaRef","alphaValue>g_alphaRef","alphaValue!=g_alphaRef"};
++ return std::string("uint alphaValue=uint(floor(textureColor.a*255.0+0.5));bool alphaPass=")+comparisons[testMethod]+";if((g_alphaPhase==0u && !alphaPass)||(g_alphaPhase!=0u && alphaPass))discard;\n";
++#endif
++
+ 	std::stringstream shaderBuilder;
+ 
+ 	const char* test = "	if(false)";
+@@ -676,7 +712,7 @@
+ 	{
+ 		std::stringstream shaderBuilder;
+ 		shaderBuilder << GLSL_VERSION << std::endl;
+-		shaderBuilder << "precision mediump float;" << std::endl;
++		shaderBuilder << "precision highp float; precision highp int;" << std::endl;
+ 		shaderBuilder << "in vec2 v_texCoord;" << std::endl;
+ 		shaderBuilder << "out vec4 fragColor;" << std::endl;
+ 		shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
+@@ -733,13 +769,18 @@
+ 	{
+ 		std::stringstream shaderBuilder;
+ 		shaderBuilder << GLSL_VERSION << std::endl;
+-		shaderBuilder << "precision mediump float;" << std::endl;
++		shaderBuilder << "precision highp float; precision highp int;" << std::endl;
+ 		shaderBuilder << "in vec2 v_texCoord;" << std::endl;
+ 		shaderBuilder << "out vec4 fragColor;" << std::endl;
+ 		shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
++        shaderBuilder << "uniform bool g_frame16;" << std::endl;
+ 		shaderBuilder << "void main()" << std::endl;
+ 		shaderBuilder << "{" << std::endl;
+-		shaderBuilder << "	fragColor = texture(g_texture, v_texCoord);" << std::endl;
++		shaderBuilder << "vec4 c = texture(g_texture, v_texCoord);" << std::endl;
++        // RGB5_A1 sampling normalizes to31/1. GS expands RGB with <<3,
++        // alpha with <<7; the host RGBA8 view must retain these exact bytes.
++        shaderBuilder << "if(g_frame16) c = floor(c * vec4(31,31,31,1) + 0.5) * vec4(8,8,8,128) / 255.0;" << std::endl;
++        shaderBuilder << "fragColor = c;" << std::endl;
+ 		shaderBuilder << "}" << std::endl;
+ 
+ 		pixelShader.SetSource(shaderBuilder.str().c_str());
+--- a/play/Source/gs/GSH_OpenGL/GSH_OpenGL.h
++++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL.h
+@@ -22,8 +22,18 @@
+ 
+ class CGSH_OpenGL : public CGSHandler, public CGsDebuggerInterface
+ {
++
+ public:
+ 	CGSH_OpenGL(bool = true);
++ struct DrawProfile {uint64 passes,vertices,snapshots,snapshotPixels;};
++ DrawProfile GetDrawProfile()const{return {m_profilePassCount,m_profileVertices,m_profileSnapshots,m_profileSnapshotPixels};}
++ struct DepthAliasStats {uint64 draws,passes,maps;};
++ DepthAliasStats GetDepthAliasStats()const{return {m_aliasDraws,m_aliasPasses,m_aliasMaps.size()};}
++ void SeedReadbackForValidation(uint32);
++ std::vector<uint8> ReadCachedForValidation(uint32);
++ void RestoreMemoryForValidation(){WriteBackMemoryCache();}
++ std::vector<uint8> ReadPopulationForValidation(uint32,bool);
++ std::vector<uint8> ReadDepthForValidation(uint32,uint32,uint32);
+ 	virtual ~CGSH_OpenGL();
+ 
+ 	static void RegisterPreferences();
+@@ -60,13 +70,23 @@
+ 	void InitializeImpl() override;
+ 	void ReleaseImpl() override;
+ 	void ResetImpl() override;
++	void WriteBackMemoryCache() override;
+ 	void NotifyPreferencesChangedImpl() override;
+ 	void MarkNewFrame() override;
+ 	void FlipImpl(const DISPLAY_INFO&) override;
+ 
+ 	GLuint m_presentFramebuffer = 0;
++ Framework::OpenGl::CTexture m_blendDestination;
++ uint32 m_blendWidth=0, m_blendHeight=0;
+ 
+ private:
++ bool IsOrderedTileEligible()const;
++ bool RenderOrderedTileBatch();
++ bool m_orderedRasterEnabled=false;
++ bool m_orderedAllowLevelZero=false;
++ bool PrimitiveOverlapsPending()const;
++ bool TryDepthAliasSprite();
++ void FlushDepthAlias();
+ 	typedef CGsTextureCache<Framework::OpenGl::CTexture> TextureCache;
+ 	typedef uint64 ShaderCapsInt;
+ 
+@@ -98,6 +118,11 @@
+ 		unsigned int alphaFailMethod : 2;
+ 		unsigned int alphaTestDepthTest_DepthFetch : 1;
+ 		unsigned int alphaTestDepthTestEqual_DepthFetch : 1;
++		unsigned int hasFixedFunctionAlphaBlend : 1;
++ unsigned int colorClamp : 1;
++ unsigned int framebufferAlphaBit : 1;
++ unsigned int perPixelAlphaBlend : 1;
++ unsigned int hasPixelMask : 1;
+ 
+ 		bool isIndexedTextureSource() const
+ 		{
+@@ -111,6 +136,7 @@
+ 		bool isValid;
+ 		bool isTextureStateValid;
+ 		bool isFramebufferStateValid;
++ bool textureFeedback=false;
+ 
+ 		//Register State
+ 		uint64 primReg;
+@@ -172,9 +198,12 @@
+ 		uint32 alphaRef;
+ 		float alphaFix;
+ 		float fogColor[3];
+-		float padding2;
+-	};
+-	static_assert(sizeof(FRAGMENTPARAMS) == 0x40, "Size of FRAGMENTPARAMS must be 64 bytes.");
++		float textureAlphaAsIndex;
++ uint32 frameMask;
++ uint32 alphaPhase;
++ uint32 padding[2];
++	};
++	static_assert(sizeof(FRAGMENTPARAMS) == 0x50, "Size of FRAGMENTPARAMS must be 80 bytes.");
+ 
+ 	enum
+ 	{
+@@ -264,6 +293,19 @@
+ 		Framework::OpenGl::CRenderbuffer m_depthBuffer;
+ 	};
+ 	typedef std::shared_ptr<CDepthbuffer> DepthbufferPtr;
++ struct DepthAliasRect {uint32 dx,dy,sx,sy,w,h;};
++ struct DepthAliasMap {std::vector<uint32> key;Framework::OpenGl::CTexture texture;bool green=false,alpha=false;};
++ FramebufferPtr m_aliasTarget;DepthbufferPtr m_aliasDepth;
++ std::vector<DepthAliasRect> m_aliasRects;
++ std::vector<DepthAliasMap> m_aliasMaps;
++ Framework::OpenGl::CTexture m_aliasDepthTexture;
++ Framework::OpenGl::CFramebuffer m_aliasSourceFbo,m_aliasCopyFbo;
++ Framework::OpenGl::CVertexArray m_aliasVao;
++ std::unique_ptr<Framework::OpenGl::CProgram> m_aliasProgram;
++ uint32 m_aliasWidth=0,m_aliasHeight=0;
++ uint64 m_aliasDraws=0,m_aliasPasses=0;
++ uint64 m_profilePassCount=0,m_profileVertices=0,m_profileSnapshots=0,m_profileSnapshotPixels=0;
++
+ 	typedef std::vector<DepthbufferPtr> DepthbufferList;
+ 
+ 	struct TEXTURE_INFO
+@@ -348,7 +390,7 @@
+ 	void FlushVertexBuffer();
+ 	void DoRenderPass();
+ 
+-	void CopyToFb(int32, int32, int32, int32, int32, int32, int32, int32, int32, int32);
++	void CopyToFb(int32, int32, int32, int32, int32, int32, int32, int32, int32, int32, bool);
+ 	void DrawToDepth(unsigned int, uint64);
+ 
+ 	void SetRenderingContext(uint64);
+@@ -427,6 +469,7 @@
+ 	Framework::OpenGl::CVertexArray m_copyToFbVertexArray;
+ 	GLint m_copyToFbSrcPositionUniform = -1;
+ 	GLint m_copyToFbSrcSizeUniform = -1;
++ GLint m_copyToFbFrame16Uniform = -1;
+ 
+ 	TextureCache m_textureCache;
+ 	PaletteList m_paletteCache;
+@@ -470,7 +513,7 @@
+ 	RENDERSTATE m_renderState;
+ 	uint32 m_validGlState = 0;
+ 	VERTEXPARAMS m_vertexParams;
+-	FRAGMENTPARAMS m_fragmentParams;
++	FRAGMENTPARAMS m_fragmentParams{};
+ 	Framework::OpenGl::CBuffer m_vertexParamsBuffer;
+ 	Framework::OpenGl::CBuffer m_fragmentParamsBuffer;
+ 	VertexBuffer m_vertexBuffer;
+--- /dev/null
++++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL_OrderedTile.inc
+@@ -0,0 +1,67 @@
++bool CGSH_OpenGL::IsOrderedTileEligible()const
++{
++ if(!m_orderedRasterEnabled||!m_renderState.isValid||m_fbScale!=1||m_multisampleEnabled)return false;
++ if(m_primitiveType!=PRIM_SPRITE&&m_primitiveType!=PRIM_LINE&&m_primitiveType!=PRIM_LINESTRIP&&m_primitiveType!=PRIM_TRIANGLE&&m_primitiveType!=PRIM_TRIANGLESTRIP&&m_primitiveType!=PRIM_TRIANGLEFAN)return false;
++ auto frame=make_convertible<FRAME>(m_renderState.frameReg);auto zbuf=make_convertible<ZBUF>(m_renderState.zbufReg);
++ if((frame.nPsm!=PSMCT32&&frame.nPsm!=PSMCT24&&frame.nPsm!=PSMCT16&&frame.nPsm!=PSMCT16S)||zbuf.nPsm!=1||m_nReg[0x45]!=0)return false;
++ if(m_drawingToDepth)return false;
++ auto prim=make_convertible<PRMODE>(m_renderState.primReg);
++ if((m_primitiveType==PRIM_LINE||m_primitiveType==PRIM_LINESTRIP)&&prim.nFog)return false;
++ if(!prim.nTexture)return true;
++ auto tex=make_convertible<TEX0>(m_renderState.tex0Reg);auto tex1=make_convertible<TEX1>(m_renderState.tex1Reg);auto clamp=make_convertible<CLAMP>(m_renderState.clampReg);
++ // The old native and GL comparison paths sample level0. Keep this profiling
++ // exception explicit while real mip sampling remains unimplemented.
++ if(tex1.nMaxMip&&!m_orderedAllowLevelZero)return false;
++ if(!m_renderState.texture0Handle||tex.GetWidth()>1024||tex.GetHeight()>1024)return false;
++ if(tex.nPsm!=PSMCT32&&tex.nPsm!=PSMCT24&&tex.nPsm!=PSMCT16&&tex.nPsm!=PSMT8&&tex.nPsm!=PSMT4&&tex.nPsm!=PSMT8H)return false;
++ if((tex.nPsm==PSMT8||tex.nPsm==PSMT4||tex.nPsm==PSMT8H)&&tex.nCPSM!=PSMCT32)return false;
++ for(const auto& framebuffer:m_framebuffers)if(framebuffer->m_texture==m_renderState.texture0Handle){
++  if(framebuffer->m_framebuffer==m_renderState.framebufferHandle)return false;
++  if(tex.nPsm!=PSMCT16||framebuffer->m_psm!=tex.nPsm||framebuffer->m_basePtr!=tex.GetBufPtr()||framebuffer->m_width!=tex.GetBufWidth()||tex.GetWidth()>framebuffer->m_width||tex.GetHeight()>framebuffer->m_height)return false;
++ }
++ if(clamp.nWMS==2&&clamp.GetMaxU()>=tex.GetWidth())return false;
++ if(clamp.nWMT==2&&clamp.GetMaxV()>=tex.GetHeight())return false;
++ if(clamp.nWMS==3&&(clamp.GetMinU()|clamp.GetMaxU())>=tex.GetWidth())return false;
++ if(clamp.nWMT==3&&(clamp.GetMinV()|clamp.GetMaxV())>=tex.GetHeight())return false;
++ return true;
++}
++
++bool CGSH_OpenGL::RenderOrderedTileBatch()
++{
++ auto frame=make_convertible<FRAME>(m_renderState.frameReg);auto zbuf=make_convertible<ZBUF>(m_renderState.zbufReg);
++ auto target=FindFramebuffer(frame);auto depth=FindDepthbuffer(zbuf,frame);
++ if(!target||!depth||target->m_framebuffer!=m_renderState.framebufferHandle)return false;
++ auto prim=make_convertible<PRMODE>(m_renderState.primReg);auto tex=make_convertible<TEX0>(m_renderState.tex0Reg);auto clamp=make_convertible<CLAMP>(m_renderState.clampReg);auto scissor=make_convertible<SCISSOR>(m_renderState.scissorReg);auto texa=make_convertible<TEXA>(m_renderState.texAReg);auto tex1=make_convertible<TEX1>(m_renderState.tex1Reg);
++ uint32 config[32]{};config[0]=uint64(prim);config[1]=m_renderState.testReg;config[2]=m_renderState.alphaReg;config[3]=m_renderState.alphaReg>>32;config[4]=frame.nMask;
++ config[5]=m_nReg[GS_REG_PABE]&1;config[6]=m_nReg[GS_REG_FBA_1+prim.nContext]&1;config[7]=m_nReg[GS_REG_COLCLAMP]&1;config[10]=m_nReg[GS_REG_SCANMSK]&3;
++ config[11]=scissor.scax0|(scissor.scax1<<16);config[12]=scissor.scay0|(scissor.scay1<<16);config[13]=zbuf.nMask;
++ config[14]=tex.nFunction|(tex.nColorComp<<2);config[15]=m_renderState.shaderCaps.texBilinearFilter||m_renderState.texture0MinFilter==GL_LINEAR||m_renderState.texture0MagFilter==GL_LINEAR;
++ config[16]=clamp.nWMS|(clamp.nWMT<<2);config[17]=clamp.GetMinU();config[18]=clamp.GetMaxU();config[19]=clamp.GetMinV();config[20]=clamp.GetMaxV();config[21]=m_renderState.fogColReg;
++ config[22]=prim.nTexture?tex.GetWidth():1;config[23]=prim.nTexture?tex.GetHeight():1;config[24]=0xffffff;
++ config[25]=tex.nPsm==PSMT4?3:(tex.nPsm==PSMT8||tex.nPsm==PSMT8H)?(m_renderState.texture0AlphaAsIndex?4:2):1;
++ config[26]=frame.nPsm;config[27]=1;config[28]=texa.nTA0|(texa.nTA1<<8)|(texa.nAEM<<16);config[29]=tex.nPsm==PSMCT16?1:tex.nPsm==PSMCT24?2:0;
++ if(prim.nTexture&&tex.nPsm==PSMCT16)for(const auto& source:m_framebuffers)if(source->m_texture==m_renderState.texture0Handle)config[29]=3;
++ std::vector<PRIM_VERTEX> packed;
++ if(m_primitiveType==PRIM_LINE||m_primitiveType==PRIM_LINESTRIP){
++  if(m_vertexBuffer.size()%2)return false;
++  packed.reserve(m_vertexBuffer.size()/2*3);
++  for(size_t i=0;i<m_vertexBuffer.size();i+=2){packed.push_back(m_vertexBuffer[i]);packed.push_back(m_vertexBuffer[i+1]);packed.push_back(m_vertexBuffer[i+1]);}
++ }else if(m_primitiveType==PRIM_SPRITE){
++  if(m_vertexBuffer.size()%6)return false;
++  packed.reserve(m_vertexBuffer.size()/2);
++  for(size_t i=0;i<m_vertexBuffer.size();i+=6){packed.push_back(m_vertexBuffer[i]);packed.push_back(m_vertexBuffer[i+5]);packed.push_back(m_vertexBuffer[i+5]);}
++ }else packed=m_vertexBuffer;
++ for(auto& v:packed){if(prim.nUseUV){v.s*=config[22]*16.0f;v.t*=config[23]*16.0f;}uint32 fog=std::lround((1.0f-v.f)*255.0f);memcpy(&v.f,&fog,4);}
++ int ok=EM_ASM_INT({
++  try{
++   if(!Module.ps2OrderedRaster)Module.ps2OrderedRaster=new globalThis.Ps2OrderedRaster(GLctx,Module.orderedKernelSource);
++   Module.ps2OrderedRaster.render(({targetFramebuffer:GL.framebuffers[$0],colorTexture:GL.textures[$1],depthRenderbuffer:GL.renderbuffers[$2],width:$3,height:$4,settings:HEAPU32.slice($5>>2,($5>>2)+32),vertexWords:HEAPU32.subarray($6>>2,($6+$7)>>2),texture:GL.textures[$8],palette:GL.textures[$9]}));
++   if($10)Module.ps2OrderedRaster.stats.levelZeroLodBatches=(Module.ps2OrderedRaster.stats.levelZeroLodBatches||0)+1;
++   return 1;
++  }catch(error){Module.orderedRasterError=error.message;console.error(error);return 0;}
++ },GLuint(target->m_framebuffer),GLuint(target->m_texture),GLuint(depth->m_depthBuffer),target->m_width,target->m_height,config,packed.data(),packed.size()*sizeof(PRIM_VERTEX),m_renderState.texture0Handle,m_renderState.texture1Handle,prim.nTexture && tex1.nMaxMip!=0);
++ if(!ok)throw std::runtime_error("Ordered GPU bridge failed");
++ const GLenum depthFunctions[]={GL_NEVER,GL_ALWAYS,GL_GEQUAL,GL_GREATER};glDepthFunc(depthFunctions[(m_renderState.testReg>>17)&3]);
++ m_validGlState=0;
++ return true;
++}
+--- /dev/null
++++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL_DepthAlias.inc
+@@ -0,0 +1,87 @@
++bool CGSH_OpenGL::TryDepthAliasSprite()
++{
++ if(m_primitiveType!=PRIM_SPRITE || m_fbScale!=1 || m_multisampleEnabled)return false;
++ uint64 prim=m_PrimitiveMode;unsigned ctx=(prim>>9)&1;
++ // Only unblended, unfogged, nearest, fixed-coordinate DECAL copies preserve the source bits.
++ if((prim&~0x200ull)!=0x116ull || m_nReg[GS_REG_TEXA]!=0x8000000000ull || m_nReg[0x45] || m_nReg[GS_REG_SCANMSK] || m_nReg[GS_REG_FBA_1+ctx] || m_nReg[GS_REG_PABE])return false;
++ auto frame=make_convertible<FRAME>(m_nReg[GS_REG_FRAME_1+ctx]);auto tex=make_convertible<TEX0>(m_nReg[GS_REG_TEX0_1+ctx]);auto zbuf=make_convertible<ZBUF>(m_nReg[GS_REG_ZBUF_1+ctx]);
++ if(frame.nPsm!=PSMCT16 || frame.nMask!=0x3fff || tex.nPsm!=PSMZ16 || tex.nFunction!=1 || !tex.nColorComp || !frame.nWidth || tex.nBufWidth!=frame.nWidth)return false;
++ if(m_nReg[GS_REG_TEST_1+ctx]!=0x30000ull || !zbuf.nMask || zbuf.nPsm!=1 || zbuf.GetBasePtr()!=tex.GetBufPtr() || m_nReg[GS_REG_TEX1_1+ctx]!=0 || m_nReg[GS_REG_CLAMP_1+ctx]!=0)return false;
++ FramebufferPtr target;DepthbufferPtr depth;
++ for(auto& f:m_framebuffers)if(f->m_basePtr==frame.GetBasePtr()&&f->m_width==frame.GetWidth()&&f->m_psm==PSMCT32)target=f;
++ for(auto& d:m_depthbuffers)if(d->m_basePtr==tex.GetBufPtr()&&d->m_width==tex.GetBufWidth()&&d->m_psm==1)depth=d;
++ if(!target||!depth)return false;
++ auto xy=make_convertible<XYOFFSET>(m_nReg[GS_REG_XYOFFSET_1+ctx]);auto sc=make_convertible<SCISSOR>(m_nReg[GS_REG_SCISSOR_1+ctx]);
++ auto a=make_convertible<XYZ>(m_VtxBuffer[1].position),b=make_convertible<XYZ>(m_VtxBuffer[0].position);
++ auto au=make_convertible<UV>(m_VtxBuffer[1].uv),bu=make_convertible<UV>(m_VtxBuffer[0].uv);
++ int x0=int(a.nX)-xy.nOffsetX,y0=int(a.nY)-xy.nOffsetY,x1=int(b.nX)-xy.nOffsetX,y1=int(b.nY)-xy.nOffsetY;
++ int u0=au.nU&0x3fff,v0=au.nV&0x3fff,u1=bu.nU&0x3fff,v1=bu.nV&0x3fff;
++ if((x0|y0|x1|y1)&15 || (u0&15)!=8 || (v0&15)!=8 || x1<=x0 || y1<=y0 || u1-u0!=x1-x0 || v1-v0!=y1-y0)return false;
++ x0/=16;y0/=16;x1/=16;y1/=16;u0/=16;v0/=16;
++ int dx=std::max(x0,int(sc.scax0)),dy=std::max(y0,int(sc.scay0));int ex=std::min(x1,int(sc.scax1)+1),ey=std::min(y1,int(sc.scay1)+1);
++ int sx=u0+dx-x0,sy=v0+dy-y0;
++ if(dx>=ex||dy>=ey)return true;
++ if(dx<0||dy<0||ex>int(target->m_width)||ey>int(target->m_height*2)||sx<0||sy<0||sx+ex-dx>int(tex.GetWidth())||sy+ey-dy>int(tex.GetHeight()))return false;
++ if(m_aliasTarget!=target||m_aliasDepth!=depth){FlushVertexBuffer();m_aliasTarget=target;m_aliasDepth=depth;}
++ else if(m_aliasRects.empty())FlushVertexBuffer();
++ m_aliasRects.push_back({uint32(dx),uint32(dy),uint32(sx),uint32(sy),uint32(ex-dx),uint32(ey-dy)});m_aliasDraws++;
++ return true;
++}
++
++void CGSH_OpenGL::FlushDepthAlias()
++{
++ if(m_aliasRects.empty())return;
++ if(!m_vertexBuffer.empty())throw std::runtime_error("Depth alias and ordinary vertices overlap");
++ auto target=m_aliasTarget;auto depth=m_aliasDepth;
++ using namespace Framework::OpenGl;
++ std::vector<uint32> key={target->m_basePtr,target->m_width,target->m_height,depth->m_basePtr,depth->m_width,depth->m_height};
++ for(auto& r:m_aliasRects){key.insert(key.end(),{r.dx,r.dy,r.sx,r.sy,r.w,r.h});}
++ auto found=std::find_if(m_aliasMaps.begin(),m_aliasMaps.end(),[&](const DepthAliasMap& m){return m.key==key;});
++ if(found==m_aliasMaps.end()){
++  using F=CGsPixelFormats;
++  F::CPixelIndexorPSMCT32 dst32(m_pRAM,target->m_basePtr,target->m_width/64);
++  F::CPixelIndexor<F::STORAGEPSMZ32> src32(m_pRAM,depth->m_basePtr,depth->m_width/64);
++  F::CPixelIndexorPSMCT16 dst16(m_pRAM,target->m_basePtr,target->m_width/64);
++  F::CPixelIndexor<F::STORAGEPSMZ16> src16(m_pRAM,depth->m_basePtr,depth->m_width/64);
++  std::vector<int32> destination(RAMSIZE/4,-1),source(RAMSIZE/4,-1);
++  for(uint32 y=0;y<target->m_height;y++)for(uint32 x=0;x<target->m_width;x++)destination[(reinterpret_cast<uint8*>(dst32.GetPixelAddress(x,y))-m_pRAM)/4]=y*target->m_width+x;
++  for(uint32 y=0;y<depth->m_height;y++)for(uint32 x=0;x<depth->m_width;x++)source[(reinterpret_cast<uint8*>(src32.GetPixelAddress(x,y))-m_pRAM)/4]=y*depth->m_width+x;
++  std::vector<uint32> lookup(target->m_width*target->m_height*2);bool green=false,alpha=false;
++  for(auto& r:m_aliasRects)for(uint32 y=0;y<r.h;y++)for(uint32 x=0;x<r.w;x++){
++   auto da=reinterpret_cast<uint8*>(dst16.GetPixelAddress(r.dx+x,r.dy+y))-m_pRAM+1;
++   auto sa=reinterpret_cast<uint8*>(src16.GetPixelAddress(r.sx+x,r.sy+y))-m_pRAM+1;
++   auto di=destination[da/4],si=source[sa/4];auto channel=da&3;
++   // Z24 leaves byte3 in RAM; handling that byte needs a coherent RAM cache first.
++   if(di<0||si<0||(sa&3)!=1||(channel!=1&&channel!=3))throw std::runtime_error("Unsupported depth alias storage mapping");
++   lookup[di*2+(channel==3)]=0x80000000u|uint32(si);green|=channel==1;alpha|=channel==3;
++  }
++  if(m_aliasMaps.size()>=8)m_aliasMaps.erase(m_aliasMaps.begin());
++  DepthAliasMap map;map.key=std::move(key);map.green=green;map.alpha=alpha;map.texture=CTexture::Create();
++  glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,map.texture);glTexStorage2D(GL_TEXTURE_2D,1,GL_RG32UI,target->m_width,target->m_height);glTexSubImage2D(GL_TEXTURE_2D,0,0,0,target->m_width,target->m_height,GL_RG_INTEGER,GL_UNSIGNED_INT,lookup.data());glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
++  m_aliasMaps.push_back(std::move(map));found=std::prev(m_aliasMaps.end());
++ }
++ if(!m_aliasProgram){
++  const char* vs="#version 300 es\nvoid main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0,1);}";
++  const char* fs="#version 300 es\nprecision highp float;precision highp int;uniform highp sampler2D depthSource;uniform highp usampler2D mapping;uniform int channel;uniform uint depthWidth;out vec4 color;void main(){uvec2 m=texelFetch(mapping,ivec2(gl_FragCoord.xy),0).rg;uint i=channel==0?m.r:m.g;if((i&0x80000000u)==0u)discard;i&=0x7fffffffu;float d=texelFetch(depthSource,ivec2(int(i%depthWidth),int(i/depthWidth)),0).r;uint z=d>=1.0?0xffffffffu:uint(d*4294967296.0);float b=float((z>>8)&255u)/255.0;color=vec4(0,b,0,b);}";
++  CShader vert(GL_VERTEX_SHADER),frag(GL_FRAGMENT_SHADER);vert.SetSource(vs);frag.SetSource(fs);vert.Compile();frag.Compile();m_aliasProgram=std::make_unique<CProgram>();m_aliasProgram->AttachShader(vert);m_aliasProgram->AttachShader(frag);m_aliasProgram->Link();m_aliasVao=CVertexArray::Create();
++ }
++ if(m_aliasWidth!=depth->m_width||m_aliasHeight!=depth->m_height){
++  m_aliasDepthTexture=CTexture::Create();m_aliasSourceFbo=Framework::OpenGl::CFramebuffer::Create();m_aliasCopyFbo=Framework::OpenGl::CFramebuffer::Create();
++  glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,m_aliasDepthTexture);glTexStorage2D(GL_TEXTURE_2D,1,GL_DEPTH_COMPONENT32F,depth->m_width,depth->m_height);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_COMPARE_MODE,GL_NONE);m_aliasWidth=depth->m_width;m_aliasHeight=depth->m_height;
++ }
++ glDisable(GL_SCISSOR_TEST);glDisable(GL_BLEND);glDisable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);
++ GLenum none=GL_NONE;glBindFramebuffer(GL_FRAMEBUFFER,m_aliasSourceFbo);glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,depth->m_depthBuffer);glDrawBuffers(1,&none);glReadBuffer(GL_NONE);
++ if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Alias depth source incomplete");
++ glBindFramebuffer(GL_FRAMEBUFFER,m_aliasCopyFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,m_aliasDepthTexture,0);glDrawBuffers(1,&none);glReadBuffer(GL_NONE);
++ if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)throw std::runtime_error("Alias depth copy incomplete");
++ glBindFramebuffer(GL_READ_FRAMEBUFFER,m_aliasSourceFbo);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,m_aliasCopyFbo);glBlitFramebuffer(0,0,depth->m_width,depth->m_height,0,0,depth->m_width,depth->m_height,GL_DEPTH_BUFFER_BIT,GL_NEAREST);
++ glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,m_aliasDepthTexture);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,found->texture);
++ glUseProgram(*m_aliasProgram);glUniform1i(glGetUniformLocation(*m_aliasProgram,"depthSource"),0);glUniform1i(glGetUniformLocation(*m_aliasProgram,"mapping"),1);glUniform1ui(glGetUniformLocation(*m_aliasProgram,"depthWidth"),depth->m_width);
++ glBindFramebuffer(GL_FRAMEBUFFER,target->m_framebuffer);GLenum color=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&color);glReadBuffer(color);glViewport(0,0,target->m_width,target->m_height);glBindVertexArray(m_aliasVao);
++ if(found->green){glColorMask(GL_FALSE,GL_TRUE,GL_FALSE,GL_FALSE);glUniform1i(glGetUniformLocation(*m_aliasProgram,"channel"),0);glDrawArrays(GL_TRIANGLES,0,3);m_aliasPasses++;}
++ if(found->alpha){glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_TRUE);glUniform1i(glGetUniformLocation(*m_aliasProgram,"channel"),1);glDrawArrays(GL_TRIANGLES,0,3);m_aliasPasses++;}
++ m_textureCache.InvalidateRange(target->m_basePtr,target->m_width*target->m_height*4);
++ m_framebuffers.erase(std::remove_if(m_framebuffers.begin(),m_framebuffers.end(),[&](const FramebufferPtr& f){return f!=target&&f->m_basePtr==target->m_basePtr;}),m_framebuffers.end());
++ m_aliasRects.clear();m_renderState.isValid=false;m_validGlState=0;
++ auto error=glGetError();if(error)throw std::runtime_error("Depth alias GL error "+std::to_string(error));
++}
+--- a/play/deps/Framework/src/opengl/Program.cpp
++++ b/play/deps/Framework/src/opengl/Program.cpp
+@@ -1,3 +1,4 @@
++#include <stdexcept>
+ #include <cassert>
+ #include "alloca_def.h"
+ #include "opengl/Program.h"
+@@ -43,7 +44,7 @@
+ 		char* error = reinterpret_cast<char*>(alloca(length + 1));
+ 		glGetProgramInfoLog(m_nHandle, length + 1, &length, error);
+ 		error[length] = 0;
+-		assert(0);
++		throw std::runtime_error(error);
+ 	}
+ 
+ 	return (nStatus == GL_TRUE);
+@@ -63,7 +64,7 @@
+ 		char* error = reinterpret_cast<char*>(alloca(length + 1));
+ 		glGetProgramInfoLog(m_nHandle, length + 1, &length, error);
+ 		error[length] = 0;
+-		assert(0);
++		throw std::runtime_error(error);
+ 	}
+ 
+ 	return (status == GL_TRUE);
+--- a/play/deps/Framework/src/opengl/Shader.cpp
++++ b/play/deps/Framework/src/opengl/Shader.cpp
+@@ -1,3 +1,4 @@
++#include <stdexcept>
+ #include <algorithm>
+ #include <cassert>
+ #include "alloca_def.h"
+@@ -60,7 +61,7 @@
+ 		char* error = reinterpret_cast<char*>(alloca(length + 1));
+ 		glGetShaderInfoLog(m_nHandle, length + 1, &length, error);
+ 		error[length] = 0;
+-		assert(0);
++		throw std::runtime_error(error);
+ 	}
+ 
+ 	return (nStatus == GL_TRUE);

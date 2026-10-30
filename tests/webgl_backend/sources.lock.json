@@ -1,0 +1,58 @@
+[
+  {
+    "name": "play",
+    "repository": "jpd002/Play-",
+    "revision": "1f27232772e484bfb79364b751b84f41f4c87481",
+    "url": "https://codeload.github.com/jpd002/Play-/tar.gz/1f27232772e484bfb79364b751b84f41f4c87481",
+    "sha256": "46a9056761668da6ef5be6f4686817730d9fada00fd9c4c91ff69637e949a7f4",
+    "directory": "play"
+  },
+  {
+    "name": "framework",
+    "repository": "jpd002/Play--Framework",
+    "revision": "587f278917acc0026bf5fc34b39f995fc26bd015",
+    "url": "https://codeload.github.com/jpd002/Play--Framework/tar.gz/587f278917acc0026bf5fc34b39f995fc26bd015",
+    "sha256": "3e4f87b6df7228dad15d9270cb15d855f8dd1b8803c7c30361549ff0f89326bc",
+    "directory": "play/deps/Framework"
+  },
+  {
+    "name": "codegen",
+    "repository": "jpd002/Play--CodeGen",
+    "revision": "a5009f7dca062695b8e5aebbd71e67b4ddfa9251",
+    "url": "https://codeload.github.com/jpd002/Play--CodeGen/tar.gz/a5009f7dca062695b8e5aebbd71e67b4ddfa9251",
+    "sha256": "c9699563583ff4811d0c227259da1782a685303f7c3f5de0af0696e47ed706b5",
+    "directory": "play/deps/CodeGen"
+  },
+  {
+    "name": "dependencies",
+    "repository": "jpd002/Play-Dependencies",
+    "revision": "8a5f6b1dea0b888b5a42b821e79470142bbea4e3",
+    "url": "https://codeload.github.com/jpd002/Play-Dependencies/tar.gz/8a5f6b1dea0b888b5a42b821e79470142bbea4e3",
+    "sha256": "fa8dc6c346a5141af959260037f6ac30b9987456dc07d13405e7bfb065076f93",
+    "directory": "play/deps/Dependencies"
+  },
+  {
+    "name": "filesystem",
+    "repository": "gulrak/filesystem",
+    "revision": "2a8b380f8d4e77b389c42a194ab9c70d8e3a0f1e",
+    "url": "https://codeload.github.com/gulrak/filesystem/tar.gz/2a8b380f8d4e77b389c42a194ab9c70d8e3a0f1e",
+    "sha256": "e11db30e695764cb19daf5058a9997c933c5ebdb3e29c697898258cbded8d65f",
+    "directory": "play/deps/Dependencies/ghc_filesystem"
+  },
+  {
+    "name": "zstd",
+    "repository": "facebook/zstd",
+    "revision": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+    "url": "https://codeload.github.com/facebook/zstd/tar.gz/f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+    "sha256": "4b0bd1f0cfb25e61b9103c35f27395530ff5b4c0d2513a00fd745849e85ea52c",
+    "directory": "play/deps/Dependencies/zstd"
+  },
+  {
+    "name": "zlib",
+    "repository": "madler/zlib",
+    "revision": "5a82f71ed1dfc0bec044d9702463dbdf84ea3b71",
+    "url": "https://codeload.github.com/madler/zlib/tar.gz/5a82f71ed1dfc0bec044d9702463dbdf84ea3b71",
+    "sha256": "54577b3e64db3d85268e909609faac1410d816376b037a1a415418f87f35814d",
+    "directory": "play/deps/Dependencies/zlib"
+  }
+]

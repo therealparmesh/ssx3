@@ -1,0 +1,9 @@
+[
+  "play/Source/gs/GSHandler.cpp",
+  "play/Source/gs/GSHandler.h",
+  "play/Source/gs/GSH_OpenGL/GSH_OpenGL.cpp",
+  "play/Source/gs/GSH_OpenGL/GSH_OpenGL_Shader.cpp",
+  "play/Source/gs/GSH_OpenGL/GSH_OpenGL.h",
+  "play/deps/Framework/src/opengl/Program.cpp",
+  "play/deps/Framework/src/opengl/Shader.cpp"
+]

@@ -1,0 +1,3 @@
+# Unified diff context contains a prefix space before upstream tabs/blank lines.
+# Preserve the patch as data; source files retain normal whitespace checks.
+upstream.patch -whitespace

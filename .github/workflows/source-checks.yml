@@ -59,6 +59,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install the pinned Emscripten SDK
         run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build python3
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git tools/emsdk
           tools/emsdk/emsdk install 6.0.11
           tools/emsdk/emsdk activate 6.0.11
@@ -69,6 +71,11 @@ jobs:
           node --check runtime/src/gs/webgl/ordered_raster.js
           node --check tests/webgl_ordered/verify.js
           node --check scripts/test_webgl_ordered.cjs
+      - name: Build the pinned asset-free WebGL backend fixtures
+        run: |
+          source tools/emsdk/emsdk_env.sh
+          sh scripts/build_webgl_backend.sh
+          node --check scripts/test_webgl_backend.cjs
       - name: Verify the WebGL GS register adapter in Wasm
         run: |
           source tools/emsdk/emsdk_env.sh
