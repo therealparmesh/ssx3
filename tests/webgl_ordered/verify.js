@@ -2,6 +2,8 @@
   const log = document.getElementById("log");
   try {
     const reference = await createReference();
+    const bridgeMode = new URLSearchParams(location.search).has("bridge");
+    const skipped = [];
     const gl = document
       .getElementById("canvas")
       .getContext("webgl2", { alpha: false, antialias: false });
@@ -14,6 +16,7 @@
         throw Error(gl.getShaderInfoLog(s));
       return s;
     };
+    const kernelSource = await (await fetch("kernel.frag")).text();
     const program = gl.createProgram();
     gl.attachShader(
       program,
@@ -22,10 +25,7 @@
         "#version 300 es\nvoid main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0,1);}",
       ),
     );
-    gl.attachShader(
-      program,
-      compile(gl.FRAGMENT_SHADER, await (await fetch("kernel.frag")).text()),
-    );
+    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, kernelSource));
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS))
       throw Error(gl.getProgramInfoLog(program));
@@ -86,7 +86,7 @@
           ((y * 4) << 8) |
           (((x ^ y) * 4) << 16) |
           (x & 8 ? 0x80000000 : 0);
-    texture(
+    const integerSource = texture(
       7,
       gl.RGBA8UI,
       64,
@@ -172,6 +172,40 @@
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.DITHER);
+    const bridge = bridgeMode ? new Ps2OrderedRaster(gl, kernelSource) : null;
+    let bridgeColor, bridgeDepth, bridgeFramebuffer;
+    if (bridgeMode) {
+      bridgeColor = texture(
+        10,
+        gl.RGBA8,
+        64,
+        64,
+        null,
+        gl.UNSIGNED_BYTE,
+        gl.RGBA,
+      );
+      bridgeDepth = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, bridgeDepth);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT32F, 64, 64);
+      bridgeFramebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, bridgeFramebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        bridgeColor,
+        0,
+      );
+      gl.framebufferRenderbuffer(
+        gl.FRAMEBUFFER,
+        gl.DEPTH_ATTACHMENT,
+        gl.RENDERBUFFER,
+        bridgeDepth,
+      );
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
+        throw Error("Incomplete bridge target");
+    }
     const initialColor = new Uint32Array(4096),
       initialDepth = new Uint32Array(4096),
       actualColor = new Uint32Array(4096 * 4),
@@ -200,7 +234,8 @@
       c[11] = 63 << 16;
       c[12] = 63 << 16;
       c[22] = c[23] = 64;
-      c[24] = 0xffffffff;
+      c[24] = bridgeMode ? 0xffffff : 0xffffffff;
+      if (bridgeMode) c[27] = 1;
       return c;
     };
     const geometry = (alpha = 64) => [
@@ -234,6 +269,13 @@
     const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2");
     const started = performance.now();
     function run(name, config, input) {
+      if (
+        bridgeMode &&
+        (config[24] > 0xffffff || name === "depth32-precision")
+      ) {
+        skipped.push(name);
+        return;
+      }
       gl.activeTexture(gl.TEXTURE8);
       gl.bindTexture(gl.TEXTURE_2D, normalizedTexture);
       const packGl16 = (c) =>
@@ -264,6 +306,22 @@
           for (let x = 0; x < 64; x++)
             pixels[y * 64 + x] =
               17 | ((((x >> 2) + (y >> 2) * 13) & 255) << 24);
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA8,
+          64,
+          64,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          new Uint8Array(pixels.buffer),
+        );
+      } else if (config[29] == 3) {
+        const pixels = Uint32Array.from(
+          texturePixels,
+          (c) => (c & 0x00f8f8f8) | (c & 0x80000000),
+        );
         gl.texImage2D(
           gl.TEXTURE_2D,
           0,
@@ -408,37 +466,123 @@
       const gpuConfig = config.slice();
       if (new URLSearchParams(location.search).has("negative"))
         gpuConfig[13] = 1;
+      gl.useProgram(program);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.uniform4uiv(gl.getUniformLocation(program, "settings[0]"), gpuConfig);
-      let query;
-      if (timer && name === "filtered-cutout-overlap") {
-        query = gl.createQuery();
-        gl.beginQuery(timer.TIME_ELAPSED_EXT, query);
+      if (bridgeMode) {
+        gl.activeTexture(gl.TEXTURE10);
+        gl.bindTexture(gl.TEXTURE_2D, bridgeColor);
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          0,
+          64,
+          64,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          new Uint8Array(initialColor.buffer),
+        );
+        gl.bindFramebuffer(gl.FRAMEBUFFER, bridgeFramebuffer);
+        gl.disable(gl.SCISSOR_TEST);
+        gl.depthMask(true);
+        gl.clearDepth(initialDepth[0] / 4294967296);
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+        let data = vu;
+        if (new URLSearchParams(location.search).has("reverse")) {
+          data = vu.slice();
+          for (let i = 0; i < vu.length; i += 24)
+            data.set(vu.subarray(vu.length - 24 - i, vu.length - i), i);
+        }
+        bridge.render({
+          targetFramebuffer: bridgeFramebuffer,
+          colorTexture: bridgeColor,
+          depthRenderbuffer: bridgeDepth,
+          width: 64,
+          height: 64,
+          settings: gpuConfig,
+          vertexWords: data,
+          texture: normalizedTexture,
+          palette: paletteTexture,
+          integerTexture: integerSource,
+        });
+        // Inspect the actual resolved target/depth, not only temporary outputs.
+        // This additional GPU snapshot and readback belongs to verification.
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, bridgeFramebuffer);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, bridge.depthCopyFramebuffer);
+        gl.blitFramebuffer(
+          0,
+          0,
+          64,
+          64,
+          0,
+          0,
+          64,
+          64,
+          gl.DEPTH_BUFFER_BIT,
+          gl.NEAREST,
+        );
+        gl.bindFramebuffer(gl.FRAMEBUFFER, bridge.inputFramebuffer);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+        gl.disable(gl.DEPTH_TEST);
+        gl.depthMask(false);
+        gl.viewport(0, 0, 64, 64);
+        gl.useProgram(bridge.initialize);
+        bridge.bind(bridge.initialize, "colorSource", 0, bridgeColor);
+        bridge.bind(bridge.initialize, "depthSource", 1, bridge.depthCopy);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.readBuffer(gl.COLOR_ATTACHMENT0);
+        gl.readPixels(
+          0,
+          0,
+          64,
+          64,
+          gl.RGBA_INTEGER,
+          gl.UNSIGNED_INT,
+          actualColor,
+        );
+        gl.readBuffer(gl.COLOR_ATTACHMENT1);
+        gl.readPixels(
+          0,
+          0,
+          64,
+          64,
+          gl.RGBA_INTEGER,
+          gl.UNSIGNED_INT,
+          actualDepth,
+        );
+      } else {
+        let query;
+        if (timer && name === "filtered-cutout-overlap") {
+          query = gl.createQuery();
+          gl.beginQuery(timer.TIME_ELAPSED_EXT, query);
+        }
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        if (query) {
+          gl.endQuery(timer.TIME_ELAPSED_EXT);
+          timerQueries.push({ name, query });
+        }
+        gl.readBuffer(gl.COLOR_ATTACHMENT0);
+        gl.readPixels(
+          0,
+          0,
+          64,
+          64,
+          gl.RGBA_INTEGER,
+          gl.UNSIGNED_INT,
+          actualColor,
+        );
+        gl.readBuffer(gl.COLOR_ATTACHMENT1);
+        gl.readPixels(
+          0,
+          0,
+          64,
+          64,
+          gl.RGBA_INTEGER,
+          gl.UNSIGNED_INT,
+          actualDepth,
+        );
       }
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      if (query) {
-        gl.endQuery(timer.TIME_ELAPSED_EXT);
-        timerQueries.push({ name, query });
-      }
-      gl.readBuffer(gl.COLOR_ATTACHMENT0);
-      gl.readPixels(
-        0,
-        0,
-        64,
-        64,
-        gl.RGBA_INTEGER,
-        gl.UNSIGNED_INT,
-        actualColor,
-      );
-      gl.readBuffer(gl.COLOR_ATTACHMENT1);
-      gl.readPixels(
-        0,
-        0,
-        64,
-        64,
-        gl.RGBA_INTEGER,
-        gl.UNSIGNED_INT,
-        actualDepth,
-      );
       const error = gl.getError();
       if (error) throw Error(name + ": GL " + error);
       reference.HEAPU32.set(config, configPtr / 4);
@@ -849,12 +993,42 @@
         gl.deleteQuery(query);
       }
     }
+    for (let ta = 0; ta < 4; ta++)
+      for (let aem = 0; aem < 2; aem++)
+        for (let filter = 0; filter < 2; filter++) {
+          const c = baseConfig();
+          c[0] |= 16 | 256;
+          c[1] |= 1 | (6 << 1) | (92 << 4) | (1 << 12);
+          c[25] = 1;
+          c[29] = 3;
+          c[28] = (ta & 1 ? 64 : 0) | ((ta & 2 ? 255 : 128) << 8) | (aem << 16);
+          c[15] = filter;
+          c[14] = 4;
+          const v = geometry(128);
+          for (const p of v) {
+            p[4] = (p[0] - 8) * 16 + 8;
+            p[5] = (p[1] - 8) * 16 + 8;
+            p[6] = 1;
+          }
+          run("expanded-gs16-" + ta + "-" + aem + "-" + filter, c, v);
+        }
+    if (bridge) {
+      for (const size of [8, 16, 24, 32, 48]) bridge.targets(size, size);
+      const c = baseConfig();
+      const v = geometry(128);
+      run("target-cache-restore", c, v);
+      if (bridge.targetSets.size > 4)
+        throw Error("Unbounded bridge target cache");
+    }
     reference._free(configPtr);
     reference._free(verticesPtr);
     reference._free(outputPtr);
     const rendererInfo = gl.getExtension("WEBGL_debug_renderer_info");
     window.kernelResult = {
       passed: results.length,
+      bridgeMode,
+      skipped,
+      bridgeStats: bridge ? { ...bridge.stats } : null,
       cases: results,
       gpuTimings,
       renderer: rendererInfo
@@ -866,6 +1040,23 @@
       scope:
         "Ordered WebGL2 triangles versus unchanged CPU GS reference:32/24/16-bit color/depth, PSMT4/8/8H and32/24/16-bit textures, alpha/blend/masks/fog/clamp/filtering.64x64 controlled cases only; no full-game or performance qualification.",
     };
+    if (bridge) {
+      bridge.destroy();
+      bridge.destroy();
+      if (
+        bridge.textures.size ||
+        bridge.framebuffers.size ||
+        bridge.programs.size ||
+        bridge.targetSets.size
+      )
+        throw Error("Bridge resources retained after destruction");
+      if (
+        !gl.isTexture(bridgeColor) ||
+        !gl.isRenderbuffer(bridgeDepth) ||
+        !gl.isFramebuffer(bridgeFramebuffer)
+      )
+        throw Error("Bridge deleted host-owned resources");
+    }
     log.textContent = JSON.stringify(
       {
         passed: results.length,

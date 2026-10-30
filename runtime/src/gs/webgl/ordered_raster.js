@@ -1,0 +1,539 @@
+/* Experimental GPU-only bridge for ordered_raster.frag. See the fixture README.
+ * External textures/framebuffers remain owned by the host. The host must restore
+ * its GL state after render() and split batches at resource/feedback hazards.
+ */
+class Ps2OrderedRaster {
+  constructor(gl, fragmentSource) {
+    this.gl = gl;
+    this.textures = new Set();
+    this.framebuffers = new Set();
+    this.programs = new Set();
+    this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    this.uniforms = new Map();
+    this.targetSets = new Map();
+    this.width = 0;
+    this.height = 0;
+    this.stats = { batches: 0, triangles: 0, rasterDraws: 0, readbacks: 0 };
+    try {
+      this.vao = gl.createVertexArray();
+      this.sampler = gl.createSampler();
+      gl.samplerParameteri(this.sampler, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.samplerParameteri(this.sampler, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.samplerParameteri(this.sampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.samplerParameteri(this.sampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const vertexSource = `#version 300 es
+void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0,1);}`;
+      this.kernel = this.program(vertexSource, fragmentSource);
+      // Z24 values are exact dyadic D32F values. Adding 0.5 after scaling
+      // would round odd values near 0xffffff up to the next integer.
+      this.initialize = this.program(
+        vertexSource,
+        `#version 300 es
+precision highp float;precision highp int;
+uniform sampler2D colorSource;uniform highp sampler2D depthSource;uniform uint frameFormat;
+layout(location=0) out uvec4 colorOutput;layout(location=1) out uint depthOutput;
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(colorSource,p,0)*255.0+vec4(0.5)));if(frameFormat==2u||frameFormat==10u){colorOutput.rgb=(colorOutput.rgb>>3u)<<3u;colorOutput.a=(colorOutput.a&128u)!=0u?128u:0u;}float d=texelFetch(depthSource,p,0).r;depthOutput=d>=1.0?0xffffffffu:uint(d*4294967296.0);}`,
+      );
+      this.resolve = this.program(
+        vertexSource,
+        `#version 300 es
+precision highp float;precision highp int;
+uniform highp usampler2D colorSource;uniform highp usampler2D depthSource;
+out vec4 colorOutput;
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSource,p,0))/255.0;gl_FragDepth=float(texelFetch(depthSource,p,0).r)/4294967296.0;}`,
+      );
+      this.dummyInteger = this.texture(gl.RGBA8UI, 1, 1);
+      this.dummyNormalized = this.texture(gl.RGBA8, 1, 1);
+      this.vertexData = null;
+      this.indexData = null;
+    } catch (error) {
+      this.destroy();
+      throw error;
+    }
+  }
+
+  program(vertexSource, fragmentSource) {
+    const gl = this.gl;
+    const program = gl.createProgram();
+    const shaders = [];
+    try {
+      for (const [type, source] of [
+        [gl.VERTEX_SHADER, vertexSource],
+        [gl.FRAGMENT_SHADER, fragmentSource],
+      ]) {
+        const shader = gl.createShader(type);
+        shaders.push(shader);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+          throw Error(gl.getShaderInfoLog(shader));
+        gl.attachShader(program, shader);
+      }
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+        throw Error(gl.getProgramInfoLog(program));
+      this.programs.add(program);
+      return program;
+    } catch (error) {
+      gl.deleteProgram(program);
+      throw error;
+    } finally {
+      for (const shader of shaders) gl.deleteShader(shader);
+    }
+  }
+
+  texture(format, width, height) {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + 12);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, format, width, height);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    this.textures.add(texture);
+    return texture;
+  }
+
+  framebuffer() {
+    const framebuffer = this.gl.createFramebuffer();
+    this.framebuffers.add(framebuffer);
+    return framebuffer;
+  }
+
+  deleteTexture(texture) {
+    if (texture) {
+      this.gl.deleteTexture(texture);
+      this.textures.delete(texture);
+    }
+  }
+
+  targets(width, height) {
+    if (width === this.width && height === this.height) return;
+    const gl = this.gl;
+    if (
+      width <= 0 ||
+      height <= 0 ||
+      width > this.maxTextureSize ||
+      height > this.maxTextureSize
+    )
+      throw Error("Unsupported ordered raster target size");
+    const fields = [
+      "inputColor",
+      "inputDepth",
+      "outputColor",
+      "outputDepth",
+      "depthCopy",
+      "headersTexture",
+      "inputFramebuffer",
+      "outputFramebuffer",
+      "depthReadFramebuffer",
+      "depthCopyFramebuffer",
+      "width",
+      "height",
+      "tilesX",
+      "tilesY",
+      "headerScratch",
+      "sourceDepthRenderbuffer",
+    ];
+    if (this.activeTargetSet)
+      for (const field of fields) this.activeTargetSet[field] = this[field];
+    const key = width + "x" + height,
+      cached = this.targetSets.get(key);
+    if (cached) {
+      Object.assign(this, cached);
+      this.activeTargetSet = cached;
+      this.targetSets.delete(key);
+      this.targetSets.set(key, cached);
+      return;
+    }
+    if (this.targetSets.size >= 4) {
+      const oldKey = this.targetSets.keys().next().value,
+        old = this.targetSets.get(oldKey);
+      for (const field of [
+        "inputColor",
+        "inputDepth",
+        "outputColor",
+        "outputDepth",
+        "depthCopy",
+        "headersTexture",
+      ])
+        this.deleteTexture(old[field]);
+      for (const field of [
+        "inputFramebuffer",
+        "outputFramebuffer",
+        "depthReadFramebuffer",
+        "depthCopyFramebuffer",
+      ]) {
+        gl.deleteFramebuffer(old[field]);
+        this.framebuffers.delete(old[field]);
+      }
+      this.targetSets.delete(oldKey);
+    }
+    this.inputColor = this.texture(gl.RGBA8UI, width, height);
+    this.inputDepth = this.texture(gl.R32UI, width, height);
+    this.outputColor = this.texture(gl.RGBA8UI, width, height);
+    this.outputDepth = this.texture(gl.R32UI, width, height);
+    this.depthCopy = this.texture(gl.DEPTH_COMPONENT32F, width, height);
+    this.tilesX = Math.ceil(width / 8);
+    this.tilesY = Math.ceil(height / 8);
+    this.headerScratch = new Uint32Array(0);
+    this.sourceDepthRenderbuffer = null;
+    this.headersTexture = this.texture(gl.RG32UI, this.tilesX, this.tilesY);
+    this.inputFramebuffer = this.framebuffer();
+    this.outputFramebuffer = this.framebuffer();
+    this.depthReadFramebuffer = this.framebuffer();
+    this.depthCopyFramebuffer = this.framebuffer();
+    for (const [framebuffer, color, depth] of [
+      [this.inputFramebuffer, this.inputColor, this.inputDepth],
+      [this.outputFramebuffer, this.outputColor, this.outputDepth],
+    ]) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        color,
+        0,
+      );
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT1,
+        gl.TEXTURE_2D,
+        depth,
+        0,
+      );
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      this.complete();
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.depthCopyFramebuffer);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.DEPTH_ATTACHMENT,
+      gl.TEXTURE_2D,
+      this.depthCopy,
+      0,
+    );
+    gl.drawBuffers([gl.NONE]);
+    gl.readBuffer(gl.NONE);
+    this.complete();
+    this.width = width;
+    this.height = height;
+    this.activeTargetSet = Object.fromEntries(
+      fields.map((field) => [field, this[field]]),
+    );
+    this.targetSets.set(key, this.activeTargetSet);
+  }
+
+  complete() {
+    if (
+      this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER) !==
+      this.gl.FRAMEBUFFER_COMPLETE
+    )
+      throw Error("Incomplete ordered raster framebuffer");
+  }
+
+  dataTexture(name, words, components) {
+    const gl = this.gl;
+    const rows = Math.max(1, Math.ceil(words.length / (1024 * components)));
+    if (rows > this.maxTextureSize)
+      throw Error("Ordered raster batch exceeds texture capacity");
+    if (!this[name] || this[name + "Rows"] < rows) {
+      this.deleteTexture(this[name]);
+      this[name + "Rows"] = Math.min(
+        this.maxTextureSize,
+        2 ** Math.ceil(Math.log2(rows)),
+      );
+      this[name] = this.texture(
+        components === 4 ? gl.RGBA32UI : gl.R32UI,
+        1024,
+        this[name + "Rows"],
+      );
+    }
+    gl.activeTexture(gl.TEXTURE0 + 12);
+    gl.bindTexture(gl.TEXTURE_2D, this[name]);
+    const rowWords = 1024 * components,
+      fullRows = Math.floor(words.length / rowWords),
+      tail = words.length - fullRows * rowWords;
+    const format = components === 4 ? gl.RGBA_INTEGER : gl.RED_INTEGER;
+    if (fullRows)
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,
+        0,
+        0,
+        0,
+        1024,
+        fullRows,
+        format,
+        gl.UNSIGNED_INT,
+        words.subarray(0, fullRows * rowWords),
+      );
+    if (tail)
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,
+        0,
+        0,
+        fullRows,
+        tail / components,
+        1,
+        format,
+        gl.UNSIGNED_INT,
+        words.subarray(fullRows * rowWords),
+      );
+  }
+
+  uniform(program, name) {
+    let entries = this.uniforms.get(program);
+    if (!entries) this.uniforms.set(program, (entries = new Map()));
+    let entry = entries.get(name);
+    if (!entry) {
+      entry = { location: this.gl.getUniformLocation(program, name) };
+      entries.set(name, entry);
+    }
+    return entry;
+  }
+
+  bind(program, name, unit, texture) {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    const uniform = this.uniform(program, name);
+    if (uniform.unit !== unit) {
+      gl.uniform1i(uniform.location, unit);
+      uniform.unit = unit;
+    }
+  }
+
+  render({
+    targetFramebuffer,
+    colorTexture,
+    depthRenderbuffer,
+    width,
+    height,
+    settings,
+    vertexWords,
+    texture,
+    palette,
+    integerTexture,
+  }) {
+    const gl = this.gl;
+    if (this.destroyed) throw Error("Ordered raster bridge was destroyed");
+    if (gl.isContextLost()) throw Error("Ordered raster context is lost");
+    if (
+      !(settings instanceof Uint32Array) ||
+      !(vertexWords instanceof Uint32Array) ||
+      settings.length !== 32 ||
+      vertexWords.length % 24 !== 0
+    )
+      throw Error("Invalid ordered raster packet");
+    if (!targetFramebuffer || !colorTexture || !depthRenderbuffer)
+      throw Error("Missing ordered raster target");
+    if (settings[0] & 16) {
+      if (settings[25] === 0 && !integerTexture)
+        throw Error("Missing integer source texture");
+      if (settings[25] !== 0 && !texture)
+        throw Error("Missing normalized source texture");
+      if (settings[25] >= 2 && !palette) throw Error("Missing source palette");
+    }
+    if (!settings[22] || !settings[23])
+      throw Error("Invalid source dimensions");
+    // D32F cannot recover all integer Z32 values. The transitional bridge only
+    // accepts a 24-bit or smaller depth domain and supported normalized GS color views.
+    if (![0, 1, 2, 10].includes(settings[26]) || settings[24] > 0xffffff)
+      throw Error("Unsupported transitional color/depth view");
+    this.targets(width, height);
+    const positions = new Float32Array(
+      vertexWords.buffer,
+      vertexWords.byteOffset,
+      vertexWords.length,
+    );
+    const bins = new Map();
+    let left = width,
+      bottom = height,
+      right = 0,
+      top = 0;
+    const scissorX = settings[11],
+      scissorY = settings[12];
+    for (let i = 0; i < vertexWords.length; i += 24) {
+      const x0 = Math.max(
+        0,
+        scissorX & 65535,
+        Math.ceil(Math.min(positions[i], positions[i + 8], positions[i + 16])),
+      );
+      const y0 = Math.max(
+        0,
+        scissorY & 65535,
+        Math.ceil(
+          Math.min(positions[i + 1], positions[i + 9], positions[i + 17]),
+        ),
+      );
+      const x1 = Math.min(
+        width - 1,
+        scissorX >>> 16,
+        Math.ceil(Math.max(positions[i], positions[i + 8], positions[i + 16])) -
+          1,
+      );
+      const y1 = Math.min(
+        height - 1,
+        scissorY >>> 16,
+        Math.ceil(
+          Math.max(positions[i + 1], positions[i + 9], positions[i + 17]),
+        ) - 1,
+      );
+      if (![x0, y0, x1, y1].every(Number.isFinite))
+        throw Error("Invalid ordered raster coordinates");
+      if (x0 > x1 || y0 > y1) continue;
+      left = Math.min(left, x0);
+      bottom = Math.min(bottom, y0);
+      right = Math.max(right, x1 + 1);
+      top = Math.max(top, y1 + 1);
+      for (let y = y0 >> 3; y <= y1 >> 3; y++)
+        for (let x = x0 >> 3; x <= x1 >> 3; x++) {
+          const key = y * this.tilesX + x;
+          let list = bins.get(key);
+          if (!list) bins.set(key, (list = []));
+          list.push(i / 24);
+        }
+    }
+    if (left >= right || bottom >= top) return;
+    let count = 0;
+    for (const list of bins.values()) count += list.length;
+    const indices = new Uint32Array(count);
+    const tileLeft = left >> 3,
+      tileBottom = bottom >> 3,
+      tileWidth = ((right - 1) >> 3) - tileLeft + 1,
+      tileHeight = ((top - 1) >> 3) - tileBottom + 1;
+    const headerLength = tileWidth * tileHeight * 2;
+    if (this.headerScratch.length < headerLength)
+      this.headerScratch = new Uint32Array(headerLength);
+    const headers = this.headerScratch.subarray(0, headerLength);
+    headers.fill(0);
+    let offset = 0;
+    for (const [key, list] of bins) {
+      const local =
+        ((Math.floor(key / this.tilesX) - tileBottom) * tileWidth +
+          (key % this.tilesX) -
+          tileLeft) *
+        2;
+      headers[local] = offset;
+      headers[local + 1] = list.length;
+      indices.set(list, offset);
+      offset += list.length;
+    }
+    this.dataTexture("vertexData", vertexWords, 4);
+    this.dataTexture("indexData", indices, 1);
+    gl.activeTexture(gl.TEXTURE0 + 12);
+    gl.bindTexture(gl.TEXTURE_2D, this.headersTexture);
+    gl.texSubImage2D(
+      gl.TEXTURE_2D,
+      0,
+      tileLeft,
+      tileBottom,
+      tileWidth,
+      tileHeight,
+      gl.RG_INTEGER,
+      gl.UNSIGNED_INT,
+      headers,
+    );
+    gl.disable(gl.SCISSOR_TEST);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.STENCIL_TEST);
+    gl.disable(gl.CULL_FACE);
+    gl.disable(gl.DITHER);
+    gl.depthMask(false);
+    gl.colorMask(true, true, true, true);
+    gl.bindVertexArray(this.vao);
+    if (this.sourceDepthRenderbuffer !== depthRenderbuffer) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.depthReadFramebuffer);
+      gl.framebufferRenderbuffer(
+        gl.FRAMEBUFFER,
+        gl.DEPTH_ATTACHMENT,
+        gl.RENDERBUFFER,
+        depthRenderbuffer,
+      );
+      gl.drawBuffers([gl.NONE]);
+      gl.readBuffer(gl.NONE);
+      this.complete();
+      this.sourceDepthRenderbuffer = depthRenderbuffer;
+    }
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.depthReadFramebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.depthCopyFramebuffer);
+    gl.blitFramebuffer(
+      left,
+      bottom,
+      right,
+      top,
+      left,
+      bottom,
+      right,
+      top,
+      gl.DEPTH_BUFFER_BIT,
+      gl.NEAREST,
+    );
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.inputFramebuffer);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.viewport(left, bottom, right - left, top - bottom);
+    gl.useProgram(this.initialize);
+    this.bind(this.initialize, "colorSource", 0, colorTexture);
+    this.bind(this.initialize, "depthSource", 1, this.depthCopy);
+    gl.uniform1ui(
+      this.uniform(this.initialize, "frameFormat").location,
+      settings[26],
+    );
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.outputFramebuffer);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.useProgram(this.kernel);
+    for (const [name, unit, input] of [
+      ["initialColor", 0, this.inputColor],
+      ["initialDepth", 1, this.inputDepth],
+      ["vertices", 2, this.vertexData],
+      ["bins", 3, this.headersTexture],
+      ["lists", 4, this.indexData],
+      ["sourceTexture", 5, integerTexture || this.dummyInteger],
+      ["normalizedTexture", 7, texture || this.dummyNormalized],
+      ["paletteTexture", 8, palette || this.dummyNormalized],
+    ])
+      this.bind(this.kernel, name, unit, input);
+    gl.bindSampler(7, this.sampler);
+    gl.bindSampler(8, this.sampler);
+    gl.uniform4uiv(this.uniform(this.kernel, "settings[0]").location, settings);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindSampler(7, null);
+    gl.bindSampler(8, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFramebuffer);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.useProgram(this.resolve);
+    this.bind(this.resolve, "colorSource", 0, this.outputColor);
+    this.bind(this.resolve, "depthSource", 1, this.outputDepth);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.ALWAYS);
+    gl.depthMask(true);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    // The host checks errors at its frame boundary; querying after every batch
+    // would force repeated GL command round trips. The fixture checks each case.
+    this.stats.batches++;
+    this.stats.triangles += vertexWords.length / 24;
+    this.stats.rasterDraws += 3;
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    const gl = this.gl;
+    for (const texture of this.textures) gl.deleteTexture(texture);
+    for (const framebuffer of this.framebuffers)
+      gl.deleteFramebuffer(framebuffer);
+    for (const program of this.programs) gl.deleteProgram(program);
+    gl.deleteVertexArray(this.vao);
+    gl.deleteSampler(this.sampler);
+    this.textures.clear();
+    this.framebuffers.clear();
+    this.programs.clear();
+    this.uniforms.clear();
+    this.targetSets.clear();
+  }
+}
+
+globalThis.Ps2OrderedRaster = Ps2OrderedRaster;

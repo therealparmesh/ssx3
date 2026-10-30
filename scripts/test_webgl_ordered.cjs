@@ -6,6 +6,7 @@ const puppeteer = require("puppeteer-core");
 
 async function main() {
   const engine = process.argv[2] || "chromium";
+  const bridge = process.argv[3] === "bridge";
   assert(
     ["chromium", "firefox"].includes(engine),
     "Choose chromium or firefox",
@@ -46,6 +47,7 @@ async function main() {
         });
       });
       const url = new URL(origin);
+      if (bridge) url.searchParams.set("bridge", "1");
       if (mode === "negative-depth") url.searchParams.set("negative", "1");
       if (mode === "negative-order") url.searchParams.set("reverse", "1");
       await page.goto(url.href, { waitUntil: "load" });
@@ -67,13 +69,17 @@ async function main() {
         logs,
       };
       fs.writeFileSync(
-        path.join(output, `${engine}-${mode}.json`),
+        path.join(output, `${engine}-${bridge ? "bridge-" : ""}${mode}.json`),
         JSON.stringify(evidence, null, 2) + "\n",
       );
       assert.equal(errors.length, 0, "No uncaught browser errors");
       if (mode === "positive") {
         assert(!result.error, result.error);
-        assert.equal(result.passed, 708, "Run the complete fixture matrix");
+        assert.equal(
+          result.passed,
+          bridge ? 692 : 724,
+          "Run the complete fixture matrix",
+        );
         assert.equal(logs.length, 0, "No browser or graphics warnings");
         assert(
           result.cases.every(

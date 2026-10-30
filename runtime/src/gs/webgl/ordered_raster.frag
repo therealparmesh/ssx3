@@ -92,9 +92,11 @@ vec4 sampleTexel(ivec2 at) {
     uint ta0 = cfg(28) & 255u, ta1 = (cfg(28) >> 8) & 255u;
     bool transparent =
         (cfg(28) & 65536u) != 0u && all(equal(decoded.rgb, vec3(0)));
-    decoded.a = format == 1u && value.a >= 0.5 ? float(ta1)
-                : transparent                  ? 0.0
-                                               : float(ta0);
+    decoded.a = ((format == 1u && value.a >= 0.5) ||
+                 (format == 3u && (uint(decoded.a) & 128u) != 0u))
+                    ? float(ta1)
+                : transparent ? 0.0
+                              : float(ta0);
   }
   return decoded;
 }

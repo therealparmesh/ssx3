@@ -46,7 +46,7 @@ used by this harness. WebGL2 is required.
 
 ## What the checks prove
 
-Each browser runs **708 controlled cases**, comparing all 4,096 color pixels and
+Each browser runs **724 controlled cases**, comparing all 4,096 color pixels and
 all 4,096 integer depth values with the software renderer. The matrix covers:
 
 - 81 blend equations and factors, alpha comparisons, and all four failure modes.
@@ -93,9 +93,49 @@ The uniform block contains eight `uvec4` values. Its word layout is:
 | 30–31 | Reserved |
 
 Integration still needs real GS command batching, texture and palette lifetimes,
-GPU-only framebuffer/depth transfers, physical VRAM alias coherence, presentation
-and resource/context-loss handling. The fixture does not implement points, lines,
+physical VRAM alias coherence, presentation and context-loss recovery. The
+GPU bridge below supplies transfers and owned-resource cleanup, but still needs
+those renderer-level integrations. The fixture does not implement points, lines,
 sprites, dithering, mip LOD or general framebuffer feedback. Region coordinates
 in these tests stay within the supplied texture storage. Full-game fidelity,
 sustained performance, audio, saves, controls and physical phone testing remain
 separate release requirements.
+
+## GPU bridge validation
+
+`runtime/src/gs/webgl/ordered_raster.js` is a synchronous GPU-only bridge around
+this kernel. It receives host-owned normalized RGBA8 color and D32F depth views,
+converts the affected region into integer attachments, processes the ordered
+batch, and resolves color/depth back to the host. It preserves external object
+ownership and exposes `destroy()` for its own resources. The host must restore
+its GL state, check errors at frame boundaries, and split batches at hazards.
+The bridge caches programs, uniforms, and framebuffer attachments and uploads
+only populated vertex/list rows and the affected tile rectangle.
+
+Run the bridge matrix with:
+
+```sh
+NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.cjs chromium bridge
+NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.cjs firefox bridge
+```
+
+This mode exercises **692 cases per browser**, comparing the actual resolved
+color and depth with the CPU renderer. It also checks both negative controls.
+The bridge accepts the supported 32/24/16-bit color views and a 24-bit-or-smaller
+depth domain; D32F cannot reconstruct all 32-bit integer depth values. The raw integer kernel
+matrix retains its 724-case coverage. Unsupported bridge cases are explicitly
+listed as skipped, rather than counted as passes. No tests are removed from the
+raw kernel matrix.
+
+The bridge never reads pixels back to the CPU. The fixture performs extra
+snapshots and readbacks to verify the resolved target, including maximum Z24.
+Its counters describe bridge operations only. Real renderer integration,
+resource/VRAM coherency and full-game performance remain unqualified.
+
+Bridge checks also exercise target-size cache eviction, restoration of a previous
+size, idempotent destruction, and preservation of the host's framebuffer,
+texture, and depth renderbuffer. The cache retains at most four target sizes.
+The expanded GS16 framebuffer source adapter distinguishes a normalized RGBA8
+view containing already-expanded 5-bit color and a raw alpha high bit from an
+RGB5_A1 texture. Reapplying RGB5_A1 normalization to the former would lose color
+precision and interpret its alpha incorrectly.

@@ -36,10 +36,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE int reference(const unsigned *config,
   s.colclamp = config[7];
   s.scanmsk = config[10];
   s.fogcol = config[21];
-  unsigned texturePsm = config[25] == 2         ? PSMT8
-                        : config[25] == 3       ? PSMT4
-                        : config[25] == 4       ? PSMT8H
-                        : (config[29] & 3) == 1 ? PSMCT16
+  unsigned texturePsm = config[25] == 2   ? PSMT8
+                        : config[25] == 3 ? PSMT4
+                        : config[25] == 4 ? PSMT8H
+                        : ((config[29] & 3) == 1 || (config[29] & 3) == 3)
+                            ? PSMCT16
                         : (config[29] & 3) == 2 ? PSMCT24
                                                 : PSMCT32;
   s.texa = (config[28] & 255u) | (uint64_t((config[28] >> 8) & 255u) << 32) |

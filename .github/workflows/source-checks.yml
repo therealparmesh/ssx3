@@ -66,6 +66,7 @@ jobs:
         run: |
           source tools/emsdk/emsdk_env.sh
           sh scripts/build_webgl_ordered.sh
+          node --check runtime/src/gs/webgl/ordered_raster.js
           node --check tests/webgl_ordered/verify.js
           node --check scripts/test_webgl_ordered.cjs
       - name: Compile and execute an unseen VU program on host and worker
