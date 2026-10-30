@@ -26,7 +26,13 @@ class Backend final : public CGSH_OpenGL {
   public:
     Backend() : CGSH_OpenGL(false) {}
     void close() { ReleaseImpl(); }
-    void sync() { SyncMemoryCache(); }
+    void sync() {
+        SyncMemoryCache();
+        // Internal clean-cache lookups need no driver query. Public exports
+        // still report a pending GL failure before returning caller data.
+        if (glGetError())
+            throw std::runtime_error("WebGL VRAM export GL error");
+    }
     void restore() { WriteBackMemoryCache(); }
     void show(const DisplaySource &src, unsigned w, unsigned h) {
         SetPresentationParams({w, h, CGSHandler::PRESENTATION_MODE_FILL});

@@ -6,6 +6,10 @@
 #include <cstring>
 #include <vector>
 #include <stdexcept>
+#ifdef PS2_GPU_WEBGL
+#include <GLES3/gl3.h>
+#include <algorithm>
+#endif
 
 namespace {
 using ps2::gs::gpu::DisplaySource;
@@ -105,9 +109,43 @@ int main() {
     bool rejected=false;try{gpu::write_state(invalid,savedScale,palette);}catch(const std::invalid_argument&){rejected=true;}
     check(rejected,"Malformed native snapshot metadata rejected");gpu::download(memory.data());
     check(std::memcmp(memory.data(),saved.data(),kMemorySize)==0,"Rejected snapshot leaves VRAM intact");
+
+    // Errors remain observable after removing per-alias glGetError queries.
+    // The negative control consumes real driver errors but lies about success.
+    EM_ASM({
+      if(new URLSearchParams(location.search).has('skipWebglErrors')){
+        const original=GLctx.getError.bind(GLctx);
+        GLctx.getError=function(){original();return 0;};
+      }
+    });
+    auto rejectGlFault=[&](auto action,const char* message){
+        EM_ASM({GLctx.enable(0xffffffff);});
+        bool caught=false;
+        try{action();}catch(const std::runtime_error&){caught=true;}
+        check(caught,message);
+        check(glGetError()==GL_NO_ERROR,"Boundary must consume the injected GL error");
+    };
+    vertices[0].r=vertices[1].r=0x33;gpu::draw(state,vertices,2);gpu::flush();
+    std::fill(memory.begin(),memory.end(),0xa5);const auto sentinel=memory;
+    rejectGlFault([&]{gpu::download(memory.data());},"Dirty WebGL export must reject a GL fault");
+    check(memory==sentinel,"Failed dirty export must leave caller memory intact");
+    gpu::download(memory.data());
+    for(unsigned y=12;y<32;y++)for(unsigned x=8;x<24;x++)check(valueAt(0,1,x,y)==0x9b41a933,"Dirty export retry retains GPU pixels");
+    const auto clean=memory;
+    rejectGlFault([&]{gpu::download(memory.data());},"Clean WebGL export must reject a GL fault");
+    check(memory==clean,"Failed clean export must leave caller memory intact");
+    saved={0x12345678};palette={0x87654321};savedScale=77;
+    rejectGlFault([&]{gpu::read_state(saved,savedScale,palette);},"WebGL snapshot must reject a GL fault");
+    check(saved==std::vector<std::uint32_t>{0x12345678} && palette==std::vector<std::uint32_t>{0x87654321} && savedScale==77,"Failed snapshot must leave caller state intact");
+    rejectGlFault([&]{gpu::display(source(64),output,width,height);},"WebGL display must reject a GL fault");
+    rejectGlFault([&]{gpu::display_async(source(64),output,width,height);},"Async WebGL display must reject a GL fault");
+    auto fallback=source(64);fallback.dbx=64;
+    rejectGlFault([&]{gpu::display(fallback,output,width,height);},"CPU display fallback must reject a GL fault");
+    check(gpu::display(source(64),output,width,height),"Display retries after consumed GL faults");
+    for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)check(output[y*width+x]==(valueAt(0,1,x,y)|0xff000000u),"Display retry retains exact pixels");
 #endif
 #ifdef PS2_GPU_WEBGL
-    EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true});});
+    EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true,glFaults:6});});
 #endif
     EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4});},received,pixels,hash,scale,offset);
     return 0;

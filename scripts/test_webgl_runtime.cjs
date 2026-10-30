@@ -40,8 +40,21 @@ let browser;
   assert.equal(result.native.synchronous, true);
   assert(result.native.nonzeroSourceOffset >= 8192);
   assert.deepEqual(result.integration, { snapshot: true, drawExport: true, localCopy: true,
-    partialRgb24: true, rejectedSnapshot: true, browserYield: true });
+    partialRgb24: true, rejectedSnapshot: true, browserYield: true, glFaults: 6 });
   await page.screenshot({ path: path.join(output, kind + '.png') });
-  console.log('PASS', kind, JSON.stringify(result.native), JSON.stringify(result.integration));
+  await page.close();
+  const control = await browser.newPage();
+  await control.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'gpu', { value: undefined, configurable: true }));
+  const controlUrl = new URL(url);
+  controlUrl.searchParams.set('skipWebglErrors', '1');
+  await control.goto(controlUrl.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await control.waitForFunction(() => window.qaProbe?.result || window.qaProbe?.errors.length, { timeout: 60000 });
+  const negative = await control.evaluate(() => ({ result: qaProbe.result, errors: qaProbe.errors, messages: qaProbe.messages }));
+  fs.writeFileSync(path.join(output, kind + '-skip-errors.json'), JSON.stringify({ expectedFailure: true, ...negative }, null, 2));
+  assert.notEqual(negative.result?.passed, true);
+  assert(negative.messages.some(text => text.includes('PROBE_FAIL: Dirty WebGL export must reject a GL fault')),
+    'Suppressing error queries must fail the dirty-export control');
+  await control.close();
+  console.log('PASS', kind, JSON.stringify(result.native), JSON.stringify(result.integration), 'and suppressed-error negative control');
 })().catch(error => { console.error(error); process.exitCode = 1; })
   .finally(async () => { if (browser) await browser.close(); });

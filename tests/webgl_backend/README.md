@@ -73,6 +73,11 @@ do not establish full-game speed. The runtime validates again when the source
 resource owner or immutable copy storage changes, copies mapped source bounds and
 scissors destination writes; reset clears the validation cache.
 
+The separate runtime probe injects actual GL faults at dirty/clean export,
+snapshot, synchronous/asynchronous display and CPU-display fallback. A control
+consumes errors while falsely reporting success. Clean exports must check errors
+even when no dirty surface requires a readback.
+
 Native depth caches initialize from RAM, including untouched pixels. Before a
 CPU upload, physical-page overlap determines whether pending GPU writes must
 be exported. Disjoint uploads do not cause readback. Copy/alias operations also
@@ -85,7 +90,9 @@ cached GPU resources without rendering old pending work into restored memory.
 The save hook, `SyncMemoryCache` (GPU to CPU RAM), tracks conservative dirty
 surface rectangles and stages disjoint color/depth views into a temporary RAM
 image. Physical ownership is checked before readback; RAM and dirty metadata
-are committed only after all reads succeed. An empty export performs no reads.
+are committed only after all reads succeed. An empty helper export performs no
+pixel readbacks. The runtime export API checks pending GL errors before returning
+RAM or snapshots, including a clean-cache result.
 Overlapping cached views, a view wrapping onto itself, lossy floating-point Z32,
 scaled storage and multisampling are rejected. General physical alias
 reconciliation remains unfinished. The restore/export fixtures are not an
