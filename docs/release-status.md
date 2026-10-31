@@ -264,6 +264,69 @@ this motivates investigating the separate 80 ms producer high-water limit.
 The atomic fix does not clear the clock qualification. No tolerance was relaxed
 and the candidate has not been deployed; private version69 remains unchanged.
 
+## Target-aligned audio pacing candidate
+
+The next candidate paces the producer against its configured reserve: 40 ms for
+copy presentation and 64 ms for the direct surface. Previously its independent
+80 ms ceiling allowed the queue to start far above the converter's target and
+drain during play. Pause acknowledgement and the post-resume budget recheck
+remain in the pacing loop. Converter, limiter, renderer and source-clock verifier
+are unchanged. This is a new candidate including the later pause/counter fixes;
+the earlier target-aligned experiment rejected by the raw output-count metric
+is not reclassified.
+
+All 19 native checks pass. The pacing regression now tests both reserve
+boundaries and pause/resume behavior for both paths. Negative controls reject
+the fixed 80 ms ceiling, unacknowledged pause escape and a skipped resume budget.
+Only native Wasm and its compressed copy changed from the counter candidate;
+its native SHA-256 is
+`39ecdb8495c63ecfb27d087bb1632f11707fc596a7ffdc258c8e82ea60d5aeb0`.
+
+A fresh visible Chromium profile ran the same 300-second Gravitude procedure
+at 1280×800, DPR 1 and calibrated 120 Hz with the documented Linux WebGPU flags.
+The 300.458-second window passed all existing gates: 60.002594 fresh submissions/s,
+a 20.065 ms maximum actual interval, no image loss/replacements or pool underflow,
+no missing audio, clipped/full-scale PCM or application errors/warnings. The
+entire source-clock interval is [+6.22, +11.11] ms. Queue snapshots were 31.33
+and 39.33 ms; the raw output-count difference was +91.33 ms and remains diagnostic
+only. No limits were changed and no capture/build/profile ran inside the window.
+
+The post-window screen showed a new top-five time of 03:27 for Moby. Continue and
+Save Records were not selected; qualifier ranking, advancement and record
+persistence are not claimed. The measurement includes racing and the record
+screen tail.
+
+The completed fresh Firefox window lasted 300.653 seconds at 59.996680 fresh
+submissions/s. Its source-clock interval, [-6.46, -1.54] ms, passes. It had no
+missing audio, clipped/full-scale PCM, image overwrites, producer replacements,
+pool underflow or application errors/warnings. One actual image interval reached
+33.30 ms, with a 33.32 ms fresh-RAF gap, at approximately 105.6 seconds into the
+window. This fails the unchanged 25 ms gate, so the candidate remains held.
+The corresponding upload took 0.72 ms, canvas acquisition 0.02 ms and submission
+0.02 ms; these observations do not establish the delay's cause. The old private
+RAF context log had filled on normal alternate 120 Hz refreshes in the first
+3.3 seconds, leaving no contemporaneous queue/clock history for that event.
+The post-window qualifier screen confirmed Moby sixth at 04:18, without
+advancement. Both browsers subsequently passed 27 native keyboard/controller
+checkpoints each, with no application errors/warnings.
+
+An earlier Firefox attempt aborted after the local HTTP test server exited with
+SIGTERM (143), exhausting disc-read retries. It supplies no completed timing
+result and remains separately retained. A fresh profile ran the completed window
+above with a retained-terminal server whose liveness was checked throughout.
+A subsequent diagnostic with bounded clock/queue/upload/message history had a
+24.62 ms maximum actual submission interval but retained a 25.26 ms fresh-RAF
+interval, so it also failed the unchanged image gate. Its source-clock interval
+[+14.75, +19.92] ms passes. There were no image overwrites/replacements, audio
+shortages, clipping or application errors/warnings. Its 108,239 history records
+wrapped in fixed storage; the wall-time history trigger did not capture the
+RAF-only near-limit event. The diagnostic does not clear the preceding failure. The next private observer
+keeps the worst 16 contexts for actual and RAF gaps above a diagnostic-only
+20 ms trigger; the release gates remain 25 ms and are byte-for-byte unchanged.
+Controls cover the observed actual 24.62/RAF 25.26 ms split and a later 33.30 ms
+event after more than the history capacity of normal entries.
+The candidate has not been deployed or given full release qualification.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified
