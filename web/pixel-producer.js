@@ -4,6 +4,9 @@
   'use strict';
   const VERSION = 1, FREE = 0, READY = 1, READING = 2, WRITING = 3, COUNT = 3;
   function create(options) {
+    const primeFrames = options.primeFrames === undefined ? 2 : options.primeFrames;
+    if (!Number.isInteger(primeFrames) || primeFrames < 2 || primeFrames > COUNT)
+      throw new Error('Invalid presenter priming depth.');
     const worker = options.port || new (options.Worker || Worker)(options.url, { name: 'ssx3-presenter' });
     const state = new Int32Array(new SharedArrayBuffer(COUNT * 2 * 4));
     const slots = Array.from({ length: COUNT }, (_, id) => ({ id,
@@ -50,7 +53,8 @@
     worker.addEventListener('messageerror', onMessageError);
     worker.start?.();
     worker.postMessage({ type: 'init', version: VERSION, canvas: options.canvas,
-      buffers: slots.map(slot => slot.bytes.buffer), slotState: state.buffer, lowPower: !!options.lowPower }, [options.canvas]);
+      buffers: slots.map(slot => slot.bytes.buffer), slotState: state.buffer,
+      primeFrames, lowPower: !!options.lowPower }, [options.canvas]);
     return {
       ready, frames, free,
       clock: { refreshInterval: () => refresh },

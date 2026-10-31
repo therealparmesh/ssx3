@@ -90,6 +90,7 @@ self.addEventListener('message', async function initialize(event) {
       importScripts('./pixel-producer.js', './readback-progress.js');
       readbackProgress = ps2ReadbackProgress.install(self, failure);
       producer = ps2PixelProducer.create({ canvas: config.canvas, port: config.presenterPort,
+        primeFrames: 3,
         url: new URL('pixel-presenter-worker.js', config.runtimeUrl), lowPower: config.lowPower,
         onFailure: failure, onPresent: () => Module.onPresent(),
         onCapacity: () => { const wake = Module.surfaceYield; Module.surfaceYield = undefined; if (wake) wake(); } });

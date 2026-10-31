@@ -12,20 +12,23 @@ parser.add_argument('--cxx', default='c++')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 source = (root / 'host/web.cpp').read_text()
-fixed = '''        while (g_paused.load() || audio_queued_ms() > 80.0) {
+fixed = '''        while (g_paused.load() || audio_queued_ms() > g_audio_target_frames / 48.0) {
             if (g_paused.load()) wait_while_paused();
             else usleep(1000);
         }'''
-old = '        while (audio_queued_ms() > 80.0 && !g_paused.load()) usleep(1000);'
+old = '        while (audio_queued_ms() > g_audio_target_frames / 48.0 && !g_paused.load()) usleep(1000);'
 assert source.count(fixed) == 1
 
 def fragment(text):
     wait = text[text.index('void wait_while_paused() {'):text.index('\nvoid configure_audio_reserve')]
     queue = text[text.index('double audio_queued_ms() {'):text.index('\ndouble g_next_frame')]
     pace = text[text.index('void pace() {'):text.index('\nvoid on_vblank')]
-    return (wait + '\n' + queue + '\n' + pace).replace('usleep(', 'audio_test_sleep(')
+    reserve = text[text.index('void configure_audio_reserve'):text.index('\nvoid push_audio')]
+    return (wait + '\n' + reserve + '\n' + queue + '\n' + pace).replace('usleep(', 'audio_test_sleep(')
 
 variants = [('current', source, None),
+            ('fixed-80ms-ceiling', source.replace(fixed, fixed.replace('g_audio_target_frames / 48.0', '80.0')),
+             'Configured audio reserve bypassed'),
             ('old-pause-escape', source.replace(fixed, old), 'Pause escaped without acknowledgement'),
             ('missing-budget-recheck', source.replace(fixed, old + '\n        if (g_paused.load()) wait_while_paused();'),
              'Resume bypassed audio budget')]
@@ -45,4 +48,4 @@ with tempfile.TemporaryDirectory(prefix='ps2-audio-pacing-') as temp:
         else:
             assert result.returncode == 0, result.stderr
             print(result.stdout.strip())
-print('Native pacing negative controls: pause escape and skipped resume budget rejected.')
+print('Native pacing negative controls: fixed80ms ceiling, pause escape and skipped resume budget rejected.')

@@ -4,7 +4,7 @@
 importScripts('./frame-clock.js');
 (function(scope) {
   const VERSION = 1, FREE = 0, READY = 1, READING = 2, COUNT = 3;
-  let initialized = false, running = false, stopped = false, paused = false, failed = false;
+  let initialized = false, running = false, stopped = false, paused = false, failed = false, primeFrames = 2;
   let transport = scope;
   const send = message => transport.postMessage(message);
   let device, context, pipeline, sampler, texture, bundle, canvas, state, buffers, clock;
@@ -73,6 +73,9 @@ importScripts('./frame-clock.js');
         if (message.version !== VERSION || message.buffers?.length !== COUNT ||
             !(message.slotState instanceof SharedArrayBuffer) || message.slotState.byteLength !== COUNT * 8)
           throw new Error('Invalid presenter initialization.');
+        primeFrames = message.primeFrames === undefined ? 2 : message.primeFrames;
+        if (!Number.isInteger(primeFrames) || primeFrames < 2 || primeFrames > COUNT)
+          throw new Error('Invalid presenter priming depth.');
         canvas = message.canvas; state = new Int32Array(message.slotState);
         buffers = message.buffers.map(buffer => {
           if (!(buffer instanceof SharedArrayBuffer)) throw new Error('Invalid pixel storage.');
@@ -124,6 +127,7 @@ importScripts('./frame-clock.js');
         frames.push(message); schedulePreparation();
       } else if (message?.type === 'pause') {
         paused = !!message.value; clock?.reset();
+        if (paused && primeFrames === COUNT) primed = false;
         if (paused) cancelPreparation(); else schedulePreparation();
       } else if (message?.type === 'resize') {
         const { width, height } = message;
@@ -143,7 +147,9 @@ importScripts('./frame-clock.js');
     try {
       if (paused) clock.reset();
       else {
-        if (frames.length >= 2) primed = true;
+        // A prepared upload still owns a queued image. Full-depth startup and
+        // resume retain enough video to cover a brief producer interruption.
+        if (pending.length >= primeFrames) primed = true;
         if (primed && clock.due(stamp)) {
           const uploaded = prepared !== null;
           const frame = prepared || acquireFrame(); prepared = null;

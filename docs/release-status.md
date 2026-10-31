@@ -477,9 +477,74 @@ were 15.00–15.10 ms (candidate) and 15.00–15.08 ms (baseline); both source-c
 intervals passed. These sampled queue counts establish additional tracked lead
 at the injected instants, not a coherent consumer queue snapshot or causal
 resolution of the earlier GC failure. Both passing means this fixture does not
-discriminate that failure. The source changes remain held and undeployed; a
-producer-gap-triggered native capture is still needed to inspect a natural
+discriminate that failure. At that checkpoint the source changes remained held
+and undeployed; a producer-gap-triggered native capture was still needed to inspect a natural
 publication interruption even when the presenter remains smooth.
+
+## Selected pacing and priming correction
+
+A new private collector saves producer context immediately on a publication gap
+above 30 ms and stops native profiling even if presentation stays smooth. Its
+real Firefox synthetic control retained 330 producer records and a native marker
+within 1.56 ms; inactive/reset and exact-30-ms boundary checks pass. The control
+is excluded from gameplay/performance qualification.
+
+With the three-image candidate, ordinary Gravitude gameplay then produced a
+33.98 ms publication gap. Its native marker aligned within 0.82 ms, with no
+skipped history rows. The same runtime owner recorded 13.71 ms of GC/CC inside
+that gap (5.93 ms shrinking major GC, 6.67 ms CC, 1.02 ms major GC, 0.09 ms CC).
+Producer-tracked depth was three at the surrounding publications. Across the
+4.015-second diagnostic window, actual image intervals stayed within 17.64 ms
+and fresh-RAF intervals within 17.30 ms, with no image/audio loss or application
+errors/warnings. This supports queue protection against the captured producer
+interruption; it does not promise protection against arbitrary stalls or prove
+the cause of every earlier failure. The profile is diagnostic-only.
+
+The selected source pairs full three-image startup/resume priming with the
+previously held producer pacing correction. The pacing ceiling now matches the
+converter's existing reserve (40 ms copy, 64 ms direct surface), retaining native
+pause acknowledgement and the post-resume budget recheck. Fixed-80-ms, escaped-
+pause and skipped-budget negative controls are rejected. Generic pixel-producer
+clients retain the two-image default; the game runtime requests three and counts
+a prepared upload toward that depth. No GC preferences or release gates changed.
+
+Both unprofiled five-minute Gravitude windows for this exact staged candidate
+pass, at 1280×800 CSS pixels/DPR1 and calibrated 120 Hz:
+
+| Browser | Submissions/s | Maximum actual interval | Maximum fresh-RAF interval | Source-clock bounds |
+| --- | ---: | ---: | ---: | --- |
+| Firefox | 60.000004 | 20.68 ms | 17.50 ms | [-0.52, +4.52] ms |
+| Chromium | 60.002447 | 20.62 ms | 16.67 ms | [-7.10, -2.23] ms |
+
+Both have no image overwrites/replacements, pool underflow, missing audio,
+clipping or application errors/warnings. The native Wasm is SHA-256
+`39ecdb8495c63ecfb27d087bb1632f11707fc596a7ffdc258c8e82ea60d5aeb0`.
+The preceding native build-reproduction evidence applies; the additional changes
+are the three worker JavaScript helpers and their tests.
+
+Both browsers also pass all 27 native-worker keyboard/gamepad checkpoints,
+including reconnects, temporary API denial, real focus/visibility loss, neutral
+paused input and held-input restoration before unpause. Separate loaded-career
+media checks measure approximately ten seconds of actual stereo PCM without
+shortages/full-scale samples, prove that pause freezes both simulation and the
+audio clock, and recover through explicit resume and simulated audio suspension.
+Both finish acknowledged-paused with no application errors/warnings.
+
+Media-probe setup failures are retained separately: an unguarded observer met an
+unavailable AudioWorkletNode context; a no-card startup produced valid silence;
+and an unhandled import confirmation prevented reload. The corrected probe uses
+the established API guard, accepts its isolated QA import confirmation and
+navigates the actual imported career before requiring audible stereo samples.
+These excluded attempts are not reclassified as player defects or passing audio
+qualification. No guest state or audio/scoring rules were edited.
+
+All 19 native suites, the 28 browser-JavaScript workflow commands, and build/play
+workflow checks pass locally. The local source-clock test used its supported
+explicit native-fixture path; an excluded runner attempt requested an unbuilt
+artifact belonging to a separate Wasm CI job. Complete GitHub CI remains required.
+The correction is selected in source, but the hosted site remains version69
+pending CI and packaging/publication checks. Full game progression, every
+physical controller/output and universal zero-drop behavior remain unqualified.
 
 ## Current browser gamepad verification
 
