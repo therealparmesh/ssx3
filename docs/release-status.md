@@ -70,6 +70,32 @@ input. There were no guest-memory/card edits, altered game rules or native
 observer wrappers. It adds purchase and subsequent save-transfer coverage;
 it is not a new timing qualification or proof of later-peak progression.
 
+## Later-peak loading and interaction checks
+
+The unchanged WebGPU worker entered Peak 3's The Throne and Peak 2's Ruthless
+backcountry in headed Chromium 156 and Firefox 158.0.1 on Linux at 1280×800,
+using the documented WebGPU enablement settings. The checks exercised transport,
+loading, cinematic skipping, controller movement and acknowledged host pause.
+Ordinary terrain collisions and wipeouts were retained; Firefox also recovered
+from a Ruthless wipeout through normal Square-button presses and resumed riding.
+Both browsers closed with no application errors or warnings.
+
+These checks used a separate QA card made from the public
+[Apollo SSX 3 save](https://bucanero.github.io/apollo-saves/PS2/SLUS20772/).
+The source archive is pinned to Apollo commit
+`6715bd86c736a7808e9101eb4199aa79e59fbe57`. Standard mymc++ 3.2.0 PSV import
+preserved all three save-file payloads byte-for-byte in a new card, which the
+player imported and the game loaded through their ordinary UIs. The source
+save's original earnings method is unverified. This is later-course access
+coverage, not evidence of earning its unlocks. No save or game assets were
+added to this repository, and the separately earned Zoe career was unchanged.
+
+After entering The Throne, Chromium advanced another 900 native fields and
+Firefox another 300; after entering Ruthless, both advanced another 600 before
+inspection. These are short functional checks, including falls and slow movement,
+not full-course completions or new timing qualifications. Normal later-peak
+unlocks and complete progression remain unverified.
+
 ## Opt-in live statistics and current worker qualification
 
 The version 67 split-screen Firefox failure remains recorded below. A new passive DOM/native profile captured seven in-window snapshot waits, each starting 1.30–2.20 ms after an FPS-label mutation. No other DOM changes, JavaScript canvas readbacks or overlapping GC/CC pause were recorded. The delayed 25.10 ms submission interval included an 11.84 ms snapshot wait. A private paint-containment prototype still produced a 25.38 ms interval and a 13.31 ms snapshot wait, so it was rejected.
@@ -128,7 +154,7 @@ Both passed the unchanged 25 ms actual-submission/fresh-image and 50 ms audio/em
 Version 67 deployed successfully with the same owner-only audience. All three actual served application documents matched the packaged desktop/primary/compatibility shells exactly, allowing only the two reviewed hosting script templates. All compiled native/JavaScript/helper assets remain byte-identical. The independent hosted Firefox race passed 300.904 seconds at 59.999983 fresh submissions/s, maximum interval 23.380 ms, with zero replacements, overwritten images, queue underflows, missing audio, clipping or application errors/warnings. Its audio/emulation-clock difference was 10 ms. The actual results screen showed Zoe fifth at 03:45. The hosted Chromium race also passed 300.645 seconds at 60.002550 submissions/s, maximum interval 21.860 ms, with zero image/audio loss, replacements, pool underflows, clipping or application errors/warnings. Its audio/emulation-clock difference was 16.000 ms; the rendered results showed Zoe sixth at 03:53. Firefox recorded 15 known hosting-cookie warnings separately; Chromium recorded 0. Both hosted checks used the actual served application document without replacement, reached normal rendered race results, acknowledged native pause, closed cleanly and restored the original display mode. These are bounded desktop qualifications; the remaining physical-device and complete-game sign-offs stay open.
 
 
-## Version67 current-worker two-player racing
+## Historical version67 worker two-player racing
 
 The actual version 67 desktop worker was cold-started in separate headed Chromium and Firefox sessions on Linux at 120 Hz, 1280×800 and DPR 1. The served application document matched the qualified shell exactly; immutable assets and disc were unchanged. Normal Multi Play menus used the keyboard to select Zoe as Player 1 and a second simulated standard gamepad to select Moby as Player 2. All Bragging Rights options remained Off/No. Separate views of both riders were verified before each accepted measurement. No native fixture, guest/card edit, unlock code or altered game rule was used.
 
@@ -143,7 +169,7 @@ Chromium's actual Multi Play Results screen showed Player 2 fourth at 03:42 and 
 
 A separate bounded Firefox diagnostic captured a 26.98 ms submission interval after 20.277 seconds of split-screen play. An overlapping native `PCanvasManager::Msg_GetSnapshot` wait lasted 14.745 ms; three images were queued before the missed/late callback, the clock remained near 8.33 ms and the upload took 0.98 ms. No overlapping GC/CC pause marker or JavaScript canvas readback was recorded. Six snapshot waits occupied 56.10 ms in the 20.595-second profile, with a 15.31 ms maximum. This narrows the captured delay to a native snapshot wait; it does not establish the caller, a fix, or the cause of every unprofiled delay. Profiling changes scheduling and is separate from normal qualification. The diagnostic paused and closed cleanly, restored the display, and exited with the expected timing-gate failure.
 
-Current-worker split-screen controls and Chromium timing are verified within this environment; Firefox's unchanged 25 ms submission/fresh-image gate remains a production issue. The earlier single-player qualifications do not cover this failure. No runtime or hosting change was made during these checks.
+These version67 checks verified split-screen controls and Chromium timing within this environment; Firefox's 25 ms submission/fresh-image gate remained a production issue at that checkpoint. The earlier single-player qualifications did not cover that failure. The version68 opt-in statistics fix and subsequent five-minute two-player qualifications above supersede this status. No runtime or hosting change was made during the version67 checks themselves.
 
 ## Current worker first-use career
 
@@ -266,7 +292,10 @@ The peak-controlled primary passed all 14 native interaction checkpoints and a 6
 
 ## Remaining sign-off
 
-- Real iPhone and Android browser compatibility, sustained performance, memory pressure, thermal behavior and touch play. Agent device access is currently unavailable; desktop viewport emulation is not device qualification.
+Physical-phone testing is outside the current release scope at the owner's
+request. Phone compatibility, sustained performance, memory pressure, thermal
+behavior and touch play are unqualified; they are not a pending release gate.
+
 - Physical USB/Bluetooth controller mappings, disconnect/reconnect behavior and latency, plus physical speaker/headphone/Bluetooth audio and A/V synchronization.
 - Full normal progression, unlocks, medals and broader courses/modes. The recorded race windows and earlier save/recovery checks do not establish complete game coverage.
 - Physical display delivery and historical rare timing events. CPU submissions, completion notifications and screenshots alone do not prove physical scanout timing.
