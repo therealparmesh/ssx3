@@ -912,7 +912,15 @@ Rendered render_pending(const std::function<void(const DisplayRegs &)> &on_prese
         case queue::kGif:
             gif::render(static_cast<int>(h.arg0), payload, h.arg1);
 #if defined(PS2_GPU) && defined(__EMSCRIPTEN__)
-            if (gpu_on()) submitted = gpu::flush_pending();
+            if (gpu_on()) {
+#ifdef PS2_GPU_WEBGL
+                // WebGL submits on this owner synchronously. A completed
+                // packet does not require a browser task boundary.
+                gpu::flush_pending();
+#else
+                submitted = gpu::flush_pending();
+#endif
+            }
 #endif
             break;
         case queue::kGifReset: gif::render_reset(); break;
@@ -943,6 +951,10 @@ Rendered render_pending(const std::function<void(const DisplayRegs &)> &on_prese
         }
         queue::render().pop(h);
         if (submitted) return Rendered::busy;
+#if defined(PS2_GPU_WEBGL) && defined(__EMSCRIPTEN__)
+        // Bound synchronous work after every packet, including short queues.
+        if (!presented && elapsed_ms() >= budget_ms) return Rendered::busy;
+#endif
         if (presented) {
             g_presented.fetch_add(1);
             queue::notify(g_presented);

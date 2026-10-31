@@ -2,6 +2,43 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Bounded synchronous render slices
+
+WebGL now drains each synchronous GIF packet without forcing a browser yield
+for every packet. The renderer checks the six-millisecond slice budget after
+each packet, including queues shorter than eight packets. The browser host
+also yields after presentation, so frames that fit within a slice still allow
+input and browser presentation to run. WebGPU keeps its completion-driven
+yields and presentation behavior.
+
+The actual runtime API fixture exercises two TEXFLUSH GIF packets in the real
+renderer queue. It checks coalescing before the deadline, yielding after one
+packet with an expired budget, draining the remainder, and preserving the
+presentation boundary. The preceding scheduler fails the coalescing oracle;
+a control removing the per-packet deadline check fails the short-queue budget
+oracle. Both normal runtime fixtures pass in Chromium and Firefox, retaining
+the exact pixel, mip, snapshot, register-order and injected-error checks.
+The final game also passes all 27 keyboard/simulated standard-controller
+checks in both browsers, including analog pressure, two-controller reorder,
+disconnect/reconnect, API denial/recovery, actual hidden-tab suspension and
+held-input restoration before native resume. These do not measure physical
+controller latency.
+
+Two fresh normal-menu Chromium runs at 1280×800/DPR 1 with WebGPU withheld,
+no GPU overrides and no in-window build or profiler delivered 1,108 images
+in 20.000 seconds (55.40/s) and 1,046 in 20.024 seconds (52.24/s).
+Maximum presentation intervals were 105.93 and 33.68 ms; both exhausted the
+audio queue. A 16 ms browser timer kept progressing, with maximum observed
+gaps of 235.96 and 107.50 ms. Slice budgeting bounds work between packets;
+it does not preempt an individual packet or a synchronous GPU operation.
+A fresh final-build Chromium repeat delivered 962 images in 20.025 seconds
+(48.04/s), with a 110.84 ms maximum presentation interval, audio starvation
+and a 273.03 ms maximum timer gap. The private and final game Wasm differ,
+so the final repeat is retained separately; final-build controller checks
+use this same Wasm. These partial-race windows improve on the preceding
+canonical 19.25/s result but still fail release requirements. They are not deterministic replay,
+completed-race, source-clock audio or hardware-output qualification.
+
 ## Direct rendering-owner register submission
 
 The WebGL adapter now applies vertex attribute latches directly and invokes

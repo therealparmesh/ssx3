@@ -274,8 +274,8 @@ void flush() {
 bool flush_pending() {
     drain();
     // WebGL calls do not suspend on a WebGPU completion promise. Report work
-    // so the host takes its bounded browser-yield path between GIF packets,
-    // including when a complete frame fits inside one render slice.
+    // for API callers; the renderer coalesces packets within its time budget
+    // and the browser host also yields at presentation boundaries.
     const bool submitted = workSinceYield;
     workSinceYield = false;
     return submitted;

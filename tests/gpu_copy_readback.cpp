@@ -97,8 +97,38 @@ void check_fade_and_modulation(std::uint32_t scale) {
 #ifdef PS2_GPU_WEBGL
 #include <array>
 #include "gs/raster.hpp"
+#include "gs/queue.hpp"
 #include "gpu_mip_fixture.inc"
 namespace {
+// Exercise the actual renderer queue, GIF parser and synchronous GPU adapter.
+void verify_render_slices() {
+    using namespace ps2::gs;
+    auto &ring = queue::render();
+    ring.start(4096);
+    // One packed A+D TEXFLUSH write per packet produces real backend work.
+    const std::uint64_t packet[] = {1ull | (1ull << 15) | (1ull << 60), 0xE, 0, 0x3F};
+    const auto post = [&] { ring.post(queue::kGif, 3, 2, packet, sizeof packet); };
+    queue::Header header{};
+    const std::uint8_t *payload = nullptr;
+    gpu::flush_pending();
+    post(); post();
+    check(render_pending({}, 1000000) == ps2::Rendered::idle && !ring.peek(header, payload),
+          "Synchronous WebGL packets share an unexpired render slice");
+    post(); post();
+    check(render_pending({}, -1) == ps2::Rendered::busy && ring.peek(header, payload),
+          "Expired WebGL slice yields after one packet in a short queue");
+    check(render_pending({}, 1000000) == ps2::Rendered::idle && !ring.peek(header, payload),
+          "Remaining packet survives a budget yield");
+    const DisplayRegs regs{};
+    ring.post(queue::kPresent, 0, 0, &regs, sizeof regs);
+    post();
+    unsigned presents = 0;
+    check(render_pending([&](const DisplayRegs &) { ++presents; }, 1000000) == ps2::Rendered::presented &&
+          presents == 1 && ring.peek(header, payload), "Presentation remains a separate host boundary");
+    check(render_pending({}, 1000000) == ps2::Rendered::idle && !ring.peek(header, payload),
+          "Packet after presentation remains ordered");
+    EM_ASM({window.qaProbe.renderSlices=({coalescedPackets:2,budgetYield:true,presentBoundary:true});});
+}
 void verify_register_submission() {
     using namespace ps2::gs;
     std::vector<std::uint32_t> ram(kMemorySize / 4), clut(512);
@@ -267,6 +297,7 @@ int main() {
 #ifdef PS2_GPU_WEBGL
     verify_runtime_mips();
     verify_register_submission();
+    verify_render_slices();
     EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true,glFaults:6});});
 #endif
     check_fade_and_modulation(scale);

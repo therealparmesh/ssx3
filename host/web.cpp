@@ -737,10 +737,15 @@ int main(int argc, char **argv) {
         bool displayed = false;
         const ps2::Rendered rendered = ps2::render_pending(surface, copy ? blit : none, wait_shown, 6.0, &displayed);
         if (rendered == ps2::Rendered::presented) ps2web_frame_done(displayed);
-        // Presentation already schedules a refresh wait before the next
-        // image. Prepare its queued work immediately; another posted task
-        // here can be delayed by input and waste that frame's render time.
-        if (rendered == ps2::Rendered::busy) {
+        // WebGPU presentation already schedules the refresh wait. Prepare
+        // its next work immediately; another task can waste that render time.
+        // Synchronous WebGL also needs a boundary for sub-budget frames.
+        if (rendered == ps2::Rendered::busy
+#ifdef PS2_GPU_WEBGL
+            // Even sub-budget frames must let input and presentation run.
+            || rendered == ps2::Rendered::presented
+#endif
+        ) {
             ps2::browser_yield();
         } else if (rendered == ps2::Rendered::idle) {
             const double start = emscripten_get_now();
