@@ -397,6 +397,20 @@ close, retained native timing markers and 0.24 ms native/private marker alignmen
 That abbreviated synthetic run supplies no gameplay, clock or release
 qualification. No original failure is reclassified and hosting is unchanged.
 
+The first ordinary gameplay run with that collector reached its 300.652-second
+time limit without a late-frame signal. At a calibrated 120.014 Hz, local headed
+Firefox produced 60.000047 actual submissions/s, a 20.18 ms maximum actual
+interval and a 17.50 ms maximum fresh-RAF interval. The full source-clock bound
+[-1.18, +3.85] ms passed; there were no missing audio samples, image
+overwrites/replacements, pool underflows, clipping or application errors/warnings.
+The bounded history wrapped 108,235 records and retained one 20.18 ms event at
+approximately 90.2 seconds. Its native marker and samples were evicted by the
+time-limit shutdown, so this capture provides no causal native attribution.
+Firefox closed automatically and the 60 Hz desktop mode was restored. This is
+an instrumented diagnostic, not a release qualification: the earlier 33.30 ms
+and 25.20 ms failures remain unresolved, the extra-field experiment remains
+rejected, and the aligned 40 ms candidate remains held without deployment.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified
