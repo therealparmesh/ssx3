@@ -25,7 +25,19 @@ the private direct-submission implementation presented 486 over 20.035 seconds
 (24.26/s). Maximum intervals were 109.07 and 105.41 ms; both exhausted audio.
 These are partial-course, fixed-duration windows with naturally varying race
 scenes, not deterministic replay, completed races or release qualification.
-Canonical-build repetition and sustained timing qualification remain open.
+The canonical repeat presented 387 images over 20.100 seconds (19.25/s), with
+a 107.37 ms maximum interval and audio starvation. The initial 33% throughput
+gain therefore has not reproduced reliably and is not an accepted speed claim.
+The private and canonical backend/kernel object files are byte-identical, but
+their final Wasm bundles differ; link placement and normal-run variability
+remain unresolved. The direct path is selected as a verified reduction in
+register-buffer work, not as near-60 gameplay qualification. Source commit
+`a2627929c8e58c082f0767500c564cb25a947112` passed source CI.
+Its freshly linked canonical game also passes all 27 native keyboard/controller
+checks in both Chromium and Firefox, with WebGPU withheld and no GPU enablement
+overrides. This includes disconnect/reconnect, reordered two-player slots,
+analog pressure, actual tab hiding and held-input restoration before native
+resume. Both controller sessions closed with no application errors/warnings.
 
 Other trials remain unselected. An alpha-test KEEP hardware route passed
 1,286 color/depth cases in both browsers but was unused in the sampled race
