@@ -36,8 +36,13 @@ A fresh final-build Chromium repeat delivered 962 images in 20.025 seconds
 and a 273.03 ms maximum timer gap. The private and final game Wasm differ,
 so the final repeat is retained separately; final-build controller checks
 use this same Wasm. These partial-race windows improve on the preceding
-canonical 19.25/s result but still fail release requirements. They are not deterministic replay,
-completed-race, source-clock audio or hardware-output qualification.
+canonical 19.25/s result but still fail release requirements. The final Firefox
+race-entry window delivered 601 images in 20.035 seconds (30.00/s), with a
+75.26 ms maximum presentation interval and audio starvation. Its browser
+timer progressed only 106 times, with a maximum 415 ms gap; Firefox
+responsiveness remains a performance issue despite passing the functional
+controller checks. These are not deterministic replay, completed-race,
+source-clock audio or hardware-output qualifications.
 
 ## Direct rendering-owner register submission
 
