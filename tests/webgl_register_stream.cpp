@@ -50,9 +50,8 @@ int main() {
            "GS contexts were conflated");
     expect(has(6, 0x12345678), "Setup replay must not reload CLUT");
     expect(has(1, 0x3f00000078563412ull), "RGBA/Q bit packing changed");
-    expect(has(2, 0x41680000c0500000ull), "ST bit packing changed");
-    expect(has(3, 0x1abc1234) && has(0x0A, 0xa500000000000000ull),
-           "UV/fog bit packing changed");
+    expect(has(3, 0x1abc1234) && count(2) == 0 && count(0x0A) == 0,
+           "Fixed-coordinate draw forwarded unused ST/fog attributes");
     expect(count(5) == 3, "Repeated XYZ kicks were dropped");
     expect(has(5, 0x00abcdeffffffffeull), "XYZ bit packing changed");
     expect(std::memcmp(before.data(), &s, sizeof(s)) == 0,
@@ -123,6 +122,58 @@ int main() {
     }
     expect(rejected && events.empty(),
            "Malformed draw partially emitted commands");
+    {
+      // Change every attribute while toggling its consumer. Re-enabling ST,
+      // UV or fog must restore the current value before every XYZ action.
+      webgl::RegisterStream replay;
+      State state{};
+      std::array<std::uint64_t, 128> regs{};
+      unsigned verticesChecked = 0;
+      for (unsigned step = 0; step < 16; ++step) {
+        const unsigned flags = ((step & 1) ? 0x10 : 0) |
+                               ((step & 2) ? 0x100 : 0) |
+                               ((step & 4) ? 0x20 : 0);
+        state.prmodecont = step < 8;
+        state.prim = 3 | (state.prmodecont ? flags : (flags ^ 0x130));
+        state.prmode = flags;
+        std::array<Vertex, 3> changing{};
+        for (unsigned i = 0; i < changing.size(); ++i) {
+          changing[i] = v;
+          changing[i].s = -float(step * 3 + i) - 3.25f;
+          changing[i].t = float(step * 3 + i) + 14.5f;
+          changing[i].u = step * 48 + i * 16;
+          changing[i].v = step * 64 + i * 16;
+          changing[i].f = step * 3 + i;
+        }
+        unsigned st = 0, uv = 0, fog = 0, kicks = 0;
+        auto hardware = [&](std::uint8_t id, std::uint64_t value) {
+          regs[id] = value;
+          st += id == 2; uv += id == 3; fog += id == 0x0A;
+          if (id != 5) return;
+          const auto &vertex = changing[kicks++];
+          if (flags & 0x10) {
+            if (flags & 0x100)
+              expect(regs[3] == (std::uint64_t(vertex.u) | (std::uint64_t(vertex.v) << 16)),
+                     "Re-enabled UV consumed a stale vertex");
+            else
+              expect(regs[2] == (std::uint64_t(std::bit_cast<std::uint32_t>(vertex.s)) |
+                                    (std::uint64_t(std::bit_cast<std::uint32_t>(vertex.t)) << 32)),
+                     "Re-enabled ST consumed a stale vertex");
+          }
+          if (flags & 0x20)
+            expect(regs[0x0A] == std::uint64_t(vertex.f) << 56,
+                   "Re-enabled fog consumed a stale vertex");
+          ++verticesChecked;
+        };
+        replay.draw(state, changing.data(), 3, step + 200, hardware);
+        expect(kicks == 3, "Attribute pruning changed vertex actions");
+        expect(st == (((flags & 0x110) == 0x10) ? 3u : 0u) &&
+                   uv == (((flags & 0x110) == 0x110) ? 3u : 0u) &&
+                   fog == ((flags & 0x20) ? 3u : 0u),
+               "Unused texture/fog attributes were replayed");
+      }
+      expect(verticesChecked == 48, "Attribute mode sequence did not finish");
+    }
     {
       webgl::RegisterStream replay;
       State state{};

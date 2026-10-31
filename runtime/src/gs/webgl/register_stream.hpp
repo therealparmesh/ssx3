@@ -50,11 +50,18 @@ public:
            std::uint64_t(v.r) | (std::uint64_t(v.g) << 8) |
                (std::uint64_t(v.b) << 16) | (std::uint64_t(v.a) << 24) |
                (std::uint64_t(std::bit_cast<std::uint32_t>(v.q)) << 32));
-      emit(sink, 2,
-           std::uint64_t(std::bit_cast<std::uint32_t>(v.s)) |
-               (std::uint64_t(std::bit_cast<std::uint32_t>(v.t)) << 32));
-      emit(sink, 3, std::uint64_t(v.u) | (std::uint64_t(v.v) << 16));
-      emit(sink, 0x0A, std::uint64_t(v.f) << 56);
+      // Only forward attributes consumed by this draw. Leaving inactive
+      // registers untouched also leaves their cached values untouched, so
+      // re-enabling a consumer emits its current vertex before the XYZ kick.
+      if (mode & 0x10) {
+        if (mode & 0x100)
+          emit(sink, 3, std::uint64_t(v.u) | (std::uint64_t(v.v) << 16));
+        else
+          emit(sink, 2,
+               std::uint64_t(std::bit_cast<std::uint32_t>(v.s)) |
+                   (std::uint64_t(std::bit_cast<std::uint32_t>(v.t)) << 32));
+      }
+      if (mode & 0x20) emit(sink, 0x0A, std::uint64_t(v.f) << 56);
       // XYZ2 is an action, even if all bits match the previous vertex.
       emit(sink, 5,
            std::uint64_t(v.x) | (std::uint64_t(v.y) << 16) |
