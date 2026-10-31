@@ -50,6 +50,87 @@ The trials remain private diagnostics, with context/resource cleanup,
 CPU-region fallback, long-run stability and completed-race qualification still
 open.
 
+## Raster and upload retests
+
+The earlier single-draw ordered-raster trial was retested with the newer
+scheduler and same-context presenter in Firefox. It still passes the
+1,062-case exact color/depth matrix, depth/order negative controls and real
+runtime API fixture, including mip, snapshot, register-order, slice-budget,
+GL-fault and FIFO pixel checks. Its sampled race window reduces raster draw
+calls from the preceding trial's 567,849 to 265,596, but delivers only 900
+images in 20.014 seconds (44.97/s), with a 52.20 ms maximum interval and
+234,400 actual AudioWorklet underrun frames (4.883 seconds at 48 kHz).
+Reducing this pass count alone does not meet the delivery gate. The shader
+alternative remains outside source.
+
+A separate roughly 12-second Firefox diagnostic instruments bridge methods
+and GL entry points. It records about 1.60 seconds inside bridge texture
+uploads and 0.96 seconds inside native texture uploads. The bridge's `render`
+method takes about 5.63 seconds inclusively across 128,305 calls; this includes
+its child methods and GL calls, so the timings must not be added together.
+Instrumentation changes throughput. These observations identify submission
+costs for investigation, not uninstrumented gameplay performance.
+
+A subsequent private trial rotates upload textures, retaining at most 64
+slots and a four-MiB budget per stream, except that one supported texture
+larger than that budget can still be allocated. The fixture and real runtime
+checks pass in Firefox, and the sampled game uses eight MiB across its two
+streams. With the same-context presenter, the first normal-menu race window
+presents 1,049 images in 20.019 seconds (52.40/s), with a 65.68 ms maximum
+interval and 115,872 actual underrun frames (2.414 seconds). The same storage
+change on the selected PBO/copy player presents only 742 images in 20.002
+seconds (37.10/s), with a 67.24 ms maximum interval and 319,936 underrun frames
+(6.665 seconds). Both game sessions log no application errors or warnings.
+Each storage trial preserves its respective baseline Wasm; only the private
+JavaScript upload method and its loading hook differ. These naturally varying
+partial-race windows do not prove a deterministic speed gain. The rotation
+is not selected, and it cannot be assumed to improve other presenters.
+Chromium was not qualified for these later trials. The production WebGPU
+release and selected WebGL renderer are unchanged.
+
+## Private worker-owned WebGL prototype
+
+A later private prototype runs the same-context WebGL renderer on the existing
+runtime worker, with the DOM canvas transferred as an OffscreenCanvas. WebGPU
+is withheld and no GPU enablement preferences are applied. The initial menu
+run boots and draws, but a native-frame wait times out after resume: the worker
+is actually at frame 4,607 while the page's shared status still reports 1,964.
+The game resumed; the worker's timer-based telemetry publisher was starved.
+Publishing shared status at presentation fixes that trial's ordinary-menu
+navigation and repeated native pause acknowledgements. The failed telemetry
+runs remain separate from the later performance window.
+
+The corrected worker trial presents 920 images over 20.005 seconds (45.99/s),
+with a 64.20 ms maximum presentation interval and 219,776 actual underrun
+frames (4.579 seconds at 48 kHz). The page's 16 ms timer runs 1,242 times and
+its largest gap is 17.78 ms, with none above 100 ms. The earlier main-thread
+same-context trial's largest timer gap was 267.70 ms. Worker ownership removes
+the large observed page task stalls; it does not establish 60 fps or continuous
+audio. The first worker observer routes source-clock captures to the wrong
+comparison field. Its original result is retained; a separate comparison of
+the saved native captures passes the 50 ms bound. This is not a passing media
+qualification.
+
+The same worker prototype in Chromium presents 1,158 images over 20.013
+seconds (57.86/s), with a 37.23 ms maximum interval, 31,264 actual underrun
+frames (0.651 seconds), and an 18.21 ms maximum page-timer gap. Its source-clock
+comparison passes while delivery and actual audio still fail. Neither browser
+therefore qualifies for release on this private path.
+
+A same-Wasm JavaScript trial enabling the alternate timer race for buffered
+WebGL delivers 884 images in 20.010 seconds (44.18/s), a 54.24 ms maximum
+interval and 249,056 underrun frames (5.189 seconds). Its page timer's maximum
+gap is 18.26 ms. The corrected observer's source-clock comparison passes,
+again while output is too slow. The timer change is rejected. Neither normal
+worker gameplay window logs application errors or warnings. The corrected worker game also passes all 27 native keyboard and simulated
+standard-controller checks in Chromium and Firefox, with the real worker input exports
+observed after forwarding each call. This includes both sticks, trigger
+pressure, disconnect/reconnect, two-controller reordering, hidden-tab pause
+and held-input restoration before native resume. Both sessions report no
+application errors or warnings. Worker pixel,
+lifecycle and resource qualification remain incomplete; the source build
+still rejects WebGL worker mode and these prototypes are not shipped.
+
 ## Fence-backed display readbacks
 
 The copy presenter now submits pixel-pack-buffer readbacks before collecting
