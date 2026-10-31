@@ -23,6 +23,11 @@ node scripts/test_browser_gamepad.cjs firefox
 Use `puppeteer-core` 25.16.0 outside the source checkout, as with the other
 browser checks. `PUPPETEER_MODULE`, `CHROMIUM_EXECUTABLE`, `FIREFOX_EXECUTABLE`
 and `SSX3_TEST_OUTPUT` override dependencies, executables and evidence output.
+Set `SSX3_TEST_BACKEND=webgl` to run the same assertions against the experimental
+window-owned WebGL player. This mode withholds WebGPU, applies no GPU feature
+flags or preferences, checks the compiled and initialized backend, and observes
+the actual window-owned native input exports. The default WebGPU mode still
+requires its game-worker observer; it cannot silently fall back to window tests.
 Evidence defaults to a new temporary directory. This Linux test explicitly
 enables WebGPU with Chromium's unsafe-WebGPU/Vulkan flags or Firefox's
 `dom.webgpu.enabled` preference. It does not prove default-browser GPU support.

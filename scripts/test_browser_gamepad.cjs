@@ -5,6 +5,8 @@ const fs = require("node:fs"),
   p = require(process.env.PUPPETEER_MODULE || "puppeteer-core");
 const kind = process.argv[2] || "firefox";
 assert(["chrome", "firefox"].includes(kind));
+const backend = process.env.SSX3_TEST_BACKEND || "webgpu";
+assert(["webgpu", "webgl"].includes(backend));
 const out =
   process.env.SSX3_TEST_OUTPUT ||
   fs.mkdtempSync(path.join(os.tmpdir(), "ssx3-gamepad-"));
@@ -22,14 +24,14 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
           browser: "firefox",
           executablePath: process.env.FIREFOX_EXECUTABLE || "/usr/bin/firefox",
           headless: false,
-          extraPrefsFirefox: { "dom.webgpu.enabled": true },
+          extraPrefsFirefox: backend === "webgpu" ? { "dom.webgpu.enabled": true } : {},
           defaultViewport: { width: 1280, height: 800 },
         }
       : {
           executablePath:
             process.env.CHROMIUM_EXECUTABLE || "/usr/bin/chromium",
           headless: false,
-          args: ["--enable-unsafe-webgpu", "--enable-features=Vulkan"],
+          args: backend === "webgpu" ? ["--enable-unsafe-webgpu", "--enable-features=Vulkan"] : [],
           defaultViewport: { width: 1280, height: 800 },
         },
   );
@@ -38,6 +40,9 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
     if (m.type() === "warn") warnings.push(m.text());
+  });
+  if (backend === "webgl") await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, "gpu", { value: undefined, configurable: true });
   });
   if (process.env.SSX3_TEST_DENY_GAMEPAD === "1") {
     await page.evaluateOnNewDocument(() => {
@@ -116,11 +121,34 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
   );
   assert.equal(await page.evaluate(() => !!Module.failed), false);
   assert.equal(await page.title(), "SSX 3");
+  if (backend === "webgl") assert(await page.evaluate(() =>
+    webglBackend && navigator.gpu === undefined && !Module.workerRuntime));
   await page.bringToFront();
   const query = async (label) => {
     const result = await page.evaluate(
-      () =>
-        new Promise((resolve, reject) => {
+      () => {
+        // The WebGL runtime currently owns the window. Observe its real native
+        // exports with the same post-call state and assertions as the worker.
+        if (!window.qaRuntimeWorker) {
+          if (!webglBackend || Module.workerRuntime)
+            throw Error("Expected the WebGPU worker or explicit window-owned WebGL runtime");
+          if (!window.qaDirectInput) {
+            const input = window.qaDirectInput = { events: [], pads: {}, connected: {}, pressure: {}, resumes: [] };
+            for (const [name, kind] of [["_ps2web_pad", "pads"], ["_ps2web_pad_connected", "connected"], ["_ps2web_pressure", "pressure"], ["_ps2web_pause", "pause"]]) {
+              const native = Module[name];
+              Module[name] = function (...args) {
+                const value = native.apply(this, args);
+                if (kind === "pause") {
+                  if (!args[0]) input.resumes.push(JSON.parse(JSON.stringify({pads: input.pads, connected: input.connected, pressure: input.pressure})));
+                } else input[kind][args[0]] = args.slice(1);
+                if (input.events.length < 500) input.events.push({name, args, frame: Module._ps2web_frames()});
+                return value;
+              };
+            }
+          }
+          return {...qaDirectInput, frame: Module._ps2web_frames(), paused: Module.paused, failed: Module.failed};
+        }
+        return new Promise((resolve, reject) => {
           const id = crypto.randomUUID(),
             w = qaRuntimeWorker;
           const timer = setTimeout(() => {
@@ -135,7 +163,8 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
           }
           w.addEventListener("message", reply);
           w.postMessage({ qaInput: true, id });
-        }),
+        });
+      },
     );
     assert(!result.failed);
     if (label) {
@@ -151,6 +180,7 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
     { timeout: 120000 },
   );
   assert(!(await page.evaluate(() => Module.failed)));
+  if (backend === "webgl") assert.equal(await page.evaluate(() => Module.ps2GpuBackend), "webgl");
   await page.click("#canvas");
   let v = await query("running");
   assert.deepEqual(v.connected["0"], [1]);
@@ -310,16 +340,19 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
       {
         passed: true,
         browser: kind,
+        backend,
         nativeGamepad,
         checks,
         errors,
         warnings,
         flags:
-          kind === "firefox"
+          backend === "webgl" ? [] : kind === "firefox"
             ? ["dom.webgpu.enabled=true"]
             : ["--enable-unsafe-webgpu", "--enable-features=Vulkan"],
         scope:
-          "Worker WebGPU build supplied at the test URL. Standard GamepadAPI snapshots traverse the production window/client and real native worker exports. No physical-phone test required; no performance claim from this instrumented diagnostic.",
+          backend === "webgl"
+            ? "Window-owned WebGL build with WebGPU withheld. Standard GamepadAPI snapshots traverse production polling and real native exports. Simulated controllers; no hardware or performance claim."
+            : "Worker WebGPU build supplied at the test URL. Standard GamepadAPI snapshots traverse the production window/client and real native worker exports. No physical-phone test required; no performance claim from this instrumented diagnostic.",
       },
       null,
       2,

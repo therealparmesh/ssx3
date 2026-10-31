@@ -15,6 +15,20 @@ including all four modulation cases, three fades and the combined tint pass,
 These are integration/correctness results, not a new game-speed qualification.
 The production WebGPU branch and private hosted release are unchanged.
 
+The freshly linked WebGL game also passes all 27 native keyboard/controller
+checkpoints in headed Chromium and Firefox with WebGPU withheld and no GPU
+enablement overrides. This includes all sixteen standard buttons, independent
+keyboard stick/D-pad channels, both sticks, trigger pressure, two slots,
+disconnect/reconnect/reordering, temporary API denial/recovery, actual tab hiding,
+native frame freeze and held-input restoration before unpause. The observer
+forwards each real window-owned native call before recording it. Controllers
+are simulated browser snapshots; this is not physical-controller latency or
+gameplay performance qualification. Use `SSX3_TEST_BACKEND=webgl` with the
+[controller driver](../tests/browser_gamepad/README.md).
+An explicit native Gamepad API denial fails before Play with
+`Native browser Gamepad API access failed`, confirming that synthetic pads
+cannot hide a browser permissions failure.
+
 The candidate now captures and samples CPU-owned mip chains before queuing
 vertices, including fixed/Q-based level selection, mip filtering, per-level
 wraps and palette decoding before filtering. Automatic TEX0 mip-address actions
