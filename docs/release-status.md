@@ -1,5 +1,9 @@
 # Release status
 
+The `webgpu-v70` desktop release checkpoint is described in
+[the release notes](webgpu-v70.md). Subsequent WebGL work is separate; this
+checkpoint does not alter the qualified hosted WebGPU runtime.
+
 The release target is now the WebGPU player with keyboard and standard browser
 gamepad support. The owner explicitly selected one graphics backend and removed
 physical-phone testing from the release requirements. A hardware WebGPU adapter,

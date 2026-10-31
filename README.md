@@ -1,6 +1,6 @@
 # SSX 3
 
-An experimental SSX 3 (USA, PlayStation 2) browser port built on [ps2-web-recomp](https://github.com/snuri00/ps2-web-recomp). The Emotion Engine executable is statically translated to C++ and compiled to WebAssembly; the remaining console hardware runs in the runtime, with WebGPU graphics and stereo AudioWorklet output.
+An SSX 3 (USA, PlayStation 2) browser port built on [ps2-web-recomp](https://github.com/snuri00/ps2-web-recomp). The Emotion Engine executable is statically translated to C++ and compiled to WebAssembly; the remaining console hardware runs in the runtime, with WebGPU graphics and stereo AudioWorklet output.
 
 This repository contains the runtime, recompiler, browser player, build scripts and source regression tests. Supply your own disc image. ROMs, BIOS files, generated game translations, compiled game assets and memory cards are excluded.
 
@@ -57,6 +57,8 @@ Live FPS/statistics and GPU timestamp queries are opt-in. Add `?debug` to the pl
 Save career progress in the game first: **Mcomm → Options → Save game**, or the lodge's **Save Game** command. Saves use the browser's storage for the current origin. Then use the player's **Options → Export card** before changing browser, device or host. Import restores that `.ps2` card on the destination; load the career through the game's normal menus. Concurrent tabs cannot independently overwrite the same origin's card.
 
 ## Status and testing
+
+The tagged [WebGPU desktop release](docs/webgpu-v70.md) records the supported target, release checks and limitations. Build it from your own disc image; generated game binaries and disc data are not distributed in this repository.
 
 Version 70 is deployed privately with aligned audio pacing and a fully primed three-image queue at startup/resume. Separate five-minute hosted Gravitude race/results windows at 120 Hz passed: Chromium 60.002494 submissions/s with a 21.47 ms maximum interval; Firefox 60.000035 with a 19.20 ms maximum. Both passed the source-audio clock tolerance with no image/audio loss, clipping or application errors. Both hosted browsers also passed 27 native-worker keyboard/gamepad checkpoints, and source CI passes. These windows include racing and results; they do not establish successful qualifier advancement. See [current release status](docs/release-status.md) for exact builds, scope and retained earlier failures, and [validation scope](docs/validation.md) for historical evidence and limitations.
 
