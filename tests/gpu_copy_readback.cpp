@@ -293,12 +293,83 @@ int main() {
     rejectGlFault([&]{gpu::display(fallback,output,width,height);},"CPU display fallback must reject a GL fault");
     check(gpu::display(source(64),output,width,height),"Display retries after consumed GL faults");
     for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)check(output[y*width+x]==(valueAt(0,1,x,y)|0xff000000u),"Display retry retains exact pixels");
+    auto upload=[&](unsigned seed) {
+        const auto src=source(seed);std::vector<std::uint32_t> data(src.width*src.height);
+        for(unsigned i=0;i<data.size();i++)data[i]=pixel(seed,i);
+        State image{};image.bitbltbuf=std::uint64_t(src.fbw)<<48;image.trxreg=src.width|(std::uint64_t(src.height)<<32);
+        gpu::image_begin(image);gpu::image_data(reinterpret_cast<const std::uint8_t*>(data.data()),data.size()*4);
+    };
+    upload(2);
+    DisplaySource crop{0,1,PSMCT32,4,3,16,7,true};
+    check(!gpu::display_async(crop,output,width,height),"First cropped PBO image is queued");
+    EM_ASM({wasmMemory.grow(1);}); // Refresh shared heap views while a readback is outstanding.
+    auto invalidDisplay=crop;invalidDisplay.width=0;
+    check(!gpu::display_async(invalidDisplay,output,width,height),"Invalid display does not consume pending image");
+    EM_ASM({
+        const gl = Module.ps2WebglCanvas.getContext('webgl2');
+        const original = gl.clientWaitSync;
+        let held = true;
+        Module.qaFenceObserved = false; Module.qaFenceReleased = false;
+        gl.clientWaitSync = function(...args) {
+            if (held) { Module.qaFenceObserved = true; return gl.TIMEOUT_EXPIRED; }
+            return original.apply(this, args);
+        };
+        Module.qaRestoreFence = () => { gl.clientWaitSync = original; };
+        setTimeout(() => { held = false; Module.qaFenceReleased = true; }, 10);
+    });
+    upload(3);
+    check(gpu::display_async(source(3),output,width,height),"Prior PBO survives source upload and drawing-buffer resize");
+    check(EM_ASM_INT({return Module.qaFenceObserved && Module.qaFenceReleased;}),
+          "Native PBO collection suspends until a browser task releases the fence");
+    EM_ASM({Module.qaRestoreFence();delete Module.qaRestoreFence;});
+    check(width==16&&height==7,"Odd interlaced cropped dimensions");
+    for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)
+        check(output[y*width+x]==pixel(2,(3+y/2)*64+4+x),"Cropped interlaced PBO pixels");
+    check(gpu::display(source(3),output,width,height),"Synchronous display cancels the next queued PBO");
+    check(!gpu::display_async(source(3),output,width,height),"Synchronous display clears asynchronous FIFO");
+    gpu::read_state(saved,savedScale,palette);gpu::write_state(saved,savedScale,palette);
+    check(!gpu::display_async(source(3),output,width,height),"Snapshot restoration cancels an in-flight PBO");
+    check(gpu::display(source(3),output,width,height),"Display after PBO snapshot cancellation");
+    for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)
+        check(output[y*width+x]==pixel(3,y*width+x),"Restored source pixels after PBO cancellation");
+
+    // The first 16 rows have the same GS page addresses at FBW 1 and 2.
+    // The wider source forces CPU fallback while retaining known seed-3 pixels.
+    DisplaySource cpuSource{0,1,PSMCT32,0,0,128,16,false};
+    check(!gpu::display_async(cpuSource,output,width,height),"CPU fallback starts an empty FIFO");
+    upload(4);
+    check(gpu::display_async(source(4),output,width,height),"GPU submission returns preceding CPU fallback");
+    check(width==128 && height==16,"CPU fallback FIFO dimensions");
+    for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)
+        check(output[y*width+x]==pixel(3,y*128+x),"CPU fallback survives later source upload");
+    check(gpu::display_async(cpuSource,output,width,height),"CPU fallback preserves preceding GPU ticket");
+    check(width==64 && height==16,"GPU dimensions after CPU fallback submission");
+    for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)
+        check(output[y*width+x]==pixel(4,y*64+x),"GPU ticket survives CPU fallback readback");
+    check(gpu::display(source(4),output,width,height),"Synchronous display cancels CPU fallback FIFO");
+
+    // Reuse equal-sized GPU storage across distinct frames, rather than
+    // resizing every frame as the preceding 64-frame fixture does.
+    for(unsigned i=0;i<32;i++) {
+        const unsigned seed=4+i*4; upload(seed);
+        const bool got=gpu::display_async(source(seed),output,width,height);
+        check(got==(i!=0),"Fixed-size readback FIFO availability");
+        if(got)for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)
+            check(output[y*width+x]==pixel(seed-4,y*64+x),"Fixed-size reused readback retains distinct frame pixels");
+    }
+    check(gpu::display_async(source(128),output,width,height),"Collect last fixed-size frame");
+    for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)
+        check(output[y*width+x]==pixel(128,y*64+x),"Last fixed-size frame pixels");
+    check(gpu::display(source(128),output,width,height),"Cancel duplicate fixed-size submission");
+
+
+
 #endif
 #ifdef PS2_GPU_WEBGL
     verify_runtime_mips();
     verify_register_submission();
     verify_render_slices();
-    EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true,glFaults:6});});
+    EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true,glFaults:6,readbackLifecycle:true});});
 #endif
     check_fade_and_modulation(scale);
     ps2::gs::gpu::wait_idle();

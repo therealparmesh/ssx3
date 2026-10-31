@@ -13,7 +13,8 @@ let browser;
   browser = await puppeteer.launch(kind === 'firefox'
     ? { browser: 'firefox', executablePath: process.env.FIREFOX_EXECUTABLE || '/usr/bin/firefox', headless: false }
     : { executablePath: process.env.CHROMIUM_EXECUTABLE || '/usr/bin/chromium', headless: false });
-  const page = await browser.newPage(), errors = [];
+  const page = await browser.newPage(), errors = [], readbackWarnings = [];
+  page.on('console', message => { if(message.type()==='warn' && message.text().includes('READ-usage buffer')) readbackWarnings.push(message.text()); });
   page.on('pageerror', error => errors.push(error.message));
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'gpu', { value: undefined, configurable: true });
@@ -22,16 +23,17 @@ let browser;
   await page.waitForFunction(() => window.qaProbe?.result || window.qaProbe?.errors.length, { timeout: 60000 });
   const result = await page.evaluate(() => ({
     native: qaProbe.result, mips: qaProbe.mips, submission: qaProbe.registerSubmission, slices: qaProbe.renderSlices, integration: qaProbe.webglIntegration, errors: qaProbe.errors,
-    messages: qaProbe.messages, backend: Module.ps2GpuBackend, isolated: crossOriginIsolated,
+    readbacks: {...Module.ps2WebglReadbacks?.stats}, messages: qaProbe.messages, backend: Module.ps2GpuBackend, isolated: crossOriginIsolated,
     webgpuAbsent: navigator.gpu === undefined, title: document.title, url: location.href,
   }));
-  result.browser = kind; result.pageErrors = errors;
+  result.browser = kind; result.pageErrors = errors; result.readbackWarnings = readbackWarnings;
   fs.writeFileSync(path.join(output, kind + '.json'), JSON.stringify(result, null, 2));
   assert.equal(result.backend, 'webgl');
   assert.equal(result.isolated, true);
   assert.equal(result.webgpuAbsent, true);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(errors, []);
+  assert.deepEqual(readbackWarnings, [], 'Readback storage must not discard accelerated copies');
   assert.equal(result.native?.passed, true);
   assert.equal(result.native.frames, 64);
   assert.equal(result.native.pixels, 188416);
@@ -45,13 +47,34 @@ let browser;
   assert.deepEqual(result.slices, {coalescedPackets: 2, budgetYield: true, presentBoundary: true});
   assert(result.native.nonzeroSourceOffset >= 8192);
   assert.deepEqual(result.integration, { snapshot: true, drawExport: true, localCopy: true,
-    partialRgb24: true, rejectedSnapshot: true, browserYield: true, glFaults: 6 });
+    partialRgb24: true, rejectedSnapshot: true, browserYield: true, glFaults: 6, readbackLifecycle: true });
+  assert.equal(result.readbacks.peakBuffers, 2);
   assert.equal(result.mips?.cases, 124);
   assert.equal(result.mips.pixels, 7936);
   assert.equal(result.mips.hash, 2473005509);
   assert(result.mips.mipBatches > 0);
   assert.equal(result.mips.approximateBatches, 0);
   await page.screenshot({ path: path.join(output, kind + '.png') });
+  result.contextLoss = await page.evaluate(async () => {
+    const gl = Module.ps2WebglCanvas.getContext('webgl2');
+    const extension = gl.getExtension('WEBGL_lose_context');
+    if (!extension) return { supported: false };
+    const id = Module.ps2WebglReadbacks.enqueue(0, 0, 1, 1);
+    extension.loseContext();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    let rejected = false, consumed = false;
+    try { await Module.ps2WebglReadbacks.collect(id, () => { consumed = true; }); }
+    catch (_) { rejected = true; }
+    Module.ps2WebglReadbacks.dispose();
+    return { supported: true, rejected, consumed, allocated: Module.ps2WebglReadbacks.stats.allocated,
+      pending: Module.ps2WebglReadbacks.stats.pending };
+  });
+  assert.equal(result.contextLoss.supported, true, 'The test browser must expose deliberate context-loss injection');
+  assert.equal(result.contextLoss.rejected, true);
+  assert.equal(result.contextLoss.consumed, false);
+  assert.equal(result.contextLoss.allocated, 0);
+  assert.equal(result.contextLoss.pending, 0);
+  fs.writeFileSync(path.join(output, kind + '.json'), JSON.stringify(result, null, 2));
   await page.close();
   const control = await browser.newPage();
   await control.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'gpu', { value: undefined, configurable: true }));

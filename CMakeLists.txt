@@ -112,6 +112,10 @@ if(PS2_GPU_BACKEND STREQUAL "webgl")
     # Keep those methods out of Asyncify; they must not call browser-yield or
     # async readback callbacks. WebGPU retains its instrumented rendering path.
     set(PS2_WEB_SYNC_FUNCTIONS "${CMAKE_CURRENT_SOURCE_DIR}/web/sync-webgl-functions.json")
+    # The native GS handler stays synchronous. Its GPU API wrapper can suspend
+    # while collecting a display fence, so keep that wrapper instrumented.
+    list(REMOVE_ITEM PS2_WEB_SUSPEND_FLAGS -sASYNCIFY_IMPORTS=ps2_browser_yield)
+    list(APPEND PS2_WEB_SUSPEND_FLAGS -sASYNCIFY_IMPORTS=ps2_browser_yield,ps2_webgl_readback_collect)
     set(PS2_WEBGL_UPSTREAM "" CACHE PATH "Checksum-verified upstream GS tree")
     include(cmake/webgl_backend.cmake)
     ps2_add_webgl_libraries("${PS2_WEBGL_UPSTREAM}")
@@ -123,10 +127,12 @@ if(PS2_GPU_BACKEND STREQUAL "webgl")
     target_compile_definitions(ps2runtime PUBLIC PS2_GPU PS2_GPU_WEBGL)
     set_property(TARGET ps2runtime APPEND PROPERTY INTERFACE_LINK_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/web/webgl-context.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/web/webgl-readback.js"
         "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/gs/webgl/ordered_raster.js")
     target_link_libraries(ps2runtime PUBLIC gsh_opengl ps2webgl_gs_core)
     target_link_options(ps2runtime PUBLIC -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sOFFSCREENCANVAS_SUPPORT=1
         "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/webgl-context.js\""
+        "SHELL:--js-library \"${CMAKE_CURRENT_SOURCE_DIR}/web/webgl-readback.js\""
         "SHELL:--pre-js \"${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/gs/webgl/ordered_raster.js\"")
 endif()
 

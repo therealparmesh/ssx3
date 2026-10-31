@@ -8,6 +8,10 @@ mergeInto(LibraryManager.library, {
     specialHTMLTargets['!ps2-webgl'] = canvas;
     return 1;
   },
+  ps2_webgl_init_readbacks__deps: ['$GL', '$ps2webglCreateReadbacks'],
+  ps2_webgl_init_readbacks: function() {
+    Module.ps2WebglReadbacks = ps2webglCreateReadbacks(GLctx);
+  },
   ps2_webgl_resize_context: function(width, height) {
     const canvas = Module.ps2WebglCanvas;
     if (!canvas) return;

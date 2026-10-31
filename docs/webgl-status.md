@@ -2,6 +2,62 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Fence-backed display readbacks
+
+The copy presenter now submits pixel-pack-buffer readbacks before collecting
+the preceding image. The FIFO retains two GL buffers, including submission
+and collection in flight. An already-ready fence completes through the
+callback adapter synchronously; an unfinished fence suspends the GPU API
+wrapper until browser tasks observe completion. The native GS handler stays
+synchronous, and its existing Asyncify exclusions are unchanged. WebGPU keeps
+its preceding build and presentation path.
+
+The expanded real-runtime fixture passes in Chromium and Firefox. Alongside
+the existing exact-pixel, mip, register-order, slice-budget and error checks,
+it covers odd interlaced crops, shared memory growth during an outstanding
+readback, source uploads/resizes, synchronous-display and snapshot cancellation,
+and alternating CPU/GPU fallback frames. It forces a native fence wait until
+a browser task releases it and checks context-loss cleanup. The helper tests
+also cover synchronous completion, canceled waits, driver/consumer failures,
+pack-state restoration and timeout cleanup.
+
+A same-sized, distinct-frame sequence exposed a Chromium readback-storage
+warning that the preceding resize-every-frame fixture missed. Its old-storage
+control passes pixels but emits 33 warnings. Refreshing GPU storage before
+each reused buffer's next submission removes those warnings in the runtime
+fixture. GL buffer objects and CPU scratch arrays remain reusable. The first
+game controller run exercised all 27 functional cases but failed the warning
+gate; that failed run is retained and is not counted as passing qualification.
+
+Before the storage fix, two ordinary-menu Chromium race-entry windows at
+1280×800/DPR 1 delivered 1,153 images in 20.002 seconds (57.64/s) and 1,150 in
+20.007 seconds (57.48/s). Maximum intervals were 55.43 and 50.29 ms, and maximum
+browser timer delays were 61.55 and 56.17 ms. Firefox delivered 795 images in
+20.003 seconds (39.74/s), with a 63.78 ms maximum presentation interval and
+65.28 ms maximum timer delay. All three windows exhausted audio. The canonical
+pre-storage-fix Wasm matches these private game builds exactly; JavaScript
+differs only in output-directory references.
+
+The warning-fixed canonical game then delivered 1,035 images in 20.009 seconds
+in Chromium (51.73/s), with a 74.03 ms maximum presentation interval and a
+76.61 ms maximum timer delay. Firefox delivered 893 images in 20.002 seconds
+(44.65/s), with a 54.24 ms maximum presentation interval and a 67.54 ms maximum
+timer delay. Both exhausted audio; neither game run logged application errors
+or warnings. These later windows supersede the earlier 57/s Chromium trials
+for the selected implementation; the earlier rate is not its qualification.
+Race scenes vary naturally, so these are bounded observations, not matched
+deterministic throughput claims. The final canonical game passes all 27
+keyboard/simulated standard-controller checks in both Chromium and Firefox,
+including disconnect/reconnect, two-controller reorder, analog pressure,
+actual hidden-tab suspension and held-input restoration before native resume.
+Both controller sessions report zero application errors and warnings.
+
+These are partial-race software-submission diagnostics. They do not establish
+steady 60 fps, uninterrupted audio, physical input/output latency or completed
+race/game qualification. A separate synchronous-function exclusion trial
+passed the rendering fixture but delivered 46.67/s in ordinary Chromium
+race entry versus the preceding canonical 48.04/s; it remains unselected.
+
 ## Bounded synchronous render slices
 
 WebGL now drains each synchronous GIF packet without forcing a browser yield

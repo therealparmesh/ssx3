@@ -12,11 +12,33 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 
 fs::path CAppConfig::GetBasePath() const { return "/tmp"; }
 extern const char kGsWebglKernel[];
 extern "C" int ps2_webgl_prepare_context();
 extern "C" void ps2_webgl_resize_context(int, int);
+extern "C" void ps2_webgl_init_readbacks();
+// clang-format off
+EM_JS(int, ps2_webgl_readback_begin, (int x, int y, int w, int h), {
+    try { return Module.ps2WebglReadbacks.enqueue(x, y, w, h); }
+    catch(error) { console.error(error); return 0; }
+});
+EM_JS_DEPS(ps2_webgl_readback_collect, "$Asyncify");
+EM_JS(int, ps2_webgl_readback_collect, (int id, void* target, unsigned bytes), {
+    return Asyncify.handleSleep(wake => {
+        const consume = function(data) {
+            if (HEAPU8.buffer !== wasmMemory.buffer) updateMemoryViews();
+            if (data.byteLength !== bytes || target + bytes > HEAPU8.length) throw new Error('Invalid WebGL readback destination');
+            HEAPU8.set(data, target);
+        };
+        try {
+            if (Module.ps2WebglReadbacks.collectNow(id, consume)) { wake(1); return; }
+            Module.ps2WebglReadbacks.collect(id, consume).then(() => wake(1), error => {console.error(error);wake(0);});
+        } catch(error) {console.error(error);wake(0);}
+    });
+});
+// clang-format on
 
 namespace ps2::gs::gpu {
 namespace {
@@ -147,8 +169,28 @@ Mode currentMode = Mode::off;
 EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = 0;
 std::thread::id owner;
 bool workSinceYield = false;
-std::vector<std::uint32_t> pending;
-unsigned pendingWidth = 0, pendingHeight = 0;
+struct PendingFrame {
+    int ticket = 0;
+    std::vector<std::uint32_t> pixels;
+    unsigned width = 0, height = 0, physical = 0;
+    bool halved = false;
+    bool empty() const { return !ticket && pixels.empty(); }
+};
+PendingFrame pending;
+void discard(PendingFrame &frame) {
+    if (frame.ticket)
+        EM_ASM({ Module.ps2WebglReadbacks.cancel($0); }, frame.ticket);
+    frame = {};
+}
+void orient(const std::vector<std::uint32_t> &raw, std::vector<std::uint32_t> &rgba, unsigned width, unsigned height,
+            unsigned physical, bool halved) {
+    rgba.resize(std::size_t(width) * height);
+    for (unsigned y = 0; y < height; y++)
+        for (unsigned x = 0; x < width; x++)
+            rgba[std::size_t(y) * width + x] =
+                raw[std::size_t(physical - 1 - (halved ? y / 2 : y)) * width + x] | 0xff000000;
+}
+
 void check() {
     if (!backend || std::this_thread::get_id() != owner)
         throw std::runtime_error("WebGL GS called outside its rendering owner");
@@ -192,6 +234,7 @@ bool init(Mode wanted) {
         },
         kGsWebglKernel);
     try {
+        ps2_webgl_init_readbacks();
         backend = std::make_unique<Backend>();
         backend->Initialize();
         backend->Reset();
@@ -311,7 +354,7 @@ void write_state(const std::vector<std::uint32_t> &vram, std::uint32_t scale, co
     backend->load(vram, scale, clut);
     drain();
     registers.invalidate();
-    pending.clear();
+    discard(pending);
 }
 bool display(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height) {
     drain();
@@ -337,35 +380,61 @@ bool display(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::ui
         glReadPixels(src.dbx, 0, width, physical, GL_RGBA, GL_UNSIGNED_BYTE, raw.data());
         if (glGetError())
             throw std::runtime_error("WebGL display readback failed");
-        for (unsigned y = 0; y < height; y++)
-            for (unsigned x = 0; x < width; x++)
-                rgba[std::size_t(y) * width + x] =
-                    raw[std::size_t(physical - 1 - (src.halved ? y / 2 : y)) * width + x] | 0xff000000;
+        orient(raw, rgba, width, height, physical, src.halved);
     }
-    pending.clear();
+    discard(pending);
     return true;
 }
 bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::uint32_t &width,
                    std::uint32_t &height) {
-    std::vector<std::uint32_t> next;
-    unsigned w = 0, h = 0;
-    // display() clears pending only for explicit synchronous clients.
-    auto old = std::move(pending);
-    const auto ow = pendingWidth, oh = pendingHeight;
-    if (!display(src, next, w, h)) {
-        pending = std::move(old);
+    drain();
+    if (!src.width || !src.height || !src.fbw || src.width > 2048 || src.height > 2048)
         return false;
+    PendingFrame next, old;
+    std::swap(old, pending);
+    try {
+        next.width = src.width;
+        next.height = src.height;
+        next.physical = src.halved ? (src.height + 1) / 2 : src.height;
+        next.halved = src.halved;
+        if (src.width + src.dbx > src.fbw * 64 || src.dby + next.physical > 1024) {
+            if (!display(src, next.pixels, next.width, next.height)) {
+                std::swap(pending, old);
+                return false;
+            }
+        } else {
+            ps2_webgl_resize_context(src.width + src.dbx, next.physical + src.dby);
+            backend->show(src, src.width + src.dbx, next.physical + src.dby);
+            next.ticket = ps2_webgl_readback_begin(src.dbx, 0, src.width, next.physical);
+            if (!next.ticket)
+                throw std::runtime_error("WebGL display readback submission failed");
+        }
+        // Submit the new image before waiting for the preceding fence, so
+        // rendering and readback can overlap without changing FIFO order.
+        if (old.empty()) {
+            std::swap(pending, next);
+            return false;
+        }
+        if (old.ticket) {
+            std::vector<std::uint32_t> raw(std::size_t(old.width) * old.physical);
+            int result = ps2_webgl_readback_collect(old.ticket, raw.data(), raw.size() * 4);
+            old.ticket = 0;
+            if (!result)
+                throw std::runtime_error("WebGL display readback collection failed");
+            orient(raw, rgba, old.width, old.height, old.physical, old.halved);
+        } else
+            rgba = std::move(old.pixels);
+        width = old.width;
+        height = old.height;
+        std::swap(pending, next);
+        return true;
+    } catch (...) {
+        discard(old);
+        discard(next);
+        throw;
     }
-    pending = std::move(next);
-    pendingWidth = w;
-    pendingHeight = h;
-    if (old.empty())
-        return false;
-    rgba = std::move(old);
-    width = ow;
-    height = oh;
-    return true;
 }
+
 bool attach_surface(const SurfaceTarget &) { return false; }
 void resize_surface(std::uint32_t, std::uint32_t) {}
 bool has_surface() { return false; }
