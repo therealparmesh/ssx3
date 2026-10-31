@@ -96,7 +96,50 @@ void check_fade_and_modulation(std::uint32_t scale) {
 }
 #ifdef PS2_GPU_WEBGL
 #include <array>
+#include "gs/raster.hpp"
 #include "gpu_mip_fixture.inc"
+namespace {
+void verify_register_submission() {
+    using namespace ps2::gs;
+    std::vector<std::uint32_t> ram(kMemorySize / 4), clut(512);
+    gpu::write_state(ram, 1, clut);
+    std::memset(memory(), 0, kMemorySize);
+    State state{};
+    state.prim = 3 | 8;
+    state.prmodecont = state.colclamp = 1;
+    state.ctx[0].frame = 1ull << 16;
+    state.ctx[0].zbuf = 1ull << 32;
+    state.ctx[0].scissor = (31ull << 16) | (15ull << 48);
+    Vertex vertices[3]{};
+    for (unsigned draw = 0; draw < 2; ++draw) {
+        vertices[0].x = (2 + draw * 8) * 16;
+        vertices[1].x = (18 + draw * 8) * 16;
+        vertices[2].x = vertices[0].x;
+        vertices[0].y = vertices[1].y = (2 + draw * 2) * 16;
+        vertices[2].y = (10 + draw * 2) * 16;
+        for (unsigned i = 0; i < 3; ++i) {
+            vertices[i].r = (i + draw) % 3 == 0 ? 128 : 0;
+            vertices[i].g = (i + draw) % 3 == 1 ? 128 : 0;
+            vertices[i].b = (i + draw) % 3 == 2 ? 128 : 0;
+            vertices[i].a = 64 + i * 64;
+            vertices[i].q = 1;
+        }
+        raster::draw(state, vertices, 3);
+        gpu::draw(state, vertices, 3);
+    }
+    // No export/flush between the overlapping draws. Every XYZ action must
+    // consume its own attribute latches, including intermediate vertex colors.
+    std::vector<std::uint8_t> output(kMemorySize);
+    gpu::download(output.data());
+    for (unsigned y = 0; y < 16; ++y)
+        for (unsigned x = 0; x < 32; ++x) {
+            const auto at = address32(0, 1, x, y);
+            check(std::memcmp(output.data() + at, memory() + at, 4) == 0,
+                  "Native register submission matches CPU raster pixels");
+        }
+    EM_ASM({window.qaProbe.registerSubmission=({draws:2,pixels:512,cpuOracle:true});});
+}
+}
 #endif
 
 int main() {
@@ -223,6 +266,7 @@ int main() {
 #endif
 #ifdef PS2_GPU_WEBGL
     verify_runtime_mips();
+    verify_register_submission();
     EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true,glFaults:6});});
 #endif
     check_fade_and_modulation(scale);

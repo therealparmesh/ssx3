@@ -26,6 +26,16 @@ class Backend final : public CGSH_OpenGL {
   public:
     Backend() : CGSH_OpenGL(false) {}
     void close() { ReleaseImpl(); }
+    void write(std::uint8_t id, std::uint64_t value) {
+        // These registers only latch vertex attributes. Action registers must
+        // run their handlers now, before the next vertex changes those latches.
+        if (id == 1 || id == 2 || id == 3 || id == 0x0A) {
+            m_nReg[id] = value;
+            m_regsDirty = true;
+        } else {
+            WriteRegisterSynchronous(id, value);
+        }
+    }
     void sync() {
         SyncMemoryCache();
         // Internal clean-cache lookups need no driver query. Public exports
@@ -136,7 +146,6 @@ webgl::RegisterStream registers;
 Mode currentMode = Mode::off;
 EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = 0;
 std::thread::id owner;
-unsigned queued = 0;
 bool workSinceYield = false;
 std::vector<std::uint32_t> pending;
 unsigned pendingWidth = 0, pendingHeight = 0;
@@ -147,13 +156,10 @@ void check() {
 void drain() {
     check();
     backend->DrainPendingCalls();
-    queued = 0;
 }
 void emit(std::uint8_t id, std::uint64_t value) {
-    backend->WriteRegister({id, value});
+    backend->write(id, value);
     workSinceYield = true;
-    if (++queued >= 8192)
-        drain();
 }
 } // namespace
 Mode mode() { return currentMode; }
@@ -251,6 +257,7 @@ void local_copy(const State &s) {
                 write_pixel(dp, dbp, dbw, (dx + x) & 2047, (dy + y) & 2047, pixels[y * w + x]);
         std::memcpy(backend->GetRam(), ps2::gs::memory(), kMemorySize);
         backend->restore();
+        drain();
         workSinceYield = true;
     }
     registers.invalidate();
@@ -302,6 +309,7 @@ void read_state(std::vector<std::uint32_t> &vram, std::uint32_t &scale, std::vec
 void write_state(const std::vector<std::uint32_t> &vram, std::uint32_t scale, const std::vector<std::uint32_t> &clut) {
     drain();
     backend->load(vram, scale, clut);
+    drain();
     registers.invalidate();
     pending.clear();
 }

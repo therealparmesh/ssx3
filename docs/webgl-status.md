@@ -2,6 +2,43 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Direct rendering-owner register submission
+
+The WebGL adapter now applies vertex attribute latches directly and invokes
+action-register handlers synchronously on its checked rendering owner. It no
+longer sends the same register stream through the backend's second write buffer.
+Queued initialization, transfer and restore controls still drain before later
+register actions. RGBA/Q, ST, UV and fog remain latched in the native register
+image; XYZ, palette, transfer and setup actions retain their real handlers.
+The protected upstream entry point is included in the checksum-verified patch.
+
+The canonical runtime API fixture passes in Chromium and Firefox, including
+all existing draw/export, mip, color/fade, snapshot and injected-error checks.
+A new 512-pixel CPU-raster oracle compares two overlapping draws with changing
+per-vertex RGB/alpha and no intermediate flush. A private control that delays
+XYZ actions while updating attributes immediately fails this oracle.
+
+The first normal-menu Chromium race-entry comparison used 1280×800/DPR 1,
+WebGPU withheld, no GPU enablement overrides and no in-window builds/profiling.
+The preceding copy player presented 366 images over 20.133 seconds (18.18/s);
+the private direct-submission implementation presented 486 over 20.035 seconds
+(24.26/s). Maximum intervals were 109.07 and 105.41 ms; both exhausted audio.
+These are partial-course, fixed-duration windows with naturally varying race
+scenes, not deterministic replay, completed races or release qualification.
+Canonical-build repetition and sustained timing qualification remain open.
+
+Other trials remain unselected. An alpha-test KEEP hardware route passed
+1,286 color/depth cases in both browsers but was unused in the sampled race
+and did not improve its roughly 18/s delivery. A material diagnostic found
+reverse-subtract blending in about 31% of sampled packets. A private hardware
+blend probe checked all 8,454,144 source/destination/alpha combinations: even
+the biased variant differed in 65,634 cases on each tested browser. Approximate
+fixed-function blending is not selected. An integer snapshot prototype passed
+both browsers' 1,062-case matrix and actual runtime API fixtures, and reduced
+shader draw calls from three to one for ordered batches. Its 20.060-second
+race-entry check still presented only 367 images (18.29/s), with a 111.90 ms
+maximum interval and audio starvation. It also remains outside source.
+
 ## Resumed from the WebGPU release
 
 The branch now incorporates `webgpu-v70`, including source-audio clock checks,

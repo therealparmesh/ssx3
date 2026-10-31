@@ -21,7 +21,7 @@ let browser;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => window.qaProbe?.result || window.qaProbe?.errors.length, { timeout: 60000 });
   const result = await page.evaluate(() => ({
-    native: qaProbe.result, mips: qaProbe.mips, integration: qaProbe.webglIntegration, errors: qaProbe.errors,
+    native: qaProbe.result, mips: qaProbe.mips, submission: qaProbe.registerSubmission, integration: qaProbe.webglIntegration, errors: qaProbe.errors,
     messages: qaProbe.messages, backend: Module.ps2GpuBackend, isolated: crossOriginIsolated,
     webgpuAbsent: navigator.gpu === undefined, title: document.title, url: location.href,
   }));
@@ -41,6 +41,7 @@ let browser;
   assert.equal(result.native.modulationCases, 4);
   assert.equal(result.native.fadeCases, 3);
   assert.equal(result.native.combinedFadeTint, true);
+  assert.deepEqual(result.submission, {draws: 2, pixels: 512, cpuOracle: true});
   assert(result.native.nonzeroSourceOffset >= 8192);
   assert.deepEqual(result.integration, { snapshot: true, drawExport: true, localCopy: true,
     partialRgb24: true, rejectedSnapshot: true, browserYield: true, glFaults: 6 });

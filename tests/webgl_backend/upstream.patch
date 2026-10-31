@@ -1318,12 +1318,16 @@
  #include <unordered_map>
  #include "../GSHandler.h"
  #include "../GsDebuggerInterface.h"
-@@ -22,8 +25,24 @@
+@@ -22,8 +25,28 @@
  
  class CGSH_OpenGL : public CGSHandler, public CGsDebuggerInterface
  {
 + // Asset-free fixture exercises private attachment ownership transitions.
 + friend class WebglAliasFixture;
++
++protected:
++ // The caller owns rendering and has drained queued control operations.
++ void WriteRegisterSynchronous(uint8 id, uint64 value) { WriteRegisterImpl(id, value); }
 +
  public:
  	CGSH_OpenGL(bool = true);
