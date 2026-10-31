@@ -85,12 +85,13 @@ public:
 
 private:
   template <class Sink>
-  void emit(Sink &sink, unsigned reg, std::uint64_t value, bool force = false) {
+  bool emit(Sink &sink, unsigned reg, std::uint64_t value, bool force = false) {
     if (!force && known_[reg] && values_[reg] == value)
-      return;
+      return false;
     sink(static_cast<std::uint8_t>(reg), value);
     values_[reg] = value;
     known_[reg] = true;
+    return true;
   }
 
   template <class Sink>
@@ -116,15 +117,19 @@ private:
       emit(sink, 0x14 + c, v.tex1);
       emit(sink, 0x08 + c, v.clamp);
       emit(sink, 0x18 + c, v.xyoffset);
-      emit(sink, 0x34 + c, v.miptbp1);
-      emit(sink, 0x36 + c, v.miptbp2);
       emit(sink, 0x40 + c, v.scissor);
       emit(sink, 0x42 + c, v.alpha);
       emit(sink, 0x47 + c, v.test);
       emit(sink, 0x4A + c, v.fba);
       emit(sink, 0x4C + c, v.frame);
       emit(sink, 0x4E + c, v.zbuf);
-      emit(sink, 0x06 + c, v.tex0 & ~(7ull << 61));
+      const bool tex0Written = emit(sink, 0x06 + c, v.tex0 & ~(7ull << 61));
+      // TEX0 can implicitly overwrite MIPTBP1 in the backend. Restore the
+      // runtime's final register image after that action, even if its value
+      // equals our last emitted value. Explicit overrides must also survive.
+      emit(sink, 0x34 + c, v.miptbp1,
+           tex0Written && (v.tex1 & (1ull << 9)));
+      emit(sink, 0x36 + c, v.miptbp2);
     }
   }
 

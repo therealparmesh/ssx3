@@ -22,6 +22,11 @@ DisplaySource source(std::uint32_t seed) {
     return {0, (widths[(seed-1)%4]+63)/64, ps2::gs::PSMCT32, 0, 0, widths[(seed-1)%4], heights[(seed-1)%4], false};
 }
 }
+#ifdef PS2_GPU_WEBGL
+#include <array>
+#include "gpu_mip_fixture.inc"
+#endif
+
 int main() {
     ps2::gs::init();
     check(ps2::gs::gpu::mode() == ps2::gs::gpu::Mode::primary, "Actual GS GPU initialization");
@@ -145,6 +150,7 @@ int main() {
     for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++)check(output[y*width+x]==(valueAt(0,1,x,y)|0xff000000u),"Display retry retains exact pixels");
 #endif
 #ifdef PS2_GPU_WEBGL
+    verify_runtime_mips();
     EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true,glFaults:6});});
 #endif
     EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4});},received,pixels,hash,scale,offset);

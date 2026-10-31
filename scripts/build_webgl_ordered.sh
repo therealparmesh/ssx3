@@ -20,3 +20,6 @@ cp "$raster_root/runtime/src/gs/webgl/ordered_raster.frag" "$raster_output/kerne
 printf 'Asset-free WebGL fixture: %s\n' "$raster_output"
 
 cp "$raster_root/runtime/src/gs/webgl/ordered_raster.js" "$raster_output/ordered_raster.js"
+
+mkdir -p "$raster_output/mips"
+cp "$raster_root/tests/webgl_mips/"*.html "$raster_root/tests/webgl_mips/"*.js "$raster_output/mips/"

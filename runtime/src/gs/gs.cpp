@@ -1,6 +1,7 @@
 #include "gs.hpp"
 
 #include "gif.hpp"
+#include "mip_layout.hpp"
 #include "queue.hpp"
 #include "raster.hpp"
 #include "../hw.hpp"
@@ -482,6 +483,10 @@ void write(std::uint32_t reg, std::uint64_t value) {
     case 0x06: case 0x07:
         s.ctx[reg - 6].tex0 = value;
         load_clut(value);
+        if (s.ctx[reg - 6].tex1 & (1ull << 9)) {
+            if (auto mip = automatic_miptbp1(value))
+                s.ctx[reg - 6].miptbp1 = *mip;
+        }
         break;
     case 0x08: case 0x09: s.ctx[reg - 8].clamp = value; break;
     case 0x0A: s.fog = value; break;

@@ -43,10 +43,51 @@ void begin(unsigned psm, unsigned pixels) {
     write(0x52, pixels | (1ull << 32));
     write(0x53, 1);
 }
+void mip_register_actions() {
+    using namespace ps2::gs;
+    struct Golden { unsigned psm, width, height, pitch, base, a, b, c; };
+    const Golden goldens[] = {
+        {0, 7, 7, 4, 0, 256, 320, 336},
+        {0, 7, 6, 8, 0, 256, 320, 336},
+        {0, 6, 7, 1, 0, 64, 80, 84},
+        {1, 7, 6, 4, 0, 256, 320, 336},
+        {2, 7, 7, 2, 0, 128, 160, 168},
+        {10, 7, 6, 4, 0, 128, 160, 168},
+        {19, 7, 6, 4, 0, 64, 80, 84},
+        {20, 7, 6, 4, 0, 32, 40, 42},
+        {0, 6, 7, 4, 16380, 60, 76, 80},
+    };
+    auto descriptor = [](unsigned p) { return std::uint64_t(p | (1u << 14)); };
+    for (unsigned context : {0u, 1u}) for (const auto &g : goldens) {
+        reset();
+        const auto tex0 = std::uint64_t(g.base) | (std::uint64_t(g.pitch) << 14) |
+            (std::uint64_t(g.psm) << 20) | (std::uint64_t(g.width) << 26) |
+            (std::uint64_t(g.height) << 30);
+        const auto expected = descriptor(g.a) | (descriptor(g.b) << 20) | (descriptor(g.c) << 40);
+        write(0x34 + context, 0x12345678);
+        write(0x36 + context, 0xabcdef);
+        write(0x34 + (context ^ 1), 0x87654321);
+        write(0x14 + context, 1ull << 9);
+        expect(g_state.ctx[context].miptbp1 == 0x12345678, "TEX1 generated mip addresses without a TEX0 action");
+        write(6 + context, tex0);
+        expect(g_state.ctx[context].miptbp1 == expected, "Automatic mip addresses differ from golden layout");
+        expect(g_state.ctx[context].miptbp2 == 0xabcdef, "MTBA changed levels4..6");
+        expect(g_state.ctx[context ^ 1].miptbp1 == 0x87654321, "MTBA changed the other context");
+        write(0x34 + context, 0x12345678);
+        write(6 + context, tex0);
+        expect(g_state.ctx[context].miptbp1 == expected, "Repeated TEX0 action did not regenerate mips");
+        write(0x14 + context, 0);
+        write(0x34 + context, 0x12345678);
+        write(6 + context, tex0);
+        expect(g_state.ctx[context].miptbp1 == 0x12345678, "Disabled MTBA replaced explicit mip addresses");
+    }
+    reset();
+}
 }
 int main() {
     try {
         using namespace ps2::gs;
+        mip_register_actions();
         unsigned cases = 0;
         for (unsigned psm : {1u, 0x31u}) for (unsigned pixels = 1; pixels <= 40; ++pixels) {
             for (bool chunked : {false, true}) {

@@ -123,6 +123,43 @@ int main() {
     }
     expect(rejected && events.empty(),
            "Malformed draw partially emitted commands");
+    {
+      webgl::RegisterStream replay;
+      State state{};
+      state.prim = 3;
+      state.prmodecont = 1;
+      std::array<std::uint64_t, 128> registers{};
+      unsigned checked = 0;
+      auto hardware = [&](std::uint8_t id, std::uint64_t value) {
+        registers[id] = value;
+        if ((id == 6 || id == 7) && (registers[0x14 + id - 6] & 512))
+          registers[0x34 + id - 6] = 0xfeedface; // TEX0's hidden register action.
+        if (id == 5) {
+          for (unsigned c = 0; c < 2; ++c)
+            expect(registers[0x34 + c] == state.ctx[c].miptbp1 &&
+                       registers[0x36 + c] == state.ctx[c].miptbp2,
+                   "Draw observed stale mip registers after TEX0");
+          ++checked;
+        }
+      };
+      for (unsigned c = 0; c < 2; ++c) {
+        state.ctx[c].tex1 = 512;
+        state.ctx[c].tex0 = 0x123400 + c;
+        state.ctx[c].miptbp1 = 0x987654321 + c;
+        state.ctx[c].miptbp2 = 0x123456789 + c;
+      }
+      replay.draw(state, vertices.data(), 3, 100, hardware);
+      // New TEX0 values can produce the same final mip image. Value caching
+      // must not suppress restoration after the implicit backend action.
+      state.ctx[0].tex0 ^= 1ull << 34;
+      state.ctx[1].tex0 ^= 1ull << 34;
+      replay.draw(state, vertices.data(), 3, 101, hardware);
+      replay.load_clut(state.ctx[0].tex0, 0, hardware);
+      replay.draw(state, vertices.data(), 3, 102, hardware);
+      replay.invalidate();
+      replay.draw(state, vertices.data(), 3, 103, hardware);
+      expect(checked == 12, "Mip replay sequence did not draw all vertices");
+    }
     std::cout << "PASS GS register stream: modes, contexts, packing, caching, "
                  "side effects, invalidation\n";
   } catch (const std::exception &error) {

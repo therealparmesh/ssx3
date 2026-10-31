@@ -14,6 +14,15 @@ uniform highp usampler2D lists;
 uniform highp usampler2D sourceTexture;
 uniform sampler2D normalizedTexture;
 uniform sampler2D paletteTexture;
+#ifdef ORDERED_MIP_SAMPLING
+uniform sampler2D mipTexture1;
+uniform sampler2D mipTexture2;
+uniform sampler2D mipTexture3;
+uniform sampler2D mipTexture4;
+uniform sampler2D mipTexture5;
+uniform sampler2D mipTexture6;
+#endif
+
 uniform uvec4 settings[8];
 #ifdef ORDERED_OPAQUE_HARDWARE
 flat in uint primitiveIndex;
@@ -68,10 +77,11 @@ bool alphaPass(int alpha, uint test) {
     return alpha != ref;
   }
 }
-int wrapCoord(int v, int axis) {
+int wrapCoord(int v, int axis, int level) {
   uint mode = (cfg(16) >> uint(axis * 2)) & 3u;
   int lo = int(cfg(axis == 0 ? 17 : 19)), hi = int(cfg(axis == 0 ? 18 : 20));
-  int size = int(cfg(axis == 0 ? 22 : 23));
+  lo >>= level; hi >>= level;
+  int size = max(1, int(cfg(axis == 0 ? 22 : 23)) >> level);
   if (mode == 0u)
     return v & (size - 1);
   if (mode == 1u)
@@ -80,11 +90,24 @@ int wrapCoord(int v, int axis) {
     return clamp(v, lo, hi);
   return (v & lo) | hi;
 }
-vec4 sampleTexel(ivec2 at) {
-  at = ivec2(wrapCoord(at.x, 0), wrapCoord(at.y, 1));
+vec4 normalizedMipTexel(ivec2 at, int level) {
+  switch(level) {
+#ifdef ORDERED_MIP_SAMPLING
+  case 1: return texelFetch(mipTexture1,at,0);
+  case 2: return texelFetch(mipTexture2,at,0);
+  case 3: return texelFetch(mipTexture3,at,0);
+  case 4: return texelFetch(mipTexture4,at,0);
+  case 5: return texelFetch(mipTexture5,at,0);
+  case 6: return texelFetch(mipTexture6,at,0);
+#endif
+  default: return texelFetch(normalizedTexture,at,0);
+  }
+}
+vec4 sampleTexel(ivec2 at, int level) {
+  at = ivec2(wrapCoord(at.x, 0, level), wrapCoord(at.y, 1, level));
   if (cfg(25) == 0u)
     return vec4(texelFetch(sourceTexture, at, 0));
-  vec4 value = texelFetch(normalizedTexture, at, 0);
+  vec4 value = normalizedMipTexel(at, level);
   if (cfg(25) >= 2u)
     value = texelFetch(
         paletteTexture,
@@ -106,7 +129,8 @@ vec4 sampleTexel(ivec2 at) {
   }
   return decoded;
 }
-ivec4 sampleTexture(vec2 uv) {
+vec4 sampleTexel(ivec2 at) { return sampleTexel(at,0); }
+ivec4 sampleBaseTexture(vec2 uv) {
   if ((cfg(15) & 1u) == 0u)
     return ivec4(sampleTexel(ivec2(floor(uv))));
   uv -= vec2(0.5);
@@ -117,6 +141,51 @@ ivec4 sampleTexture(vec2 uv) {
   vec4 top = a + (b - a) * f.x, bottom = c + (d - c) * f.x;
   return ivec4(
       clamp(top + (bottom - top) * f.y + vec4(0.5), vec4(0), vec4(255)));
+}
+// TEX1 is opt-in in this packet revision; legacy packets retain their
+// preceding level-zero filtering. Mip textures contain decoded index maps
+// for paletted formats, so filtering always follows the palette lookup.
+ivec4 sampleMipLevel(vec2 uv, int level, bool linearFilter) {
+  uv /= exp2(float(level));
+  if(!linearFilter) return ivec4(sampleTexel(ivec2(floor(uv)),level));
+  uv -= vec2(0.5);
+  ivec2 at=ivec2(floor(uv));
+  ivec2 fraction=ivec2(floor(fract(uv)*16.0));
+  ivec4 a=ivec4(sampleTexel(at,level));
+  ivec4 b=ivec4(sampleTexel(at+ivec2(1,0),level));
+  ivec4 c=ivec4(sampleTexel(at+ivec2(0,1),level));
+  ivec4 d=ivec4(sampleTexel(at+ivec2(1),level));
+  return (a*(16-fraction.x)*(16-fraction.y)+
+          b*fraction.x*(16-fraction.y)+
+          c*(16-fraction.x)*fraction.y+d*fraction.x*fraction.y)/256;
+}
+ivec4 sampleTexture(vec2 uv, float q) {
+#ifndef ORDERED_MIP_SAMPLING
+  return sampleBaseTexture(uv);
+#else
+  uint tex1=cfg(30);
+  if((tex1&0x80000000u)==0u) return sampleBaseTexture(uv);
+  float bias=float(int((cfg(31)&4095u)<<20u)>>20)/16.0;
+  float lod=bias;
+  if((tex1&1u)==0u) {
+    // Zero Q selects the most reduced level; avoid infinity-to-int casts.
+    lod= q==0.0 ? 128.0 : bias-log2(abs(q))*float(1u<<((tex1>>19u)&3u));
+  }
+  uint minFilter=(tex1>>6u)&7u;
+  if(lod<=0.0) return sampleMipLevel(uv,0,(tex1&32u)!=0u);
+  if(minFilter<2u) return sampleMipLevel(uv,0,minFilter==1u);
+  int maximum=int(min((tex1>>2u)&7u,6u));
+  lod=clamp(lod,0.0,float(maximum));
+  bool linearFilter=minFilter>=4u;
+  if((minFilter&1u)==0u) {
+    int level=min(maximum,int(floor(lod+0.5)));
+    return sampleMipLevel(uv,level,linearFilter);
+  }
+  int first=int(floor(lod)),second=min(maximum,first+1);
+  int fraction=int(floor(fract(lod)*65536.0));
+  return (sampleMipLevel(uv,first,linearFilter)*(65536-fraction)+
+          sampleMipLevel(uv,second,linearFilter)*fraction)/65536;
+#endif
 }
 ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
             uint kind, vec3 weights) {
@@ -141,7 +210,7 @@ ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
     else
       uv = tex.xy / (tex.z == 0.0 ? 1.0 : tex.z) *
            vec2(float(cfg(22)), float(cfg(23)));
-    ivec4 t = sampleTexture(uv);
+    ivec4 t = sampleTexture(uv,tex.z);
     int originalAlpha = source.a;
     uint textureFunction = cfg(14) & 3u;
     bool tcc = (cfg(14) & 4u) != 0u;

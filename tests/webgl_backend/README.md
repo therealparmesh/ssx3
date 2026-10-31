@@ -41,6 +41,9 @@ JSON evidence go to a fresh temporary directory by default. Headed browsers are
 the default, without GPU override flags. `SSX3_WEBGL_HEADLESS=1` allows functional
 testing; these fixtures do not measure performance.
 
+The live runtime probe also checks actual mip register replay, uploads and
+snapshot restore; see [mip fixtures](../webgl_mips/README.md).
+
 ## Coverage
 
 - **Population:** 393,216 pixels per browser. Every 16-bit word in PSMCT16 and

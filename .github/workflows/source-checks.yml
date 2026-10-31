@@ -71,6 +71,10 @@ jobs:
           node --check runtime/src/gs/webgl/ordered_raster.js
           node --check tests/webgl_ordered/verify.js
           node --check scripts/test_webgl_ordered.cjs
+          node --check scripts/test_webgl_mips.cjs
+          node --check tests/webgl_mips/oracle.js
+          node --check tests/webgl_mips/sampler.js
+          node --check tests/webgl_mips/bridge.js
       - name: Build the pinned asset-free WebGL backend fixtures
         run: |
           source tools/emsdk/emsdk_env.sh

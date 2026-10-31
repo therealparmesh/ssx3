@@ -56,6 +56,25 @@ void main(){uint at=uint(gl_VertexID)*2u;uvec4 v=texelFetch(vertices,ivec2(int(a
           "#version 300 es\n#define ORDERED_OPAQUE_HARDWARE 1\n#define ORDERED_HARDWARE_NO_DEPTH 1",
         ),
       );
+      const mipSource = fragmentSource.replace(
+        "#version 300 es",
+        "#version 300 es\n#define ORDERED_MIP_SAMPLING 1",
+      );
+      this.mipKernel = this.program(vertexSource, mipSource);
+      this.mipOpaque = this.program(
+        opaqueVertexSource,
+        mipSource.replace(
+          "#version 300 es",
+          "#version 300 es\n#define ORDERED_OPAQUE_HARDWARE 1",
+        ),
+      );
+      this.mipOpaqueNoDepth = this.program(
+        opaqueVertexSource,
+        mipSource.replace(
+          "#version 300 es",
+          "#version 300 es\n#define ORDERED_OPAQUE_HARDWARE 1\n#define ORDERED_HARDWARE_NO_DEPTH 1",
+        ),
+      );
       // Z24 values are exact dyadic D32F values. Adding 0.5 after scaling
       // would round odd values near 0xffffff up to the next integer.
       this.initialize = this.program(
@@ -339,6 +358,24 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     }
   }
 
+  bindMipTextures(program, levels, settings) {
+    const maximum =
+      ((settings[30] >>> 6) & 7) >= 2 ? (settings[30] >>> 2) & 7 : 0;
+    for (let i = 1; i <= 6; i++) {
+      this.bind(
+        program,
+        "mipTexture" + i,
+        8 + i,
+        (i <= maximum && levels[i - 1]) || this.dummyNormalized,
+      );
+      this.gl.bindSampler(8 + i, this.sampler);
+    }
+  }
+
+  releaseMipSamplers() {
+    for (let unit = 9; unit <= 14; unit++) this.gl.bindSampler(unit, null);
+  }
+
   render({
     targetFramebuffer,
     colorTexture,
@@ -350,6 +387,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     texture,
     palette,
     integerTexture,
+    mipTextures = [],
   }) {
     const gl = this.gl;
     if (this.destroyed) throw Error("Ordered raster bridge was destroyed");
@@ -369,6 +407,24 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       if (settings[25] !== 0 && !texture)
         throw Error("Missing normalized source texture");
       if (settings[25] >= 2 && !palette) throw Error("Missing source palette");
+    }
+    if (!Array.isArray(mipTextures)) throw Error("Invalid mip texture list");
+    const mipSampling = (settings[30] & 0x80000000) !== 0;
+    if (mipSampling && settings[0] & 16) {
+      const maximum = (settings[30] >>> 2) & 7;
+      const minification = (settings[30] >>> 6) & 7;
+      if (maximum > 6 || minification > 5)
+        throw Error("Reserved mip sampling mode");
+      if (settings[25] === 0)
+        throw Error("Mip sampling requires normalized index/color views");
+      for (const size of [settings[22], settings[23]])
+        if (!size || size > 1024 || size & (size - 1))
+          throw Error("Invalid mip source dimensions");
+      for (let i = 0; i < (minification >= 2 ? maximum : 0); i++) {
+        if (!mipTextures[i]) throw Error("Missing mip level " + (i + 1));
+        if (mipTextures[i] === colorTexture || mipTextures[i] === palette)
+          throw Error("Mip feedback requires host hazard resolution");
+      }
     }
     if (!settings[22] || !settings[23])
       throw Error("Invalid source dimensions");
@@ -424,6 +480,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
         texture,
         palette,
         integerTexture,
+        mipTextures,
       });
       return;
     }
@@ -619,7 +676,8 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outputFramebuffer);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    gl.useProgram(this.kernel);
+    const kernel = mipSampling ? this.mipKernel : this.kernel;
+    gl.useProgram(kernel);
     for (const [name, unit, input] of [
       ["initialColor", 0, this.inputColor],
       ["initialDepth", 1, this.inputDepth],
@@ -630,11 +688,13 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       ["normalizedTexture", 7, texture || this.dummyNormalized],
       ["paletteTexture", 8, palette || this.dummyNormalized],
     ])
-      this.bind(this.kernel, name, unit, input);
+      this.bind(kernel, name, unit, input);
     gl.bindSampler(7, this.sampler);
     gl.bindSampler(8, this.sampler);
-    gl.uniform4uiv(this.uniform(this.kernel, "settings[0]").location, settings);
+    if (mipSampling) this.bindMipTextures(kernel, mipTextures, settings);
+    gl.uniform4uiv(this.uniform(kernel, "settings[0]").location, settings);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (mipSampling) this.releaseMipSamplers();
     gl.bindSampler(7, null);
     gl.bindSampler(8, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, targetFramebuffer);
@@ -665,6 +725,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     texture,
     palette,
     integerTexture,
+    mipTextures = [],
   }) {
     const gl = this.gl;
     const positions = new Float32Array(
@@ -692,7 +753,14 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     const zte = (settings[1] & 65536) !== 0;
     const depthFree =
       !zte || (((settings[1] >>> 17) & 3) === 1 && settings[13] !== 0);
-    const program = depthFree ? this.opaqueNoDepth : this.opaque;
+    const mipSampling = (settings[30] & 0x80000000) !== 0;
+    const program = mipSampling
+      ? depthFree
+        ? this.mipOpaqueNoDepth
+        : this.mipOpaque
+      : depthFree
+        ? this.opaqueNoDepth
+        : this.opaque;
     if (zte && !depthFree) {
       gl.enable(gl.DEPTH_TEST);
       gl.depthFunc(
@@ -710,9 +778,11 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       this.bind(program, name, unit, input);
     gl.bindSampler(7, this.sampler);
     gl.bindSampler(8, this.sampler);
+    if (mipSampling) this.bindMipTextures(program, mipTextures, settings);
     gl.uniform2f(this.uniform(program, "targetSize").location, width, height);
     gl.uniform4uiv(this.uniform(program, "settings[0]").location, settings);
     gl.drawArrays(gl.TRIANGLES, 0, vertexWords.length / 8);
+    if (mipSampling) this.releaseMipSamplers();
     gl.bindSampler(7, null);
     gl.bindSampler(8, null);
     const count = vertexWords.length / 24;

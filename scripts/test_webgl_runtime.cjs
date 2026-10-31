@@ -21,7 +21,7 @@ let browser;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => window.qaProbe?.result || window.qaProbe?.errors.length, { timeout: 60000 });
   const result = await page.evaluate(() => ({
-    native: qaProbe.result, integration: qaProbe.webglIntegration, errors: qaProbe.errors,
+    native: qaProbe.result, mips: qaProbe.mips, integration: qaProbe.webglIntegration, errors: qaProbe.errors,
     messages: qaProbe.messages, backend: Module.ps2GpuBackend, isolated: crossOriginIsolated,
     webgpuAbsent: navigator.gpu === undefined, title: document.title, url: location.href,
   }));
@@ -41,6 +41,11 @@ let browser;
   assert(result.native.nonzeroSourceOffset >= 8192);
   assert.deepEqual(result.integration, { snapshot: true, drawExport: true, localCopy: true,
     partialRgb24: true, rejectedSnapshot: true, browserYield: true, glFaults: 6 });
+  assert.equal(result.mips?.cases, 124);
+  assert.equal(result.mips.pixels, 7936);
+  assert.equal(result.mips.hash, 2473005509);
+  assert(result.mips.mipBatches > 0);
+  assert.equal(result.mips.approximateBatches, 0);
   await page.screenshot({ path: path.join(output, kind + '.png') });
   await page.close();
   const control = await browser.newPage();
@@ -55,6 +60,6 @@ let browser;
   assert(negative.messages.some(text => text.includes('PROBE_FAIL: Dirty WebGL export must reject a GL fault')),
     'Suppressing error queries must fail the dirty-export control');
   await control.close();
-  console.log('PASS', kind, JSON.stringify(result.native), JSON.stringify(result.integration), 'and suppressed-error negative control');
+  console.log('PASS', kind, JSON.stringify(result.native), JSON.stringify(result.integration), JSON.stringify(result.mips), 'and suppressed-error negative control');
 })().catch(error => { console.error(error); process.exitCode = 1; })
   .finally(async () => { if (browser) await browser.close(); });

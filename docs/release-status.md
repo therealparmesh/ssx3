@@ -12,6 +12,28 @@ The current shell is from source `f85e4af96277d92b39f272412f5d633024ac6792`, wit
 
 ## Unreleased live WebGL integration
 
+The candidate now captures and samples CPU-owned mip chains before queuing
+vertices, including fixed/Q-based level selection, mip filtering, per-level
+wraps and palette decoding before filtering. Automatic TEX0 mip-address actions
+now update runtime state; register replay restores the final mip addresses after
+backend side effects. MIPTBP changes, CPU uploads and snapshots invalidate the
+affected views. Native mip layout/action checks and the old register replay
+negative control pass. Asset-free Chrome/Firefox checks agree on 109,440 sampler
+pixels, 1,920 ordered/opaque bridge pixels and 7,936 runtime pixels. Forced
+level-zero sampling must fail the oracle. These are discrete model checks;
+continuous-Q approximation and exact hardware rounding remain unqualified.
+GPU-owned/aliasing mip views and unsupported layouts retain the native fallback.
+See [mip fixture details](../tests/webgl_mips/README.md).
+
+A subsequent ordinary Firefox run entered Snow Jam and visibly reached 4%
+course progress with 199,751 mip batches and zero level-zero approximation
+batches. Its 20.46-second racing window delivered 400 fresh images (19.55/s),
+with a 103.04 ms maximum interval and audio reaching zero. No application errors
+were reported. An earlier script stopped at the briefing; its 18.10/s window
+is not a race measurement. These checks do not qualify a completed race,
+hardware fidelity or release performance.
+
+
 Destination samplers are now assigned once per linked shader program. Alpha-test
 failure passes update a scalar uniform while retaining the shading block's
 std140 offsets, instead of uploading the full block for every phase change.
@@ -39,12 +61,14 @@ in both browsers. This is a correctness fix; it does not establish a speed gain.
 
 Private profiling found thousands of native fallback draws per frame in a slow
 briefing. Almost all sampled fallback passes requested mip filtering, which the
-ordered path currently rejects; the native fallback currently samples level zero.
+ordered path previously rejected; the native fallback samples level zero.
+The new CPU-owned mip path covers a guarded subset of those requests.
 An explicitly approximate level-zero batching trial still submitted only about
 18 fresh images/s, so enabling that approximation would not meet the performance
 target. Sampled palettes usually contain varying alpha, ruling out a blanket
-opaque-material shortcut. Correct mip sampling, destination-dependent batching
-and frame delivery remain engineering work before performance qualification.
+opaque-material shortcut. Remaining mip aliases/layouts, destination-dependent
+batching and frame delivery remain engineering work before performance
+qualification.
 
 The draft WebGL branch now implements the runtime GPU API and can build a private game player, rather than only replaying captured commands. The normal backend and hosted release are unchanged. This candidate requires Asyncify, native internal resolution and the window-owned runtime; the split game/presentation worker is not integrated.
 
