@@ -10,7 +10,7 @@ const out =
   fs.mkdtempSync(path.join(os.tmpdir(), "ssx3-gamepad-"));
 fs.mkdirSync(out, { recursive: true });
 const url = process.env.SSX3_TEST_URL || "http://127.0.0.1:8681/";
-let browser, page;
+let browser, page, nativeGamepad;
 const errors = [],
   warnings = [],
   checks = [];
@@ -39,6 +39,19 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
     if (m.type() === "error") errors.push(m.text());
     if (m.type() === "warn") warnings.push(m.text());
   });
+  if (process.env.SSX3_TEST_DENY_GAMEPAD === "1") {
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, "getGamepads", {
+        configurable: true,
+        value() {
+          throw new DOMException(
+            "Controlled Gamepad API denial",
+            "SecurityError",
+          );
+        },
+      });
+    });
+  }
   const observer = fs.readFileSync(
     path.join(__dirname, "../tests/browser_gamepad/worker_observer.js"),
     "utf8",
@@ -63,6 +76,37 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
     };
   }, observer);
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  // Check the browser before installing synthetic pads. Replacing this API
+  // first would hide a permissions-policy or secure-context failure.
+  nativeGamepad = await page.evaluate(() => {
+    const result = {
+      secure: isSecureContext,
+      available: typeof navigator.getGamepads === "function",
+    };
+    try {
+      result.slots = navigator.getGamepads().length;
+      result.callSucceeded = true;
+    } catch (error) {
+      result.callSucceeded = false;
+      result.error = error.name;
+    }
+    return result;
+  });
+  assert.equal(
+    nativeGamepad.secure,
+    true,
+    "Gamepad testing requires a secure context",
+  );
+  assert.equal(
+    nativeGamepad.available,
+    true,
+    "Native browser Gamepad API is missing",
+  );
+  assert.equal(
+    nativeGamepad.callSucceeded,
+    true,
+    "Native browser Gamepad API access failed",
+  );
   await page.waitForFunction(
     () =>
       window.Module &&
@@ -266,6 +310,7 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
       {
         passed: true,
         browser: kind,
+        nativeGamepad,
         checks,
         errors,
         warnings,
@@ -286,7 +331,11 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
     console.error(e);
     fs.writeFileSync(
       out + "/failure.json",
-      JSON.stringify({ error: e.message, checks, errors, warnings }, null, 2),
+      JSON.stringify(
+        { error: e.message, nativeGamepad, checks, errors, warnings },
+        null,
+        2,
+      ),
     );
     process.exitCode = 1;
   })

@@ -27,6 +27,12 @@ Evidence defaults to a new temporary directory. This Linux test explicitly
 enables WebGPU with Chromium's unsafe-WebGPU/Vulkan flags or Firefox's
 `dom.webgpu.enabled` preference. It does not prove default-browser GPU support.
 
+Before supplying synthetic controllers, the driver verifies a secure context
+and calls the browser's real `navigator.getGamepads()`. A missing or denied API
+fails before Play. Run with `SSX3_TEST_DENY_GAMEPAD=1` as a negative control;
+it must exit unsuccessfully with `Native browser Gamepad API access failed`.
+This prevents simulated inputs from hiding a browser permission failure.
+
 Each browser checks 27 checkpoints: independent keyboard stick/D-pad channels;
 all sixteen standard controller buttons against fixed PS2 bit assignments;
 both sticks and analog trigger pressure; two-player input; disconnect,

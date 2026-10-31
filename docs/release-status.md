@@ -26,6 +26,19 @@ temporary API denial, real tab hiding, neutral input after acknowledged pause an
 and held-input restoration before native resume. Keyboard stick/D-pad channels
 are checked independently. No player implementation change was needed.
 
+The driver now checks secure-context and native Gamepad API access before
+installing simulated controller snapshots. Both browsers pass this check and
+all 27 input checkpoints. A controlled native API denial fails before Play,
+with zero simulated-input checkpoints reached. This prevents the test fixture
+from masking a browser permission failure.
+
+Separate checks against the actual version 68 HTTPS document used ordinary
+headed Chromium and Firefox without GPU overrides. Both had a secure,
+cross-origin-isolated document and a callable, unmodified native Gamepad API.
+No guest was started. These checks qualify controller API access; Firefox still
+did not expose WebGPU in that configuration, so they are not new gameplay or
+default-browser graphics qualifications. Site access and hosting were unchanged.
+
 The diagnostic forwards calls to the actual native exports before recording
 them; it supplies browser Gamepad API snapshots and does not substitute a guest
 or modify game memory. It uses the documented Linux WebGPU enablement settings,
