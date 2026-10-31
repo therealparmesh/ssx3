@@ -14,7 +14,11 @@ the WebGPU release.
 
 As of 2026-10-31, saved version 69 is running on the owner-private hosted site with the native audio-pacing pause correction described below. Live statistics remain opt-in through `?debug`. The preceding version 68 passed staged and hosted five-minute two-player race/results windows; the version 69 binary passed new staged five-minute later-peak windows in both desktop browsers. These results qualify their stated configurations; complete game progression and physical audio/display delivery remain unqualified.
 
-## Later-peak timing qualification remains open
+## Retained later-peak timing investigation
+
+The initial comparisons in this section use the preceding native build. The
+selected version69 runtime and its subsequent measurements are recorded below;
+these earlier failures remain retained under their original checks.
 
 A new five-minute Ruthless freeride comparison used the current source shell,
 unchanged qualified native assets, and a separate sourced QA career card. Both
@@ -189,6 +193,53 @@ guest-memory/card edit or altered game rule.
 This adds finish/rejection, Restart, Give Up/DNF, canceled-save Quit and successful
 save-and-quit/card-transfer coverage. It is not a new timing window or proof of
 successful race/campaign advancement. Runtime and hosting assets are unchanged.
+
+## Version69 Gravitude coverage and clock uncertainty
+
+The same qualified native binary and all 23 production player files were used
+for new local Gravitude career-qualifier checks. The separate sourced QA card
+started with No medal and a 03:00 top time; its earning method remains unverified,
+so it supplies access rather than evidence of earned unlocks. Moby completed
+an ordinary Chromium run sixth at 04:12; third place was 04:01. Normal reset and
+wipeout recovery were exercised. The original QA card and the native card bytes
+remained unchanged. This functional run recorded 42 actions and no application
+errors/warnings.
+
+Fresh visible Firefox and Chromium profiles then ran separate five-minute
+Gravitude windows at 1280×800, DPR 1 and calibrated 120 Hz, with the documented
+Linux WebGPU settings. Normal crouch, periodic Square recovery/boost and one
+Select reset were used. Racing and any finish/results tail are included; these
+are not 300 seconds of uninterrupted racing. No captures, builds, profiling or
+GPU-completion queries ran inside either window. The original image/loss gates
+and full-interval 50 ms source-clock tolerance were unchanged.
+
+| Browser | Duration | Fresh submissions/s | Longest actual interval | Source-clock difference interval | Full result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Firefox 158 | 300.650 s | 59.999915 | 19.640 ms | [-32.73, -27.27] ms | Pass |
+| Chromium 156 | 300.506 s | 60.002458 | 19.745 ms | [-55.31, -33.36] ms | Not qualified: full clock interval exceeds tolerance |
+
+Both had zero lost/overwritten images, producer replacements, pool underflows,
+missing audio, clipped/full-scale PCM or application errors/warnings, and no
+actual submission interval above 25 ms. Chromium's start observation crossed
+native fields 8929→8930 while its source count stayed fixed. The resulting clock
+interval is too wide to prove either a pass or drift beyond 50 ms; its entire
+interval must pass, so this window remains unqualified. Raw output-count
+comparisons were +49.33 ms for Firefox and +82.00 ms for Chromium, retained only as
+diagnostics. No failure is reclassified and no tolerance is relaxed.
+
+Post-window screens confirmed sixth-place finishes of 03:25 in Firefox and 03:51
+in Chromium, without advancement. Firefox also displayed a top-five time entry;
+Save Records was not selected, so record persistence is not claimed. Both
+browsers paused and closed cleanly. Runtime and hosting assets remain unchanged.
+
+Source inspection during the boundary investigation also found that the public
+frame getter reads a plain `std::uint64_t` counter updated by the emulation thread while
+the owner worker periodically reads it for status. Thread-safe publication and
+state-restoration behavior need further verification; this is not established as
+the cause of the clock interval. Local ThreadSanitizer probes could not start
+because of an unexpected-memory-mapping runtime error; no sanitizer pass or
+race diagnostic is claimed. This and the unresolved clock qualification remain
+open before a broader production sign-off.
 
 ## Current browser gamepad verification
 
