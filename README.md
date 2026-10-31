@@ -21,7 +21,7 @@ The default build uses JSPI and modern Wasm exception handling. A separate Async
 
 ## Controls
 
-Connect a standard USB/Bluetooth controller and press a button to activate it. Browser gamepad mappings support two controller slots; physical-device qualification remains incomplete. Touch controls appear on phones and can be enabled with `?touch` for layout testing.
+Connect a standard USB/Bluetooth controller, click Play to enable sound, and press a controller button to activate it. Browser gamepad mappings support two controller slots, both sticks, analog trigger pressure and stable player assignments when a controller disconnects. Start/Options is the game's Start button. After returning from a hidden tab, use Resume to continue. See the [browser gamepad checks](tests/browser_gamepad/README.md) for reproducible native-worker verification. Touch controls appear on phones and can be enabled with `?touch` for layout testing.
 
 Keyboard positions follow [PCSX2's layout](https://github.com/PCSX2/pcsx2/blob/master/pcsx2/Input/InputManager.cpp), with Space added for jump/select:
 
@@ -60,9 +60,11 @@ Save career progress in the game first: **Mcomm → Options → Save game**, or 
 
 Version 68 is deployed privately with live statistics moved to the existing `?debug` mode. Separate five-minute hosted two-player Snow Jam windows passed at 120 Hz: Firefox 60.000005 fresh submissions/s with a 19.180 ms maximum interval; Chromium 60.002325 with a 20.080 ms maximum. Both riders finished in each run. There was no image/audio loss, clipping or application error. All 50 asset-free CI suites pass. See [current release status](docs/release-status.md) for exact builds, scope and retained earlier failures, and [validation scope](docs/validation.md) for historical evidence and limitations.
 
-The Linux timing tests explicitly enable WebGPU: Firefox uses `dom.webgpu.enabled=true`; Chromium uses `--enable-unsafe-webgpu --enable-features=Vulkan`. Fresh automation profiles without those overrides do not start the game on the tested AMD Linux host. Hardware WebGL 2 is available there, but this build has no WebGL renderer. Default-browser startup therefore remains an open compatibility requirement.
+WebGPU is the production graphics backend. The slower WebGL experiment is separate from this build and is not a production fallback. A compatible hardware WebGPU adapter is required; the player explains missing browser capabilities before starting.
 
-Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
+The Linux timing tests explicitly enable WebGPU: Firefox uses `dom.webgpu.enabled=true`; Chromium uses `--enable-unsafe-webgpu --enable-features=Vulkan`. Fresh automation profiles without those overrides do not start the game on the tested AMD Linux host. Firefox support therefore depends on WebGPU availability in that browser/platform configuration.
+
+Physical-phone testing is outside the current release scope. These desktop results do not qualify phone performance, Bluetooth latency, physical audio/display delivery or full-game coverage, and are not a universal 60 fps or bug-free guarantee.
 
 Asset-free checks can run without a disc image:
 

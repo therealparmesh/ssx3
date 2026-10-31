@@ -1,6 +1,37 @@
 # Release status
 
-As of 2026-10-30, saved version 68 is running on the owner-private hosted site. Live statistics are now opt-in through the existing `?debug` mode. Normal play keeps the diagnostic HUD inactive, preventing its text updates from triggering native Firefox canvas snapshot waits. Both staged and actual hosted desktop browsers passed separate five-minute two-player race/results windows with near-60 fresh submissions/s and no actual interval over 25 ms. Full production sign-off remains open: default-browser compatibility, physical phones/controllers/audio/display delivery and complete game progression remain unqualified.
+The release target is now the WebGPU player with keyboard and standard browser
+gamepad support. The owner explicitly selected one graphics backend and removed
+physical-phone testing from the release requirements. A hardware WebGPU adapter,
+shared memory and cross-origin isolation are required. Firefox support depends
+on WebGPU availability in that browser/platform configuration.
+
+The near-60 results below belong to the WebGPU build. A separate experimental
+WebGL renderer measured 19.55 fresh images/s during a short race-entry check;
+it did not replace the hosted release. WebGL work has stopped and is not a
+production fallback. Its rendering/performance failures are not regressions of
+the WebGPU release.
+
+As of 2026-10-30, saved version 68 is running on the owner-private hosted site. Live statistics are now opt-in through the existing `?debug` mode. Normal play keeps the diagnostic HUD inactive, preventing its text updates from triggering native Firefox canvas snapshot waits. Both staged and actual hosted desktop browsers passed separate five-minute two-player race/results windows with near-60 fresh submissions/s and no actual interval over 25 ms. These results qualify their stated desktop configurations; complete game progression and physical audio/display delivery remain unqualified.
+
+## Current browser gamepad verification
+
+The current source shell was rebuilt using the pinned SDK with the qualified
+WebGPU worker assets (native SHA-256
+`b8cf5dfe41f9cab9fbd5ca85907515737224f8659e99300887a65d880d2935f4`).
+Both headed Chromium and Firefox pass 27 native-worker input checkpoints each,
+with no application errors or warnings. The checks cover every standard gamepad
+button, both sticks, analog pressure, two players, stable reconnect assignments,
+temporary API denial, real tab hiding, neutral input after acknowledged pause and return to focus
+and held-input restoration before native resume. Keyboard stick/D-pad channels
+are checked independently. No player implementation change was needed.
+
+The diagnostic forwards calls to the actual native exports before recording
+them; it supplies browser Gamepad API snapshots and does not substitute a guest
+or modify game memory. It uses the documented Linux WebGPU enablement settings,
+so it does not qualify default browser settings or physical-controller latency.
+It is separate from timing qualification. The driver and reproduction contract
+are in [browser gamepad checks](../tests/browser_gamepad/README.md).
 
 The current shell is from source `f85e4af96277d92b39f272412f5d633024ac6792`, with hosting source `43e95691bdd160427bd4c195b0b24479e308c075`. Native assets are unchanged: desktop runtime source `43fb1f0b293353a4880d26c0302deaec1ebaf69e`, immutable release `289893fc3b9a64e8759a0a6bd222b1e9680ab048a95e555ed582098248f0a275`, native SHA-256 `b8cf5dfe41f9cab9fbd5ca85907515737224f8659e99300887a65d880d2935f4`. Version 67 is retained for rollback. Primary/compatibility players receive the same shell change while retaining their assets and earlier desktop qualification; there is no new standalone performance window. Game assets and private access credentials are excluded from this repository.
 
@@ -36,7 +67,13 @@ Chrome documents a WebGPU compatibility mode targeting older graphics APIs, star
 
 A private feasibility test selected the existing CPU GS rasterizer in the runtime-worker environment while retaining the established hardware GPU presenter and test flags. The actual SSX 3 title rendered, but its 30.578-second window averaged only 18.546471 fresh submissions/s, with an 83.150 ms maximum interval, 563 intervals over 25 ms and 1,006,688 missing stereo frames. There were no application errors/warnings. Native pause and a frozen frame count were verified; the browser closed and the display returned to 60 Hz. This is a rejected CPU-headroom test, not a default-browser fallback or gameplay qualification. An initial helper-generation error stopped before browser launch and is retained separately.
 
-The current GS renderer uses WebGPU compute/storage operations, and the separate presenter also requires WebGPU. Providing default-browser support where hardware WebGL 2 is available requires a GPU-backed renderer and presenter, not just removing the feature check. An existing PS2 OpenGL renderer's interfaces and permissive source license were inspected, but no third-party renderer was integrated. Required integration work includes register/image submission, VRAM/CLUT coherence, framebuffer/interlace handling, context/thread ownership, reset/state behavior, and presentation that preserves bounded ownership and timing. A software fallback that misses the performance target was not shipped. Version 68 and all native/hosting assets remain unchanged by this audit; default-browser compatibility and physical-device qualification stay open.
+The GS renderer and separate presenter require WebGPU. Supporting WebGL-only
+configurations would require another renderer and presenter; that experiment
+has been stopped in favor of the selected WebGPU release target. The capability
+audit above is retained as evidence of the tested platform limits, rather than
+as a promise to implement another backend. Version 68 and its native/hosting
+assets were unchanged by that audit.
+
 
 ## Version67 FPS status update and 120 Hz qualification
 
