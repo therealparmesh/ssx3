@@ -1098,3 +1098,22 @@ even if audio drains during pause. Resume must recheck the queue before
 continuing. The same fixture deliberately substitutes the old escaping loop
 and a post-loop pause wait that omits the budget recheck; both must fail for
 their specific regressions. CTest runs this as `audio-pause-backpressure`.
+
+
+### Native frame-counter publication
+
+The public `frame_count()` and `frames_run()` getters now read an atomic
+64-bit counter, matching their cross-thread callers in GPU profiling and browser
+status publication. Saved states still serialize an ordinary eight-byte value
+at the existing field position, then restore that value through an atomic store.
+This corrects an unsafe concurrent read; it does not establish the cause of the
+retained Gravitude clock-qualification result.
+
+The asset-free `frame-counter-publication` CTest compiles the production storage,
+increment, getters and state-field helper. It checks concurrent monotonic reads
+across the 32-bit boundary, exact final increments, and byte-for-byte legacy
+64-bit state round trips, including values above JavaScript's exact integer range.
+Negative controls reject serializing the live atomic object and narrowing the
+saved field. Run it with `python3 scripts/test_frame_counter.py --cxx clang++`
+or through the native CTest suite. It does not replace full-machine saved-state
+or browser timing validation.

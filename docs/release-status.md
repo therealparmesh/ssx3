@@ -241,6 +241,29 @@ because of an unexpected-memory-mapping runtime error; no sanitizer pass or
 race diagnostic is claimed. This and the unresolved clock qualification remain
 open before a broader production sign-off.
 
+## Atomic frame-counter candidate
+
+The native frame counter now uses atomic 64-bit storage for both public getters.
+Saved-state serialization retains the existing eight-byte field through an
+ordinary local value. All 19 native suites pass, including concurrent reads,
+32-bit rollover and legacy state bytes; negative controls reject raw atomic
+serialization and a narrowed field. The unchanged audio-clock verifier passes
+59 checks across four decoded-PCM modes. Chromium and Firefox each pass all
+27 native keyboard/controller checkpoints with no application errors/warnings.
+
+The rebuilt candidate's native SHA-256 is
+`bf65d6f0ddde903661ed3d0890f3bb1c07bd4433553cdb2f8149386938598785`;
+all other production player bytes match version69. A fresh 300.486-second
+Chromium Gravitude window delivered 60.002398 submissions/s, with a 22.550 ms
+maximum interval and no image loss, producer replacements, pool underflows,
+missing audio, clipped/full-scale PCM or application errors/warnings. Its full
+source-clock interval, [-50.66, -45.34] ms, still crosses the 50 ms tolerance and
+remains unqualified. Both frame observations were stable within a single field.
+The queue changed from 83.33 to 30.67 ms while its configured target was 40 ms;
+this motivates investigating the separate 80 ms producer high-water limit.
+The atomic fix does not clear the clock qualification. No tolerance was relaxed
+and the candidate has not been deployed; private version69 remains unchanged.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified

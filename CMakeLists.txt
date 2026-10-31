@@ -236,6 +236,8 @@ if(PS2_RUNTIME_TESTS AND NOT EMSCRIPTEN)
     add_executable(ps2audio_source_clock_tests tests/audio_source_clock.cpp)
     add_test(NAME audio-source-clock COMMAND ps2audio_source_clock_tests)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME frame-counter-publication COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_frame_counter.py" --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME audio-producer-backpressure COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_audio_producer.py" --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME audio-pause-backpressure COMMAND "${Python3_EXECUTABLE}"
