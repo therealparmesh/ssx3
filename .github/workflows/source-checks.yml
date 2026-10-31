@@ -27,6 +27,8 @@ jobs:
         run: cmake --build build/checks --parallel 2
       - name: Run native regression checks
         run: ctest --test-dir build/checks --output-on-failure
+      - name: Check browser build and local-play workflow
+        run: python3 scripts/test_web_workflow.py
       - name: Check browser JavaScript regressions
         run: |
           node --check scripts/test_browser_gamepad.cjs

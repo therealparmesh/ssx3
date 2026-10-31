@@ -17,7 +17,7 @@ Open `http://127.0.0.1:8620/` in a WebGPU-capable browser. The local server supp
 
 The build verifies the executable's SHA-1 before translating it: `77114dfd1205eaccf1ccc18c5f9650097fa78bd8` (`SLUS_207.72`). Other regions/revisions are not supported by the SSX 3 wrapper.
 
-The default build uses JSPI and modern Wasm exception handling. A separate Asyncify build is available for browsers missing those features; see [build instructions](docs/building.md). WebGPU, shared memory and cross-origin isolation are required by both builds. Firefox on Linux may require `dom.webgpu.enabled=true` in `about:config`.
+The default SSX 3 build uses the dedicated Asyncify game worker and a separate WebGPU presentation worker, matching the architecture used for the desktop checks. Build, play and local-host scripts select `build/web-ssx3-asyncify-worker` consistently. The wrapper generates its browser translation without tail calls while retaining the native translation. WebGPU, shared memory and cross-origin isolation are required. Firefox on Linux may require `dom.webgpu.enabled=true` in `about:config`. Other browser variants are described in the [build instructions](docs/building.md).
 
 ## Controls
 

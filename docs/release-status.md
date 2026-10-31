@@ -327,6 +327,43 @@ Controls cover the observed actual 24.62/RAF 25.26 ms split and a later 33.30 ms
 event after more than the history capacity of normal entries.
 The candidate has not been deployed or given full release qualification.
 
+## Build workflow alignment and fresh translation
+
+The SSX 3 shell scripts now share browser variant selection. The wrapper builds
+its native translation, then a separate Asyncify translation without tail calls,
+applying startup/effects gates and recorded vector programs to both. The default
+build, play and optional local-host commands select
+`build/web-ssx3-asyncify-worker`. Generic games retain their JSPI default;
+explicit overrides select diagnostic variants consistently. Local hosting checks
+all worker helpers before service changes and removes stale compressed files
+that would otherwise shadow fresh bytes.
+
+`scripts/test_web_workflow.py` exercises the actual scripts with stand-in heavy
+tools, no disc or SDK download, and no real service changes. It covers both
+translations and patch/vector destinations, build flags, play-directory
+selection, helper/gzip publication, stale-gzip removal, a missing-helper guard,
+explicit overrides, native-only mode and a project path containing spaces.
+This workflow check is included in source CI; it is not a gameplay test.
+
+A real fresh translation with the current native generators reproduced all 221
+existing generated files byte-for-byte. A full pinned-SDK build compiled the
+game archive, runtime and host from those files without archive reuse. Its game
+archive SHA-256 matches the previous `1f22aff7…` archive, and all 23 player files,
+including compressed assets, match the held audio-pacing candidate whose native
+SHA-256 is `39ecdb84…`. This verifies fresh generation/build reproducibility for
+that candidate; it does not clear its retained Firefox timing failure or qualify
+all variants.
+
+The private dual-trigger diagnostic then completed 300.647 seconds at 60.000154
+fresh submissions/s, with a 19.30 ms maximum actual interval and 17.42 ms maximum
+fresh-RAF interval. Source-clock bounds [-6.52, -1.48] ms pass. It had no image
+loss/replacements, audio shortages, clipping or application errors/warnings.
+The fixed history wrapped 108,235 records with no event above its 20 ms diagnostic
+trigger. It did not reproduce the preceding 33.30 ms delay and remains
+explicitly diagnostic-only; no earlier failure is reclassified. The post-window
+screen showed Moby's top-five time 03:15; Continue/Save Records were not selected.
+Hosting remains unchanged.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified

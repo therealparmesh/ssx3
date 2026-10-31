@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PS2_GENERATED "" CACHE PATH "Folder with the C++ generated for a game")
 option(PS2_DEVELOPER_TOOLS "Include native profiling and named Wasm profiling functions" OFF)
 option(PS2_RUNTIME_TESTS "Build asset-free runtime and code-generation regression tests" OFF)
-option(PS2_WEB_WORKER "Experimental dedicated-worker game renderer (Asyncify only)" OFF)
+option(PS2_WEB_WORKER "Dedicated-worker game renderer (Asyncify only)" OFF)
 option(PS2_GPU_TESTS "Build browser WebGPU regression fixtures without game assets" OFF)
 
 # Keep every indirect game entry point registered. Let the linker remove only
@@ -27,7 +27,7 @@ if(EMSCRIPTEN)
         set(PS2_WEB_MODE_FLAGS -mtail-call -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0)
         set(PS2_WEB_SUSPEND_FLAGS -sJSPI)
     elseif(PS2_WEB_ASYNC STREQUAL "asyncify")
-        # Opt-in experiment: PS2_GENERATED must come from --no-tail-calls.
+        # PS2_GENERATED must come from --no-tail-calls.
         # Keep exception support for the IPU decoder without Wasm EH, which
         # cannot currently be combined with Asyncify in this toolchain.
         set(PS2_WEB_MODE_FLAGS -mno-tail-call -fexceptions)

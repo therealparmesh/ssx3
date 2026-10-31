@@ -7,8 +7,8 @@ usage() {
   cat <<'EOF'
 usage: scripts/port.sh <name> <game.iso | game.zip | game.7z> [options]
 
-Turns a PS2 disc image you own into a browser build in build/web-<name> and a
-native one in build/native-<name>. It reads the boot program named in
+Turns a PS2 disc image you own into a browser variant under build/ and a
+native build in build/native-<name>. It reads the boot program named in
 SYSTEM.CNF, translates its machine code to C++, runs it headless to find code
 the static pass missed (adding those entry points and translating again),
 compiles the vector unit programs those runs recorded and builds both.
@@ -62,6 +62,10 @@ game="$ROOT/games/$name"
 generated="$ROOT/generated/$name"
 native="$ROOT/build/native-$name"
 tools="$ROOT/build/tools"
+if [ "$web" = 1 ]; then
+  source "$here/web_config.sh"
+  ps2_web_config "$ROOT" "$name"
+fi
 export EMSDK="${EMSDK:-$ROOT/tools/emsdk}"
 setup=()
 [ "$web" = 1 ] || setup=(--native-only)
@@ -136,12 +140,15 @@ if windows=$(python3 -I "$here/windows.py" list "$elf") && [ -n "$windows" ]; th
 fi
 
 translate() {
-  "$tools/eerecomp" "$elf" --entries "$game/entries.txt" "${modules[@]}" "${overlays[@]}" --out "$generated" | tail -1
+  local output="${1:-$generated}" translation_mode="${2:-tail-calls}"
+  local translation_flags=()
+  [ "$translation_mode" != no-tail-calls ] || translation_flags=(--no-tail-calls)
+  "$tools/eerecomp" "$elf" --entries "$game/entries.txt" "${modules[@]}" "${overlays[@]}" "${translation_flags[@]}" --out "$output" | tail -1
   if [ ${#optional_visuals[@]} -gt 0 ]; then
-    python3 -I "$here/optional_visuals.py" "$generated" "${optional_visuals[@]}"
+    python3 -I "$here/optional_visuals.py" "$output" "${optional_visuals[@]}"
   fi
   if [ "$ssx3_fast_boot" -eq 1 ]; then
-    python3 -I "$here/ssx3_startup.py" "$generated"
+    python3 -I "$here/ssx3_startup.py" "$output"
   fi
 }
 
@@ -203,11 +210,19 @@ fi
 echo "== [6/6] builds"
 build_native
 if [ "$web" = 1 ]; then
+  if [ "$ps2_web_mode" = asyncify ]; then
+    # Asyncify needs its own translation without musttail dispatch. Keep the
+    # native translation intact, including discoveries from exploration.
+    translate "$ps2_web_generated" no-tail-calls
+    if compgen -G "$game/vu1/*.bin" > /dev/null; then
+      "$tools/vurecomp" "$game/vu1" "$ps2_web_generated" | tail -1
+    fi
+  fi
   "$here/build_web.sh" "$name" "$EMSDK"
 fi
 echo
 if [ "$web" = 1 ]; then
-  printf 'Done. Serve it with:  python3 scripts/serve.py %q %q\n' "build/web-$name" "games/$name/disc.iso"
+  printf 'Done. Serve it with:  python3 scripts/serve.py %q %q\n' "${ps2_web_out#$ROOT/}" "games/$name/disc.iso"
   echo "and open http://localhost:8620/"
 fi
 play=$(printf '%q %q --disc %q --window' "build/native-$name/ps2run" "${elf#$ROOT/}" "games/$name/disc.iso")
