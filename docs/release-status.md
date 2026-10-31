@@ -411,6 +411,39 @@ an instrumented diagnostic, not a release qualification: the earlier 33.30 ms
 and 25.20 ms failures remain unresolved, the extra-field experiment remains
 rejected, and the aligned 40 ms candidate remains held without deployment.
 
+A subsequent private collector adds a generation-checked shared producer history
+to distinguish readback, pixel publication and message delivery. Its concurrency
+control performed 200,000 writes and rejected in-progress/overwritten rows;
+delegation checks cover successful, rejected and synchronously thrown readbacks.
+A delayed synthetic event in real Firefox captured 329 producer records with
+no skipped rows or application errors/warnings, and native/private markers
+aligned within 0.48 ms. This validates capture wiring, not gameplay timing.
+
+The ordinary Gravitude run then reproduced a real failure at approximately
+3.67 seconds: a 25.20 ms actual interval and a 25.26 ms fresh-RAF interval.
+Automatic shutdown retained both native markers, aligned within 0.78 ms, plus
+the producer and presenter contexts. Pixels were published 34.60 ms apart and
+arrived 34.54 ms apart. Matching slot IDs and generations bound the later
+message's delivery to 0.06–0.32 ms; presenter callbacks stayed within 9.06 ms
+and uploads within 0.86 ms in the captured context.
+
+The runtime-owner worker's native profile records 5.97 ms of shrinking major GC,
+7.81 ms of cycle collection, another 1.09 ms major GC and 0.08 ms cycle collection
+during that publication gap, totaling 14.96 ms. Native samples independently
+include Major GC and CC stacks in the same worker while the presenter mostly
+waits for events. This identifies a producer-side GC/CC interruption contributing
+to this captured image deficit; it neither explains every millisecond of the
+gap nor attributes the earlier unprofiled 33.30 ms failure. The native marker
+parser now distinguishes instant markers' zero absent endpoint from split
+interval starts/ends, pairs retained split endpoints and excludes unmatched
+endpoints. A focused fixture verifies these cases before attribution.
+
+The diagnostic ended after 4.018 seconds, with no missing audio, image loss or
+application errors/warnings; source-clock bounds [+4.17, +9.16] ms passed. It
+fails the unchanged image gate. READ-promise instrumentation adds a microtask,
+so the profile remains diagnostic-only. No browser preferences disabling GC,
+release-limit changes, runtime selection or deployment followed this capture.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified
