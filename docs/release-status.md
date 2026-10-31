@@ -156,6 +156,40 @@ notifications incorrectly; its failed result is retained, and the corrected
 exact-message classification passed a fresh Firefox run. These are live
 functional smoke checks, not additional five-minute timing windows.
 
+## Version69 career race exit and save-and-quit
+
+The unchanged version69 native binary passed a local, source-owned functional
+career check using the actual earlier earned career export. A normal Snow Jam
+qualifier finished sixth at 03:55; third place was 03:44. The results correctly
+refused advancement. Restart completed its confirmation/loading/countdown flow.
+The retry was voluntarily abandoned and correctly classified DNF. No new medal,
+reward, semifinal advancement or later-peak unlock is claimed.
+
+The first save-and-quit attempt selected an empty slot by mistake. The game
+rejected the duplicate PLAYER1 name; canceling that save returned to the title.
+That canceled attempt is retained and does not establish saved race progress.
+After reloading the original career, the normal Mcomm Quit flow selected Save,
+used the existing PLAYER1 slot and overwrite confirmation, displayed Save
+complete, then returned to the title after Continue.
+
+The actual Export card button downloaded 8,650,752 bytes at SHA-256
+`d1214e7503c65d4d1cae9501d30adbd8c2b2f6c8d7ef74108253a4dceaba3230`.
+The download matched the paused native card exactly. Browser-storage revisions
+both reached 1, with no write or native card handoff pending. The original input
+export remained unchanged.
+
+Fresh headed Firefox imported that actual download through the UI. Native card
+hashes before and after normal career loading matched the download exactly;
+rendered mountain gameplay retained the $1,015 wallet and 1/5 collectible count.
+The runs recorded 93 Chromium and 11 Firefox actions, zero application errors
+or warnings, acknowledged final native pauses and clean browser closure. They
+used 1280×800 and the documented Linux WebGPU settings, simulated standard-controller
+snapshots through production polling, and no native state fixture, direct
+guest-memory/card edit or altered game rule.
+This adds finish/rejection, Restart, Give Up/DNF, canceled-save Quit and successful
+save-and-quit/card-transfer coverage. It is not a new timing window or proof of
+successful race/campaign advancement. Runtime and hosting assets are unchanged.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified
