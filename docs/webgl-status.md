@@ -61,6 +61,19 @@ run because it could exclude asynchronous queue waits; a malformed narrow
 signature failed at link time and is also excluded. The next investigation is
 display presentation without synchronous CPU pixel readback.
 
+A subsequent private ImageBitmap presentation prototype displayed normal menus
+and entered Snow Jam without application errors. Its unprofiled 20.185-second
+race-entry window still presented only 363 images (17.98/s), reached a 107.48 ms
+maximum interval, exhausted audio and replaced queued images. A separate
+5.157-second instrumented follow-up counted only 18 native `readPixels` calls
+(9.51 ms of wrapped call time), but also 96,809 bridge draw calls and 103,844
+bridge texture uploads. The follow-up presented 97 images (18.81/s). This
+demonstrates that removing explicit display readback alone does not satisfy the
+target; earlier sampled readback waits must not be treated as independent GPU
+execution cost. There is no accepted causal speed comparison. Image scaling,
+pause/capacity behavior and Firefox were not qualified for the prototype. It
+remains outside source; the normal copy player and WebGPU release are unchanged.
+
 The candidate now captures and samples CPU-owned mip chains before queuing
 vertices, including fixed/Q-based level selection, mip filtering, per-level
 wraps and palette decoding before filtering. Automatic TEX0 mip-address actions
