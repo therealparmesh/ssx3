@@ -30,6 +30,7 @@ jobs:
       - name: Check browser JavaScript regressions
         run: |
           node --check scripts/test_browser_gamepad.cjs
+          node --check scripts/test_browser_media.cjs
           node --check tests/browser_gamepad/worker_observer.js
           node scripts/test_disc_fetch.cjs
           node scripts/test_frame_presentation.cjs
@@ -37,6 +38,7 @@ jobs:
           node scripts/test_queue_submit.cjs
           node scripts/test_frame_metrics.cjs
           node scripts/test_audio_metrics.cjs
+          node scripts/test_audio_source_clock.cjs
           node scripts/test_audio_refill.cjs
           node scripts/test_queue_wait.cjs
           node scripts/test_yield_tasks.cjs

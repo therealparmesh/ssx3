@@ -66,8 +66,31 @@ browser pass or a physical A/V measurement. See the regression in
 [tests/audio_source_clock.cpp](../tests/audio_source_clock.cpp) and
 [Libretro's explanation of dynamic rate control](https://docs.libretro.com/development/cores/dynamic-rate-control/).
 
-The browser verifier needs a resampling-aware source-clock observation and new
-unchanged-runtime measurements before the later-peak check can be signed off.
+The browser verifier now brackets source statistics and ring publication at one
+read-counter instant. It includes converter/limiter delay, ratio limits and a
+32-input-frame publication margin. The complete source-clock difference interval
+must be inside (-50, +50) ms; overlap alone cannot pass. JavaScript checks use
+actual PCM time-code fixtures and cover publication lag, unsigned rollover, PAL,
+invalid observations, real buffered-delay rejection and inconclusive intervals.
+The extracted native producer checks its publication boundary, including larger
+input calls; a deliberate 64-input-packet mutant fails the 32-frame assertion.
+
+New five-minute Ruthless windows used the unchanged player above, 1280×800/DPR 1,
+and calibrated 120 Hz. No screenshots, builds or profiling ran inside them.
+
+| Browser | Fresh submissions/s | Longest actual interval | Source-clock difference interval | Result |
+| --- | ---: | ---: | ---: | --- |
+| Chromium 156 | 60.002591 | 21.71 ms | [-36.01, -30.66] ms | Pass |
+| Firefox 158 | 60.000090 | 18.74 ms | [-69.37, -63.96] ms | Fails 50 ms source-clock tolerance |
+
+Both had zero lost/overwritten images, audio shortages, clipped/full-scale PCM,
+producer replacements or application errors/warnings. Raw output-count differences
+were +74.67 ms and +38.67 ms respectively; they are retained diagnostically.
+The new source-clock check detects a Firefox failure that the old count comparison
+would have missed. Its queue changed from 92.00 ms to 30.67 ms across the window.
+Pause/resume buffering requires further work; later-peak A/V qualification remains
+open. These windows include ordinary recovery/reset inputs, not course completion
+or earned unlocks. No historical failed window is reclassified as a pass.
 The unpublished native pacing candidates are not selected for release.
 The hosted runtime has not changed as a result of these tests.
 

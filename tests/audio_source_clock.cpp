@@ -18,7 +18,7 @@ using ps2::audio::PeakLimiter;
 using ps2::audio::RateConverter;
 
 struct Snapshot {
-    double source, read, actual, lower, upper;
+    double source, read, actual, lower, upper, queued;
 };
 struct Range {
     double lower, upper;
@@ -88,7 +88,7 @@ void prove_source_clock(int mode) {
             (queued + PeakLimiter::kBlock) / RateConverter::kMaximumRatio + 1;
         assert(actual >= lower && actual <= upper);
         ++checks;
-        const Snapshot now{static_cast<double>(source), static_cast<double>(read), actual, lower, upper};
+        const Snapshot now{static_cast<double>(source), static_cast<double>(read), actual, lower, upper, queued};
         if (!start.source && source >= (mode == 0 ? 48000u : 4800u) && source % 800 == 0)
             start = now;
         if (!finish.source && source >= finish_at && source % 800 == 0) finish = now;
@@ -124,11 +124,16 @@ void prove_source_clock(int mode) {
                 "\"sourceClockDifferenceBoundsMs\":[%.6f,%.6f],"
                 "\"videoOffsetNegativeControlRejected\":true,"
                 "\"bufferDelayNegativeControlRejected\":true,"
-                "\"bufferDelayDifferenceBoundsMs\":[%.6f,%.6f]}\n",
+                "\"bufferDelayDifferenceBoundsMs\":[%.6f,%.6f],"
+                "\"start\":[%.0f,%.0f,%.0f,%.0f],\"end\":[%.0f,%.0f,%.0f,%.0f],"
+                "\"delayed\":[%.0f,%.0f,%.0f,%.0f]}\n",
                 mode, mode == 3 ? RateConverter::kMinimumRatio : ratio,
                 mode == 3 ? RateConverter::kMaximumRatio : ratio,
                 static_cast<unsigned long long>(checks), fields_per_second, raw, actual_difference,
-                corrected.lower, corrected.upper, bad_delay.lower, bad_delay.upper);
+                corrected.lower, corrected.upper, bad_delay.lower, bad_delay.upper,
+                start.source, start.read, start.actual, start.queued,
+                finish.source, finish.read, finish.actual, finish.queued,
+                delayed.source, delayed.read, delayed.actual, delayed.queued);
 }
 } // namespace
 

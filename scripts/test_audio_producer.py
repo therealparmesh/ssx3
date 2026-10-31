@@ -18,6 +18,10 @@ assert capacity
 globals_ = source[source.index('struct AudioRing {'):source.index('Slot g_slots[')]
 producer = source[source.index('void wait_while_paused() {'):source.index('\ndouble audio_queued_ms()')]
 producer = producer.replace('usleep(', 'audio_test_sleep(')
+publication = 'g_audio.write.store(write, std::memory_order_release);'
+assert producer.count(publication) == 1
+producer = producer.replace(publication, publication + '\n        audio_test_publication_checkpoint();')
+
 with tempfile.TemporaryDirectory(prefix='ps2-audio-producer-') as temp:
     directory = Path(temp)
     fragment = directory / 'producer.inc'

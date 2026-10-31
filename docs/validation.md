@@ -1062,3 +1062,28 @@ Visible Chromium compatibility and Firefox compatibility each passed ordinary GP
 The analogous Asyncify copy trial did not establish an improvement: ten injected 60-ms readbacks produced three image underflows and two replacements with the candidate, versus one of each with the prior wait policy, with no missing audio in either window. The shipped selection therefore enables copy preparation only for the primary JSPI build. Asyncify retains the prior policy. The regression checks the build selection and compatibility fallback explicitly; these stress comparisons are not ordinary-play performance qualifiers.
 
 The final gated primary build explicitly reported copy preparation enabled and passed ten injected 60-ms readbacks without image/audio loss or queue replacements; its maximum actual submission interval was 24.29 ms. The final compatibility build explicitly reported the policy disabled. Its ten injected 40-ms readbacks had no empty presentation queue or missing audio, but one producer image replacement and a 25.19-ms maximum actual interval. That retained compatibility stress limit is not a zero-loss qualification. These temporary fault injectors are not shipped.
+
+## Source-clock observation after resampling
+
+`scripts/browser_source_clock.js` is a QA helper, not shipped player code. It
+captures native fields and source counts around write/read/write ring observations.
+All bounds refer to the captured read-counter instant. The producer publishes
+writes before its source statistic; the helper conservatively allows one
+32-input packet on either side, and the producer regression checks that bound
+against the actual extracted implementation. Queue bounds include concurrent
+publication, converter lookahead, the limiter's pending/partial blocks, and the
+supported ratio range. The entire elapsed clock-difference interval must fit
+inside the existing 50 ms tolerance. Raw output sample counts remain useful
+consumption diagnostics, but are not the source clock after resampling.
+
+Build the asset-free `ps2audio_source_clock_tests` target, then run
+`node scripts/test_audio_source_clock.cjs <path-to-that-executable>` from the
+repository root. CI builds it in `build/checks` and runs the JavaScript check
+against real PCM-decoded time codes, including video-offset/buffered-delay
+negative controls, publication lag, rollover, PAL and inconclusive observations.
+The legacy standalone media runner uses this helper for its clock gate; the
+worker qualification installs it in the owner worker and samples only at window
+boundaries. No runtime or hosting change is required for the corrected verifier.
+
+The new unchanged-runtime Ruthless measurements and the retained Firefox
+source-clock failure are summarized in [release status](release-status.md).
