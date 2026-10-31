@@ -444,6 +444,43 @@ fails the unchanged image gate. READ-promise instrumentation adds a microtask,
 so the profile remains diagnostic-only. No browser preferences disabling GC,
 release-limit changes, runtime selection or deployment followed this capture.
 
+## Held full-depth priming experiment
+
+Replaying the retained arrivals and refresh callbacks through the production
+frame clock reproduces the missed due tick (25.22 ms between callback times).
+Adding one initially ready image to that trace removes the missed tick, keeps
+the maximum below 17.21 ms, and never exceeds the existing three-slot capacity.
+This models hypothetical producer lead; it does not establish that a real
+priming change sustains that lead or fixes the GC event.
+
+A held JavaScript candidate requests three images before startup and resume,
+including any pinned prepared upload. The generic producer default remains two;
+native code, the 40 ms copy reserve and frame clock are unchanged. Targeted
+checks pass startup/resume depth, prepared-image order/ownership, invalid-depth
+rejection and slot recovery. Existing producer, presenter, Firefox preparation,
+worker-client, shutdown and readback-progress checks also pass.
+
+The staged candidate passed an unprofiled 300.679-second Firefox Gravitude
+window at 60.000004 submissions/s, with a 20.68 ms maximum actual interval,
+17.50 ms maximum fresh-RAF interval, source-clock bounds [-0.52, +4.52] ms, and
+no image loss, missing audio, clipping or application errors/warnings. This
+window alone cannot establish a fix: the preceding baseline also has clean
+five-minute diagnostic windows. Chromium qualification remains outstanding.
+
+A private static handler then blocked only the runtime owner for 15 ms about
+every four seconds. Both configurations passed fifteen pauses with no image or
+audio loss and no application errors/warnings. The candidate's 60.432-second
+window peaked at 18.26 ms and had two/three producer-tracked images before all
+fifteen pauses. The baseline's 60.444-second window peaked at 20.66 ms and had
+one image before twelve pauses, two before three. Actual injected durations
+were 15.00–15.10 ms (candidate) and 15.00–15.08 ms (baseline); both source-clock
+intervals passed. These sampled queue counts establish additional tracked lead
+at the injected instants, not a coherent consumer queue snapshot or causal
+resolution of the earlier GC failure. Both passing means this fixture does not
+discriminate that failure. The source changes remain held and undeployed; a
+producer-gap-triggered native capture is still needed to inspect a natural
+publication interruption even when the presenter remains smooth.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified
