@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PS2_GENERATED "" CACHE PATH "Folder with the C++ generated for a game")
 option(PS2_DEVELOPER_TOOLS "Include native profiling and named Wasm profiling functions" OFF)
 option(PS2_RUNTIME_TESTS "Build asset-free runtime and code-generation regression tests" OFF)
-option(PS2_WEB_WORKER "Experimental dedicated-worker game renderer (Asyncify only)" OFF)
+option(PS2_WEB_WORKER "Dedicated-worker game renderer (Asyncify only)" OFF)
 option(PS2_GPU_TESTS "Build browser GPU regression fixtures without game assets" OFF)
 
 # Keep every indirect game entry point registered. Let the linker remove only
@@ -27,7 +27,7 @@ if(EMSCRIPTEN)
         set(PS2_WEB_MODE_FLAGS -mtail-call -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0)
         set(PS2_WEB_SUSPEND_FLAGS -sJSPI)
     elseif(PS2_WEB_ASYNC STREQUAL "asyncify")
-        # Opt-in experiment: PS2_GENERATED must come from --no-tail-calls.
+        # PS2_GENERATED must come from --no-tail-calls.
         # Keep exception support for the IPU decoder without Wasm EH, which
         # cannot currently be combined with Asyncify in this toolchain.
         set(PS2_WEB_MODE_FLAGS -mno-tail-call -fexceptions)
@@ -272,9 +272,15 @@ if(PS2_RUNTIME_TESTS AND NOT EMSCRIPTEN)
     enable_testing()
     add_executable(ps2audio_resampler_tests tests/audio_resampler.cpp)
     add_test(NAME audio-rate-conversion COMMAND ps2audio_resampler_tests)
+    add_executable(ps2audio_source_clock_tests tests/audio_source_clock.cpp)
+    add_test(NAME audio-source-clock COMMAND ps2audio_source_clock_tests)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME frame-counter-publication COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_frame_counter.py" --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME audio-producer-backpressure COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_audio_producer.py" --cxx "${CMAKE_CXX_COMPILER}")
+    add_test(NAME audio-pause-backpressure COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_audio_pacing.py" --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME web-disc-cache COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_disc_cache.py"
         --cxx "${CMAKE_CXX_COMPILER}")

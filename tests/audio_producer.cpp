@@ -18,7 +18,19 @@ void audio_test_sleep(unsigned microseconds) {
     ++sleeps;
     std::this_thread::sleep_for(std::chrono::microseconds(microseconds));
 }
+void audio_test_publication_checkpoint();
 #include HOST_AUDIO_PRODUCER
+
+std::atomic<unsigned> publication_checks{0};
+void audio_test_publication_checkpoint() {
+    // Observe the real producer at the worst publication boundary: PCM is
+    // visible, but its source statistic has not yet been stored.
+    const double published = g_audio_rate_stats[0].load();
+    assert(g_audio_source_frames >= published);
+    assert(g_audio_source_frames - published <= 32);
+    ++publication_checks;
+}
+
 
 template<class Predicate> void await(Predicate predicate) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
@@ -103,5 +115,11 @@ int main() {
     g_audio.write = 3072;
     push_audio(input, 32);
     assert(g_audio_rate_stats[2].load() == 1);
-    std::puts("Audio producer: full/63/64-slot admission, paused backpressure acknowledgement, exact source admission, stereo PCM, repeated ring wrap and32-bit counter rollover passed.");
+    reset();
+    std::int16_t larger[128];
+    for (unsigned i = 0; i < 64; ++i) { larger[i * 2] = 12345; larger[i * 2 + 1] = -23456; }
+    push_audio(larger, 64);
+    assert(g_audio_source_frames == 64 && g_audio_rate_stats[0].load() == 64);
+    assert(publication_checks.load() >= 1200);
+    std::puts("Audio producer: source publication lag <=32frames, full/63/64-slot admission, paused backpressure acknowledgement, exact source admission, stereo PCM, repeated ring wrap and32-bit counter rollover passed.");
 }

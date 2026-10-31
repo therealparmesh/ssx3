@@ -56,10 +56,18 @@ std::int64_t g_given = 0;
 std::vector<Event> g_events;
 bool g_halted = false;
 std::string g_halt_reason;
-std::uint64_t g_frames = 0;
+// The emulation thread advances this; status and GPU profiling read it too.
+std::atomic<std::uint64_t> g_frames{0};
 std::uint64_t g_iop_synced = 0;
 bool g_state_request = false;
 bool g_resumed = false;
+
+void frame_state(state::Stream &s) {
+    // Keep the existing eight-byte value on disk, never the live atomic object.
+    std::uint64_t frames = g_frames.load(std::memory_order_relaxed);
+    s.pod(frames);
+    if (s.loading()) g_frames.store(frames, std::memory_order_relaxed);
+}
 
 std::uint64_t next_event_time() {
     std::uint64_t t = UINT64_MAX;
@@ -155,7 +163,7 @@ void apply_patches(bool boot) {
 }
 
 void vblank() {
-    ++g_frames;
+    g_frames.fetch_add(1, std::memory_order_relaxed);
     time_frames();
     apply_presses();
     apply_patches(false);
@@ -281,7 +289,7 @@ void machine_state(state::Stream &s) {
     s.bytes(g_spr, kScratchpadSize);
     s.pod(g_base);
     s.pod(g_given);
-    s.pod(g_frames);
+    frame_state(s);
     s.pod(g_iop_synced);
     s.pod(g_options.pal);
     s.vec(g_events, [&s](Event &e) {
@@ -343,7 +351,7 @@ bool load_state(const std::string &path) {
     return load_state(data.data(), data.size());
 }
 
-std::uint64_t frame_count() { return g_frames; }
+std::uint64_t frame_count() { return g_frames.load(std::memory_order_relaxed); }
 
 bool load_elf(const std::string &path, std::uint32_t &entry) {
     std::ifstream file(path, std::ios::binary);
@@ -696,7 +704,7 @@ void browser_yield() { ps2_browser_yield(); }
 void browser_yield() {}
 #endif
 
-std::uint64_t frames_run() { return g_frames; }
+std::uint64_t frames_run() { return g_frames.load(std::memory_order_relaxed); }
 std::uint64_t primitives_drawn() { return gs::primitives_drawn(); }
 void set_pad_buttons(std::uint16_t pressed, int pad) { iop::sio2::set_buttons(pad, pressed); }
 void set_pad_axis(int axis, std::uint8_t value, int pad) { iop::sio2::set_axis(pad, axis, value); }

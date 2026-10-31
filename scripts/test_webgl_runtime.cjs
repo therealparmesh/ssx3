@@ -38,6 +38,9 @@ let browser;
   assert.equal(result.native.hash, 1370334661);
   assert.equal(result.native.scale, 1);
   assert.equal(result.native.synchronous, true);
+  assert.equal(result.native.modulationCases, 4);
+  assert.equal(result.native.fadeCases, 3);
+  assert.equal(result.native.combinedFadeTint, true);
   assert(result.native.nonzeroSourceOffset >= 8192);
   assert.deepEqual(result.integration, { snapshot: true, drawExport: true, localCopy: true,
     partialRgb24: true, rejectedSnapshot: true, browserYield: true, glFaults: 6 });

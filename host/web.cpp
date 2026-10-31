@@ -505,7 +505,13 @@ void pace() {
         g_next_frame = 0.0;
     }
     if (g_audio.active.load()) {
-        while (audio_queued_ms() > 80.0 && !g_paused.load()) usleep(1000);
+        // Pace against the same reserve as the converter. A separate larger
+        // ceiling lets resume build excess latency that later drains away.
+        // Acknowledge pauses here and recheck the reserve after resume too.
+        while (g_paused.load() || audio_queued_ms() > g_audio_target_frames / 48.0) {
+            if (g_paused.load()) wait_while_paused();
+            else usleep(1000);
+        }
         g_next_frame = 0.0;
         return;
     }

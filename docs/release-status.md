@@ -1,98 +1,807 @@
 # Release status
 
-**Production sign-off is pending.** The current ordinary-browser WebGL candidate
-has measured below 20 fresh images/s in short Firefox briefing/race-entry
-windows, with audio starvation. The earlier near-60 results below qualify their
-specific hosted configurations; they do not establish that the current candidate
-works at that speed in default browser settings or on phones.
+The `webgpu-v70` desktop release checkpoint is described in
+[the release notes](webgpu-v70.md). Subsequent WebGL work is separate; this
+checkpoint does not alter the qualified hosted WebGPU runtime.
 
-As of 2026-10-30, saved version 68 is running on the owner-private hosted site. Live statistics are now opt-in through the existing `?debug` mode. Normal play keeps the diagnostic HUD inactive, preventing its text updates from triggering native Firefox canvas snapshot waits. Both staged and actual hosted desktop browsers passed separate five-minute two-player race/results windows with near-60 fresh submissions/s and no actual interval over 25 ms. Full production sign-off remains open: default-browser compatibility, physical phones/controllers/audio/display delivery and complete game progression remain unqualified.
+The release target is now the WebGPU player with keyboard and standard browser
+gamepad support. The owner explicitly selected one graphics backend and removed
+physical-phone testing from the release requirements. A hardware WebGPU adapter,
+shared memory and cross-origin isolation are required. Firefox support depends
+on WebGPU availability in that browser/platform configuration.
+
+The near-60 results below belong to the WebGPU build. A separate experimental
+WebGL renderer measured 19.55 fresh images/s during a short race-entry check;
+it did not replace the hosted release. WebGL work has stopped and is not a
+production fallback. Its rendering/performance failures are not regressions of
+the WebGPU release.
+
+As of 2026-10-31, saved version 70 is running on the owner-private hosted site
+with aligned audio pacing and full three-image startup/resume priming. The
+selected correction and its staged Firefox/Chromium qualification are recorded
+below. Post-publication checks verify the selected live release, exact asset
+bytes and isolation headers. New hosted five-minute Gravitude race/results
+windows pass in both desktop browsers, as recorded below.
+Live statistics remain opt-in through `?debug`. The preceding version 68 passed
+staged and hosted five-minute two-player race/results windows; version 69 passed
+staged five-minute later-peak windows. These results qualify their stated
+configurations; complete game progression and physical audio/display delivery
+remain unqualified.
+The subsequent Much-2-Much exit-transition color observation is resolved below:
+the captured pink matches the game's explicit final tint pass.
+
+## Retained later-peak timing investigation
+
+The initial comparisons in this section use the preceding native build. The
+selected version69 runtime and its subsequent measurements are recorded below;
+these earlier failures remain retained under their original checks.
+
+A new five-minute Ruthless freeride comparison used the current source shell,
+unchanged qualified native assets, and a separate sourced QA career card. Both
+headed browsers ran at 1280×800 CSS pixels, DPR 1, with a calibrated 120 Hz
+refresh rate and the documented Linux WebGPU settings. Ordinary controller
+inputs included movement, wipeout recovery and reset. This checks later-peak
+runtime behavior; it does not establish full-course completion or earned unlocks.
+
+| Browser | Fresh submissions/s | Longest actual interval | Missing image/audio frames | Native/output-count difference | Original check |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Chromium 156 | 60.002467 | 19.70 ms | 0 / 0 | +71.33 ms | Fails 50 ms clock tolerance |
+| Firefox 158 | 60.000094 | 18.90 ms | 0 / 0 | +44.67 ms | Passes original check |
+
+Both windows had no submission interval above 25 ms, producer replacements,
+output clipping, or application errors/warnings. These clock results compare
+native field duration with post-resampling output sample counts. They remain
+recorded under the original check; source-audio clock qualification is still open. Boundary handoffs totaled only 3.47 ms, insufficient
+to explain its 71.33 ms difference.
+A separate 60-second Chromium diagnostic found matching native video/source-audio
+elapsed time; converter output and queue changes accounted for that diagnostic's
+28.67 ms difference. It does not supersede the failed five-minute window.
+A private candidate aligned the emulation high-water threshold with the existing
+40 ms copy-path rate-control target. It retained 60.002606 submissions/s, a
+19.05 ms maximum actual interval and no image/audio loss, but its clock difference
+was 96.00 ms. It was rejected. Boundary source-audio and native-video elapsed
+time matched exactly; conversion removed 94.67 ms of output, with a further
+-9.33 ms queue change in the independent ring-counter diagnostic. These are
+software-clock measurements, not physical A/V synchronization measurements.
+A subsequent private audio-consumption field clock kept source-video and audio
+clock agreement within tolerance but did not pass delivery timing. With no extra
+preparation allowance it measured -1.33 ms clock difference and two actual image
+intervals of 25.33 / 25.57 ms. Allowing one field ahead measured +14.00 ms and one
+26.08 ms interval. Both averaged approximately 60 fresh submissions/s with no
+missing audio, image replacements or application errors/warnings. Both remain
+unpublished; a clock pass alone is insufficient for release qualification.
+Further two-field/copy-wait variants also failed delivery timing (25.20 / 26.01 ms
+maxima) with no missing audio. They are not selected.
+
+An independent asset-free regression now encodes a time code into the actual
+PCM passed through the current converter and limiter. At ratio 0.9997, it checks
+108,968 decoded sample positions over approximately five minutes of source audio.
+The native field rate relative to output duration is 60.018067 fields/s. Raw
+output counts differ from native duration by 90.00 ms, while decoded source-audio
+time differs by only 0.3125 ms; the conservative source-clock interval is
+[-1.160, +1.160] ms. A 100 ms video offset and an approximately 85 ms increase in
+buffered source-audio delay both fail the unchanged 50 ms tolerance. This is a
+counterexample to treating resampled output counts as the source clock, not a new
+browser pass or a physical A/V measurement. See the regression in
+[tests/audio_source_clock.cpp](../tests/audio_source_clock.cpp) and
+[Libretro's explanation of dynamic rate control](https://docs.libretro.com/development/cores/dynamic-rate-control/).
+
+The browser verifier now brackets source statistics and ring publication at one
+read-counter instant. It includes converter/limiter delay, ratio limits and a
+32-input-frame publication margin. The complete source-clock difference interval
+must be inside (-50, +50) ms; overlap alone cannot pass. JavaScript checks use
+actual PCM time-code fixtures and cover publication lag, unsigned rollover, PAL,
+invalid observations, real buffered-delay rejection and inconclusive intervals.
+The extracted native producer checks its publication boundary, including larger
+input calls; a deliberate 64-input-packet mutant fails the 32-frame assertion.
+
+New five-minute Ruthless windows used the unchanged player above, 1280×800/DPR 1,
+and calibrated 120 Hz. No screenshots, builds or profiling ran inside them.
+
+| Browser | Fresh submissions/s | Longest actual interval | Source-clock difference interval | Result |
+| --- | ---: | ---: | ---: | --- |
+| Chromium 156 | 60.002591 | 21.71 ms | [-36.01, -30.66] ms | Pass |
+| Firefox 158 | 60.000090 | 18.74 ms | [-69.37, -63.96] ms | Fails 50 ms source-clock tolerance |
+
+Both had zero lost/overwritten images, audio shortages, clipped/full-scale PCM,
+producer replacements or application errors/warnings. Raw output-count differences
+were +74.67 ms and +38.67 ms respectively; they are retained diagnostically.
+The new source-clock check detects a Firefox failure that the old count comparison
+would have missed. Its queue changed from 92.00 ms to 30.67 ms across the window.
+Pause/resume buffering requires further work; later-peak A/V qualification remains
+open. These windows include ordinary recovery/reset inputs, not course completion
+or earned unlocks. No historical failed window is reclassified as a pass.
+The unpublished native pacing candidates are not selected for release.
+The hosted runtime has not changed as a result of these tests.
+
+## Native pause acknowledgement during audio pacing
+
+An asset-free threaded reproduction found that a pause arriving inside the
+audio-backpressure loop could let pacing return without acknowledging pause.
+The corrected loop acknowledges pause before continuing and rechecks the
+unchanged 80 ms queue budget after resume. The regression also rejects the
+original loop and a naive post-loop pause wait that skips the budget recheck.
+All four native audio CTest checks, 32 input/pause scenarios and the 59-check
+source-clock verifier pass. A local full native build with GCC 13 cannot compile
+the existing Clang vector intrinsics; full source CI uses Clang separately.
+
+The pinned SDK rebuilt the runtime and host from source. The final staged player
+differs from the preceding qualified player only in `ps2web.wasm` and its gzip;
+data, shell, JavaScript glue and worker helpers match exactly. Native SHA-256 is
+`6327ae7e09c0feedd6652dfb764e2a222bbfb9e331ea204b761f13ff68ca20fe`.
+Fresh visible browsers imported the separate sourced QA card through the UI,
+reached Ruthless normally and ran independent five-minute gameplay windows.
+Both used 1280×800, DPR 1 and calibrated 120 Hz with the documented Linux WebGPU
+settings. No screenshot, build, profiling or native diagnostic request occurred
+inside either measurement window.
+
+| Browser | Duration | Fresh submissions/s | Longest actual interval | Source-clock difference interval | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Chromium 156 | 300.449 s | 60.002481 | 19.02 ms | [-46.70, -41.30] ms | Pass |
+| Firefox 158 | 300.663 s | 59.999911 | 19.44 ms | [-37.33, -32.00] ms | Pass |
+
+Both had zero actual submission intervals over 25 ms, lost/overwritten images,
+producer replacements, pool underflows, missing audio, clipped/full-scale PCM
+or application errors/warnings. The entire source-clock interval passes the
+unchanged 50 ms tolerance. Raw post-resampling output-count differences were
++52.00 and +55.33 ms; these remain diagnostics rather than the source-clock gate.
+Both browsers ended with acknowledged native pause and closed cleanly. These
+new passes do not reclassify the earlier Firefox failure or establish its exact
+cause. They qualify this staged binary and these desktop configurations, not
+whole-game progression, every controller, physical A/V delivery or universal
+60 fps.
+
+The same staged binary subsequently passed all 27 native browser input
+checkpoints in each browser: keyboard channels, all sixteen standard buttons,
+both sticks/trigger pressure, two-player assignment, disconnect/reconnect,
+API denial/recovery, focus loss, neutral acknowledged pause and held-input
+restoration before resume. Both runs had no application errors/warnings and
+closed cleanly. These instrumented input checks are separate from performance
+measurement and do not certify every physical gamepad or Bluetooth connection.
+
+Source commit `4188a2b` passed the native Clang and pinned-SDK Wasm CI jobs,
+including all 18 CTest checks. The existing owner-private site was published as
+version 69 from Sites source `dd6dd6c`. All immutable release objects were
+uploaded and byte/gzip-verified before publication. Both desktop user-agent
+routes return the exact packaged application document, allowing only the two
+previously observed exact hosting-script templates. Health reports desktop
+release `baf65c7f0a8ec629c06372a5f59fcc6426b486da5d0d5ec408624f0f47f0aad6`;
+disc range requests pass and anonymous access is rejected with HTTP 401.
+Fresh live Chromium and Firefox sessions then reached the rendered title screen,
+called the real browser Gamepad API, and passed keyboard Escape pause, frozen
+native fields and resume progress. Both closed paused without application
+errors/warnings. Firefox reported 13 previously known Cloudflare cookie-domain
+notifications separately. An initial smoke driver classified those page-error
+notifications incorrectly; its failed result is retained, and the corrected
+exact-message classification passed a fresh Firefox run. These are live
+functional smoke checks, not additional five-minute timing windows.
+
+## Version69 career race exit and save-and-quit
+
+The unchanged version69 native binary passed a local, source-owned functional
+career check using the actual earlier earned career export. A normal Snow Jam
+qualifier finished sixth at 03:55; third place was 03:44. The results correctly
+refused advancement. Restart completed its confirmation/loading/countdown flow.
+The retry was voluntarily abandoned and correctly classified DNF. No new medal,
+reward, semifinal advancement or later-peak unlock is claimed.
+
+The first save-and-quit attempt selected an empty slot by mistake. The game
+rejected the duplicate PLAYER1 name; canceling that save returned to the title.
+That canceled attempt is retained and does not establish saved race progress.
+After reloading the original career, the normal Mcomm Quit flow selected Save,
+used the existing PLAYER1 slot and overwrite confirmation, displayed Save
+complete, then returned to the title after Continue.
+
+The actual Export card button downloaded 8,650,752 bytes at SHA-256
+`d1214e7503c65d4d1cae9501d30adbd8c2b2f6c8d7ef74108253a4dceaba3230`.
+The download matched the paused native card exactly. Browser-storage revisions
+both reached 1, with no write or native card handoff pending. The original input
+export remained unchanged.
+
+Fresh headed Firefox imported that actual download through the UI. Native card
+hashes before and after normal career loading matched the download exactly;
+rendered mountain gameplay retained the $1,015 wallet and 1/5 collectible count.
+The runs recorded 93 Chromium and 11 Firefox actions, zero application errors
+or warnings, acknowledged final native pauses and clean browser closure. They
+used 1280×800 and the documented Linux WebGPU settings, simulated standard-controller
+snapshots through production polling, and no native state fixture, direct
+guest-memory/card edit or altered game rule.
+This adds finish/rejection, Restart, Give Up/DNF, canceled-save Quit and successful
+save-and-quit/card-transfer coverage. It is not a new timing window or proof of
+successful race/campaign advancement. Runtime and hosting assets are unchanged.
+
+## Version69 Gravitude coverage and clock uncertainty
+
+The same qualified native binary and all 23 production player files were used
+for new local Gravitude career-qualifier checks. The separate sourced QA card
+started with No medal and a 03:00 top time; its earning method remains unverified,
+so it supplies access rather than evidence of earned unlocks. Moby completed
+an ordinary Chromium run sixth at 04:12; third place was 04:01. Normal reset and
+wipeout recovery were exercised. The original QA card and the native card bytes
+remained unchanged. This functional run recorded 42 actions and no application
+errors/warnings.
+
+Fresh visible Firefox and Chromium profiles then ran separate five-minute
+Gravitude windows at 1280×800, DPR 1 and calibrated 120 Hz, with the documented
+Linux WebGPU settings. Normal crouch, periodic Square recovery/boost and one
+Select reset were used. Racing and any finish/results tail are included; these
+are not 300 seconds of uninterrupted racing. No captures, builds, profiling or
+GPU-completion queries ran inside either window. The original image/loss gates
+and full-interval 50 ms source-clock tolerance were unchanged.
+
+| Browser | Duration | Fresh submissions/s | Longest actual interval | Source-clock difference interval | Full result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Firefox 158 | 300.650 s | 59.999915 | 19.640 ms | [-32.73, -27.27] ms | Pass |
+| Chromium 156 | 300.506 s | 60.002458 | 19.745 ms | [-55.31, -33.36] ms | Not qualified: full clock interval exceeds tolerance |
+
+Both had zero lost/overwritten images, producer replacements, pool underflows,
+missing audio, clipped/full-scale PCM or application errors/warnings, and no
+actual submission interval above 25 ms. Chromium's start observation crossed
+native fields 8929→8930 while its source count stayed fixed. The resulting clock
+interval is too wide to prove either a pass or drift beyond 50 ms; its entire
+interval must pass, so this window remains unqualified. Raw output-count
+comparisons were +49.33 ms for Firefox and +82.00 ms for Chromium, retained only as
+diagnostics. No failure is reclassified and no tolerance is relaxed.
+
+Post-window screens confirmed sixth-place finishes of 03:25 in Firefox and 03:51
+in Chromium, without advancement. Firefox also displayed a top-five time entry;
+Save Records was not selected, so record persistence is not claimed. Both
+browsers paused and closed cleanly. Runtime and hosting assets remain unchanged.
+
+Source inspection during the boundary investigation also found that the public
+frame getter reads a plain `std::uint64_t` counter updated by the emulation thread while
+the owner worker periodically reads it for status. Thread-safe publication and
+state-restoration behavior need further verification; this is not established as
+the cause of the clock interval. Local ThreadSanitizer probes could not start
+because of an unexpected-memory-mapping runtime error; no sanitizer pass or
+race diagnostic is claimed. This and the unresolved clock qualification remain
+open before a broader production sign-off.
+
+## Atomic frame-counter candidate
+
+The native frame counter now uses atomic 64-bit storage for both public getters.
+Saved-state serialization retains the existing eight-byte field through an
+ordinary local value. All 19 native suites pass, including concurrent reads,
+32-bit rollover and legacy state bytes; negative controls reject raw atomic
+serialization and a narrowed field. The unchanged audio-clock verifier passes
+59 checks across four decoded-PCM modes. Chromium and Firefox each pass all
+27 native keyboard/controller checkpoints with no application errors/warnings.
+
+The rebuilt candidate's native SHA-256 is
+`bf65d6f0ddde903661ed3d0890f3bb1c07bd4433553cdb2f8149386938598785`;
+all other production player bytes match version69. A fresh 300.486-second
+Chromium Gravitude window delivered 60.002398 submissions/s, with a 22.550 ms
+maximum interval and no image loss, producer replacements, pool underflows,
+missing audio, clipped/full-scale PCM or application errors/warnings. Its full
+source-clock interval, [-50.66, -45.34] ms, still crosses the 50 ms tolerance and
+remains unqualified. Both frame observations were stable within a single field.
+The queue changed from 83.33 to 30.67 ms while its configured target was 40 ms;
+this motivates investigating the separate 80 ms producer high-water limit.
+The atomic fix does not clear the clock qualification. No tolerance was relaxed
+and the candidate has not been deployed; private version69 remains unchanged.
+
+## Target-aligned audio pacing candidate
+
+The next candidate paces the producer against its configured reserve: 40 ms for
+copy presentation and 64 ms for the direct surface. Previously its independent
+80 ms ceiling allowed the queue to start far above the converter's target and
+drain during play. Pause acknowledgement and the post-resume budget recheck
+remain in the pacing loop. Converter, limiter, renderer and source-clock verifier
+are unchanged. This is a new candidate including the later pause/counter fixes;
+the earlier target-aligned experiment rejected by the raw output-count metric
+is not reclassified.
+
+All 19 native checks pass. The pacing regression now tests both reserve
+boundaries and pause/resume behavior for both paths. Negative controls reject
+the fixed 80 ms ceiling, unacknowledged pause escape and a skipped resume budget.
+Only native Wasm and its compressed copy changed from the counter candidate;
+its native SHA-256 is
+`39ecdb8495c63ecfb27d087bb1632f11707fc596a7ffdc258c8e82ea60d5aeb0`.
+
+A fresh visible Chromium profile ran the same 300-second Gravitude procedure
+at 1280×800, DPR 1 and calibrated 120 Hz with the documented Linux WebGPU flags.
+The 300.458-second window passed all existing gates: 60.002594 fresh submissions/s,
+a 20.065 ms maximum actual interval, no image loss/replacements or pool underflow,
+no missing audio, clipped/full-scale PCM or application errors/warnings. The
+entire source-clock interval is [+6.22, +11.11] ms. Queue snapshots were 31.33
+and 39.33 ms; the raw output-count difference was +91.33 ms and remains diagnostic
+only. No limits were changed and no capture/build/profile ran inside the window.
+
+The post-window screen showed a new top-five time of 03:27 for Moby. Continue and
+Save Records were not selected; qualifier ranking, advancement and record
+persistence are not claimed. The measurement includes racing and the record
+screen tail.
+
+The completed fresh Firefox window lasted 300.653 seconds at 59.996680 fresh
+submissions/s. Its source-clock interval, [-6.46, -1.54] ms, passes. It had no
+missing audio, clipped/full-scale PCM, image overwrites, producer replacements,
+pool underflow or application errors/warnings. One actual image interval reached
+33.30 ms, with a 33.32 ms fresh-RAF gap, at approximately 105.6 seconds into the
+window. This fails the unchanged 25 ms gate, so the candidate remains held.
+The corresponding upload took 0.72 ms, canvas acquisition 0.02 ms and submission
+0.02 ms; these observations do not establish the delay's cause. The old private
+RAF context log had filled on normal alternate 120 Hz refreshes in the first
+3.3 seconds, leaving no contemporaneous queue/clock history for that event.
+The post-window qualifier screen confirmed Moby sixth at 04:18, without
+advancement. Both browsers subsequently passed 27 native keyboard/controller
+checkpoints each, with no application errors/warnings.
+
+An earlier Firefox attempt aborted after the local HTTP test server exited with
+SIGTERM (143), exhausting disc-read retries. It supplies no completed timing
+result and remains separately retained. A fresh profile ran the completed window
+above with a retained-terminal server whose liveness was checked throughout.
+A subsequent diagnostic with bounded clock/queue/upload/message history had a
+24.62 ms maximum actual submission interval but retained a 25.26 ms fresh-RAF
+interval, so it also failed the unchanged image gate. Its source-clock interval
+[+14.75, +19.92] ms passes. There were no image overwrites/replacements, audio
+shortages, clipping or application errors/warnings. Its 108,239 history records
+wrapped in fixed storage; the wall-time history trigger did not capture the
+RAF-only near-limit event. The diagnostic does not clear the preceding failure. The next private observer
+keeps the worst 16 contexts for actual and RAF gaps above a diagnostic-only
+20 ms trigger; the release gates remain 25 ms and are byte-for-byte unchanged.
+Controls cover the observed actual 24.62/RAF 25.26 ms split and a later 33.30 ms
+event after more than the history capacity of normal entries.
+The candidate has not been deployed or given full release qualification.
+
+## Build workflow alignment and fresh translation
+
+The SSX 3 shell scripts now share browser variant selection. The wrapper builds
+its native translation, then a separate Asyncify translation without tail calls,
+applying startup/effects gates and recorded vector programs to both. The default
+build, play and optional local-host commands select
+`build/web-ssx3-asyncify-worker`. Generic games retain their JSPI default;
+explicit overrides select diagnostic variants consistently. Local hosting checks
+all worker helpers before service changes and removes stale compressed files
+that would otherwise shadow fresh bytes.
+
+`scripts/test_web_workflow.py` exercises the actual scripts with stand-in heavy
+tools, no disc or SDK download, and no real service changes. It covers both
+translations and patch/vector destinations, build flags, play-directory
+selection, helper/gzip publication, stale-gzip removal, a missing-helper guard,
+explicit overrides, native-only mode and a project path containing spaces.
+This workflow check is included in source CI; it is not a gameplay test.
+
+A real fresh translation with the current native generators reproduced all 221
+existing generated files byte-for-byte. A full pinned-SDK build compiled the
+game archive, runtime and host from those files without archive reuse. Its game
+archive SHA-256 matches the previous `1f22aff7…` archive, and all 23 player files,
+including compressed assets, match the held audio-pacing candidate whose native
+SHA-256 is `39ecdb84…`. This verifies fresh generation/build reproducibility for
+that candidate; it does not clear its retained Firefox timing failure or qualify
+all variants.
+
+The private dual-trigger diagnostic then completed 300.647 seconds at 60.000154
+fresh submissions/s, with a 19.30 ms maximum actual interval and 17.42 ms maximum
+fresh-RAF interval. Source-clock bounds [-6.52, -1.48] ms pass. It had no image
+loss/replacements, audio shortages, clipping or application errors/warnings.
+The fixed history wrapped 108,235 records with no event above its 20 ms diagnostic
+trigger. It did not reproduce the preceding 33.30 ms delay and remains
+explicitly diagnostic-only; no earlier failure is reclassified. The post-window
+screen showed Moby's top-five time 03:15; Continue/Save Records were not selected.
+Hosting remains unchanged.
+
+## Captured image availability deficit and rejected headroom experiment
+
+A local Firefox diagnostic with native sampling recorded a 25.20 ms actual image
+interval. Its private presenter history showed 8–9 ms callback intervals and
+uploads below 1 ms, but a 32.38 ms gap between frame arrivals. The ready-image
+queue was empty when the clock requested presentation. This identifies image
+availability as the limiting condition in that profiled event; it does not
+establish the upstream cause or attribute the earlier 33.30 ms failure. Earlier
+native samples and delay markers were evicted before collection, preventing a
+CPU/GC attribution. The profile remains diagnostic-only.
+
+An experiment added 800 source samples (one 60 Hz field, approximately 16.7 ms)
+to the aligned copy reserve, taking it from 40 ms to 56.67 ms while retaining 64 ms
+for direct surfaces. It passed all 19 native suites and rebuilt successfully
+(native SHA-256 `3c38c333f4ed38901b2193a0ea40587196163bb3315e0700afa1ea1fba7073f6`).
+A fresh unprofiled Firefox Gravitude window lasted 300.709 seconds at 59.998478
+fresh submissions/s, but one actual interval reached 25.26 ms at approximately
+11.3 seconds. Its full source-clock interval [+18.61, +24.06] ms passed, with no
+missing audio, image overwrites/replacements, pool underflow, clipping or
+application errors/warnings. It fails the unchanged 25 ms image gate, so the
+extra-field source change was reverted and the experiment was not selected or
+deployed. Its code patch, binary and failed result remain retained privately.
+
+The next profiler collector stops automatically after the first gap above 25 ms,
+using a reserved private shared-counter cell from presenter to page. It also
+copies schema metadata per snapshot so the private serializer cannot omit
+repeated field labels. Controls verify that near-limit 24.62 ms events do not
+signal, while 25.26 ms events do, without changing the release gate. A real
+browser synthetic-control run verified renderer-to-page notification, automatic
+close, retained native timing markers and 0.24 ms native/private marker alignment.
+That abbreviated synthetic run supplies no gameplay, clock or release
+qualification. No original failure is reclassified and hosting is unchanged.
+
+The first ordinary gameplay run with that collector reached its 300.652-second
+time limit without a late-frame signal. At a calibrated 120.014 Hz, local headed
+Firefox produced 60.000047 actual submissions/s, a 20.18 ms maximum actual
+interval and a 17.50 ms maximum fresh-RAF interval. The full source-clock bound
+[-1.18, +3.85] ms passed; there were no missing audio samples, image
+overwrites/replacements, pool underflows, clipping or application errors/warnings.
+The bounded history wrapped 108,235 records and retained one 20.18 ms event at
+approximately 90.2 seconds. Its native marker and samples were evicted by the
+time-limit shutdown, so this capture provides no causal native attribution.
+Firefox closed automatically and the 60 Hz desktop mode was restored. This is
+an instrumented diagnostic, not a release qualification: the earlier 33.30 ms
+and 25.20 ms failures remain unresolved, the extra-field experiment remains
+rejected, and the aligned 40 ms candidate remains held without deployment.
+
+A subsequent private collector adds a generation-checked shared producer history
+to distinguish readback, pixel publication and message delivery. Its concurrency
+control performed 200,000 writes and rejected in-progress/overwritten rows;
+delegation checks cover successful, rejected and synchronously thrown readbacks.
+A delayed synthetic event in real Firefox captured 329 producer records with
+no skipped rows or application errors/warnings, and native/private markers
+aligned within 0.48 ms. This validates capture wiring, not gameplay timing.
+
+The ordinary Gravitude run then reproduced a real failure at approximately
+3.67 seconds: a 25.20 ms actual interval and a 25.26 ms fresh-RAF interval.
+Automatic shutdown retained both native markers, aligned within 0.78 ms, plus
+the producer and presenter contexts. Pixels were published 34.60 ms apart and
+arrived 34.54 ms apart. Matching slot IDs and generations bound the later
+message's delivery to 0.06–0.32 ms; presenter callbacks stayed within 9.06 ms
+and uploads within 0.86 ms in the captured context.
+
+The runtime-owner worker's native profile records 5.97 ms of shrinking major GC,
+7.81 ms of cycle collection, another 1.09 ms major GC and 0.08 ms cycle collection
+during that publication gap, totaling 14.96 ms. Native samples independently
+include Major GC and CC stacks in the same worker while the presenter mostly
+waits for events. This identifies a producer-side GC/CC interruption contributing
+to this captured image deficit; it neither explains every millisecond of the
+gap nor attributes the earlier unprofiled 33.30 ms failure. The native marker
+parser now distinguishes instant markers' zero absent endpoint from split
+interval starts/ends, pairs retained split endpoints and excludes unmatched
+endpoints. A focused fixture verifies these cases before attribution.
+
+The diagnostic ended after 4.018 seconds, with no missing audio, image loss or
+application errors/warnings; source-clock bounds [+4.17, +9.16] ms passed. It
+fails the unchanged image gate. READ-promise instrumentation adds a microtask,
+so the profile remains diagnostic-only. No browser preferences disabling GC,
+release-limit changes, runtime selection or deployment followed this capture.
+
+## Held full-depth priming experiment
+
+Replaying the retained arrivals and refresh callbacks through the production
+frame clock reproduces the missed due tick (25.22 ms between callback times).
+Adding one initially ready image to that trace removes the missed tick, keeps
+the maximum below 17.21 ms, and never exceeds the existing three-slot capacity.
+This models hypothetical producer lead; it does not establish that a real
+priming change sustains that lead or fixes the GC event.
+
+A held JavaScript candidate requests three images before startup and resume,
+including any pinned prepared upload. The generic producer default remains two;
+native code, the 40 ms copy reserve and frame clock are unchanged. Targeted
+checks pass startup/resume depth, prepared-image order/ownership, invalid-depth
+rejection and slot recovery. Existing producer, presenter, Firefox preparation,
+worker-client, shutdown and readback-progress checks also pass.
+
+The staged candidate passed an unprofiled 300.679-second Firefox Gravitude
+window at 60.000004 submissions/s, with a 20.68 ms maximum actual interval,
+17.50 ms maximum fresh-RAF interval, source-clock bounds [-0.52, +4.52] ms, and
+no image loss, missing audio, clipping or application errors/warnings. This
+window alone cannot establish a fix: the preceding baseline also has clean
+five-minute diagnostic windows. Chromium qualification remains outstanding.
+
+A private static handler then blocked only the runtime owner for 15 ms about
+every four seconds. Both configurations passed fifteen pauses with no image or
+audio loss and no application errors/warnings. The candidate's 60.432-second
+window peaked at 18.26 ms and had two/three producer-tracked images before all
+fifteen pauses. The baseline's 60.444-second window peaked at 20.66 ms and had
+one image before twelve pauses, two before three. Actual injected durations
+were 15.00–15.10 ms (candidate) and 15.00–15.08 ms (baseline); both source-clock
+intervals passed. These sampled queue counts establish additional tracked lead
+at the injected instants, not a coherent consumer queue snapshot or causal
+resolution of the earlier GC failure. Both passing means this fixture does not
+discriminate that failure. At that checkpoint the source changes remained held
+and undeployed; a producer-gap-triggered native capture was still needed to inspect a natural
+publication interruption even when the presenter remains smooth.
+
+## Selected pacing and priming correction
+
+A new private collector saves producer context immediately on a publication gap
+above 30 ms and stops native profiling even if presentation stays smooth. Its
+real Firefox synthetic control retained 330 producer records and a native marker
+within 1.56 ms; inactive/reset and exact-30-ms boundary checks pass. The control
+is excluded from gameplay/performance qualification.
+
+With the three-image candidate, ordinary Gravitude gameplay then produced a
+33.98 ms publication gap. Its native marker aligned within 0.82 ms, with no
+skipped history rows. The same runtime owner recorded 13.71 ms of GC/CC inside
+that gap (5.93 ms shrinking major GC, 6.67 ms CC, 1.02 ms major GC, 0.09 ms CC).
+Producer-tracked depth was three at the surrounding publications. Across the
+4.015-second diagnostic window, actual image intervals stayed within 17.64 ms
+and fresh-RAF intervals within 17.30 ms, with no image/audio loss or application
+errors/warnings. This supports queue protection against the captured producer
+interruption; it does not promise protection against arbitrary stalls or prove
+the cause of every earlier failure. The profile is diagnostic-only.
+
+The selected source pairs full three-image startup/resume priming with the
+previously held producer pacing correction. The pacing ceiling now matches the
+converter's existing reserve (40 ms copy, 64 ms direct surface), retaining native
+pause acknowledgement and the post-resume budget recheck. Fixed-80-ms, escaped-
+pause and skipped-budget negative controls are rejected. Generic pixel-producer
+clients retain the two-image default; the game runtime requests three and counts
+a prepared upload toward that depth. No GC preferences or release gates changed.
+
+Both unprofiled five-minute Gravitude windows for this exact staged candidate
+pass, at 1280×800 CSS pixels/DPR1 and calibrated 120 Hz:
+
+| Browser | Submissions/s | Maximum actual interval | Maximum fresh-RAF interval | Source-clock bounds |
+| --- | ---: | ---: | ---: | --- |
+| Firefox | 60.000004 | 20.68 ms | 17.50 ms | [-0.52, +4.52] ms |
+| Chromium | 60.002447 | 20.62 ms | 16.67 ms | [-7.10, -2.23] ms |
+
+Both have no image overwrites/replacements, pool underflow, missing audio,
+clipping or application errors/warnings. The native Wasm is SHA-256
+`39ecdb8495c63ecfb27d087bb1632f11707fc596a7ffdc258c8e82ea60d5aeb0`.
+The preceding native build-reproduction evidence applies; the additional changes
+are the three worker JavaScript helpers and their tests.
+
+Both browsers also pass all 27 native-worker keyboard/gamepad checkpoints,
+including reconnects, temporary API denial, real focus/visibility loss, neutral
+paused input and held-input restoration before unpause. Separate loaded-career
+media checks measure approximately ten seconds of actual stereo PCM without
+shortages/full-scale samples, prove that pause freezes both simulation and the
+audio clock, and recover through explicit resume and simulated audio suspension.
+Both finish acknowledged-paused with no application errors/warnings.
+
+Media-probe setup failures are retained separately: an unguarded observer met an
+unavailable AudioWorkletNode context; a no-card startup produced valid silence;
+and an unhandled import confirmation prevented reload. The corrected probe uses
+the established API guard, accepts its isolated QA import confirmation and
+navigates the actual imported career before requiring audible stereo samples.
+These excluded attempts are not reclassified as player defects or passing audio
+qualification. No guest state or audio/scoring rules were edited.
+
+All 19 native suites, the 28 browser-JavaScript workflow commands, and build/play
+workflow checks pass locally. The local source-clock test used its supported
+explicit native-fixture path; an excluded runner attempt requested an unbuilt
+artifact belonging to a separate Wasm CI job. [Complete GitHub CI](https://github.com/therealparmesh/ssx3/actions/runs/41208542362)
+passed for runtime commit `4aa0b55289ed60facd76ff08dc9b5d8c204e3b7c`.
+
+Version70 was published privately from Site source commit
+`c925c6e79fd8bf81aaca92117705a8ac94ede3d3`, using desktop release
+`891ffd5a693e41d8903ce130291cb42d69ee4ee7ebca16bd5fc7c4e1b36381a3`.
+All 20 raw/gzip assets were uploaded and verified before publication. The
+packaged Worker artifact passed ESM validation and the existing routing,
+isolation, range, upload, fallback and immutable-asset checks. Post-publication
+HTTP checks verify that both desktop user agents select this release, its ten
+raw assets match the tested bytes, and the isolation headers remain present.
+An unauthenticated game-page request returned403. The Site retains its sole
+owner allowlist with no external visitors/groups. The subsequent hosted
+qualification is recorded below; the five-minute windows above are staged.
+Full game progression, every physical controller/output and universal zero-drop
+behavior remain unqualified.
+
+## Version70 hosted timing, input and media verification
+
+Fresh headed Firefox and Chromium profiles loaded the actual owner-private
+version70 documents and immutable assets over HTTPS. Authentication headers were
+restricted to the exact Site origin; no application response was replaced.
+Ordinary menu/controller inputs loaded the separate QA career and entered
+Gravitude. Actual qualifier rules and the countdown were visually verified
+before measurement. Each window used 1280×800 CSS pixels, DPR1 and calibrated
+120 Hz, with the documented Linux WebGPU settings. No screenshots, builds or
+profiling ran inside either window.
+
+| Browser | Duration | Submissions/s | Maximum actual interval | Maximum fresh-RAF interval | Source-clock bounds |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Firefox | 300.647 s | 60.000035 | 19.20 ms | 17.38 ms | [-10.46, -5.54] ms |
+| Chromium | 300.458 s | 60.002494 | 21.47 ms | 16.67 ms | [-4.46, +0.46] ms |
+
+Both pass the unchanged submission-rate, 25 ms interval, zero-loss and 50 ms
+source-clock gates, with no overwritten/replaced images, pool underflow, missing
+audio, full-scale/clipped PCM or application errors/warnings. Chromium's raw
+post-resampling output-count difference was +74.67 ms; its independently bounded
+source clock passes. The windows include racing and the results tail, not five
+minutes of uninterrupted active racing. Chromium's rendered qualifier result
+shows Moby sixth at 04:03 with advancement refused. Firefox's end screen shows
+Moby's 03:29 entry in Top 5 Record Times; no subsequent qualification, saved
+record, reward or earned unlock is claimed. Both ended acknowledged-paused and
+their test browsers closed with exit0.
+
+The known Firefox hosting diagnostic, exactly `Cookie “__cf_bm” has been rejected
+for invalid domain.`, occurred fifteen times via pageerror and was retained
+separately. Two startup-only harness probes ended before measurement while this
+event path was identified. Classification tests cover both console/pageerror
+paths and retain every other error/warning in the original gate. No measured
+failure was reclassified. Earlier fixed-delay setup screenshots showed movies
+or loading rather than gameplay; adaptive ordinary navigation and the verified
+countdown provide the gameplay evidence instead.
+
+Both hosted browsers also passed all 27 native-worker input checkpoints. These
+check actual keyboard events, all sixteen standard controller buttons, two
+controller slots, sticks, analogue trigger pressure, reconnect/reordering,
+temporary API denial/recovery, real tab visibility loss, stopped guest frames,
+neutral paused input and held-input restoration before native unpause. Native
+Gamepad API access was checked before installing synthetic controller snapshots.
+There were no application errors/warnings. Firefox retained thirteen identical
+hosting-cookie diagnostics separately. These instrumented checks establish the
+browser/native input path, not physical controller mappings or latency.
+
+Separate hosted media runs imported the QA card through the normal UI and
+measured ten seconds of actual AudioWorklet PCM across the loading-to-freeride
+transition. Firefox delivered 482,304 frames (195,628 with unequal stereo
+channels, peak0.670); Chromium delivered 480,256 (158,711 stereo, peak0.624).
+Neither lost samples or emitted full-scale PCM. The start images still show
+loading; the end images show actual freeride, so these are not ten seconds of
+continuous audible gameplay. The five-minute race windows above independently
+check sustained stereo output.
+
+Both media runs then verified that explicit pause freezes native frames and the
+audio clock, Resume restores both, a simulated AudioContext suspension pauses
+the native game, and a fresh gesture resumes it. Both ended acknowledged-paused
+and closed with exit0, with no application errors/warnings. Firefox retained
+fifteen identical hosting-cookie diagnostics separately. These checks use
+software sample counters and lifecycle observations; physical output fidelity,
+speaker/headphone routing and end-to-end A/V synchronization are not measured.
+No application or hosted asset changed during this verification.
+
+## Version70 Much-2-Much functional coverage
+
+The actual owner-private version70 Chromium player loaded the separately sourced
+QA career and entered Peak3 Much-2-Much Big Air through ordinary Transport menus.
+The baseline event information showed No medal and an existing 185,000 record.
+This card is used for course access only; its original unlock/earnings provenance
+is unverified and supplies no earned-unlock evidence.
+
+The first Heat1 finished and posted 1,280 points. Heat2 landed an 8,200-point
+double-front-flip/900 grab combo, but the rider subsequently spent too long in
+the pipe and the timer expired. The standings posted zero for that heat and
+correctly refused advancement, sixth with 1,280 combined. Restart confirmation
+returned to Heat1. That retry finished and posted 8,180 points. Its second heat
+also landed an 8,180-point combo but timed out, posting zero; the final standings
+again refused advancement, sixth with 8,180 combined. HUD totals during Heat2
+include Heat1 and are not independent heat scores. No medal, reward, new record
+or successful advancement was earned. The timeouts and wipeouts remain retained
+as gameplay outcomes; they do not establish an application defect.
+
+Normal Transport returned to Select Peak. Final acknowledged-paused card reads
+still matched the imported 8,650,752-byte card at SHA-256
+`33379fb6211a9a774675df3c260cab87df95494d61457382fb837a2de2ce1237`,
+with all write revisions zero and no pending write. No in-game save was made.
+The test browser closed with exit0 and no application errors/warnings. Inputs
+used normal simulated standard-controller polling, without a native observer,
+guest-memory/card edits, native save-state fixtures or altered rules. This adds a new
+course's scored finish, timeout, restart, standings and return coverage; it is
+not a new performance window, Firefox course check or complete progression.
+
+An intermediate screenshot
+after selecting Transport shows a nearly uniform pink image with a faint skip
+prompt (98.18% of the game-image crop has RGB241/163/253). A later image, after
+600 additional native frames, shows the correct Select Peak menu. This single
+frame does not establish its duration, cause or parity with the original game;
+the exit animation was not visually qualified at that checkpoint. The subsequent
+source/pixel investigation is recorded below. Earlier screenshots prematurely
+named transport/world/finish/standings are excluded from those claims when they
+actually show a menu, loading, movie or active play. Select press/hold requests
+also do not supply conclusive repositioning evidence in this run.
+
+## Much-2-Much exit tint resolved
+
+Unpaused screenshot sequences reproduce the exit image as part of a gradual
+fade from Moby using his Mcomm into Select Peak. The same color appears with
+Original visual effects enabled, so skipping the decorative functions is not
+required for the observation. Captures and GPU observers are diagnostics only;
+they supply no new performance qualification.
+
+A read-only observer of the actual GS draw uploads records white untextured
+fade triangles with rising alpha, followed by a final textured MODULATE pass.
+That later pass reads and writes framebuffer0 as PSMCT32, disables alpha
+blending and uses vertex RGBA(121,82,127,128). For a white texel, its fixed-point
+modulation yields RGB(241,163,253), exactly matching the earlier uniform frame.
+The final pass, rather than the preceding white fade alone, explains the pink.
+No runtime color correction is warranted for this observation. This resolves
+the specific captured exit color, not all cinematics or whole-game rendering.
+
+The observer forwards uploads unchanged. Its parser fixtures check raw
+HEAPU8 offsets, arena guard words, source colors and bounds, textured records,
+invalid/small-record rejection and inactive behavior; an actual live control
+also produces valid draw records. Earlier empty probes used an overly narrow
+geometry filter or omitted the arena guard word and remain excluded. An initial
+paused control observed no uploads and is not evidence of missing rendering.
+The final Original capture used held viewport control at1280×800/DPR1 after a
+secondary debugging connection cleared its own viewport override. Earlier
+cropped Original setup images are excluded from viewport comparison. No guest
+memory, card, rules or application assets were edited.
+
+The asset-free GS GPU fixture now checks four fixed modulation colors, three
+white-fade alpha levels and a complete white fade followed by that same tint.
+It renders through the actual C++ renderer and WGSL shaders, checks every output
+pixel, and exercises same-frame framebuffer texture feedback. Chromium and
+Firefox each pass normal uploads, mapped staging and 2× rendering with no page,
+GPU validation or fixture errors. The previous64-frame ordering/resize/readback
+checks remain intact. The new cases use fixed expected pixels, including the
+observed RGB241/163/253, without importing a game asset or copying shader helpers.
+
+Both the menu return and byte-identical final QA card were verified before the
+diagnostic browser and helpers closed cleanly. Read-only paused GPU storage
+copies used additional diagnostic queue commands and are excluded from timing.
+The selected runtime, immutable assets, private hosting and acceptance gates
+remain unchanged.
+
+## Current browser gamepad verification
+
+The current source shell was rebuilt using the pinned SDK with the qualified
+WebGPU worker assets (native SHA-256
+`b8cf5dfe41f9cab9fbd5ca85907515737224f8659e99300887a65d880d2935f4`).
+Both headed Chromium and Firefox pass 27 native-worker input checkpoints each,
+with no application errors or warnings. The checks cover every standard gamepad
+button, both sticks, analog pressure, two players, stable reconnect assignments,
+temporary API denial, real tab hiding, neutral input after acknowledged pause and return to focus
+and held-input restoration before native resume. Keyboard stick/D-pad channels
+are checked independently. No player implementation change was needed.
+
+The driver now checks secure-context and native Gamepad API access before
+installing simulated controller snapshots. Both browsers pass this check and
+all 27 input checkpoints. A controlled native API denial fails before Play,
+with zero simulated-input checkpoints reached. This prevents the test fixture
+from masking a browser permission failure.
+
+Separate checks against the actual version 68 HTTPS document used ordinary
+headed Chromium and Firefox without GPU overrides. Both had a secure,
+cross-origin-isolated document and a callable, unmodified native Gamepad API.
+No guest was started. These checks qualify controller API access; Firefox still
+did not expose WebGPU in that configuration, so they are not new gameplay or
+default-browser graphics qualifications. Site access and hosting were unchanged.
+
+The diagnostic forwards calls to the actual native exports before recording
+them; it supplies browser Gamepad API snapshots and does not substitute a guest
+or modify game memory. It uses the documented Linux WebGPU enablement settings,
+so it does not qualify default browser settings or physical-controller latency.
+It is separate from timing qualification. The driver and reproduction contract
+are in [browser gamepad checks](../tests/browser_gamepad/README.md).
 
 The current shell is from source `f85e4af96277d92b39f272412f5d633024ac6792`, with hosting source `43e95691bdd160427bd4c195b0b24479e308c075`. Native assets are unchanged: desktop runtime source `43fb1f0b293353a4880d26c0302deaec1ebaf69e`, immutable release `289893fc3b9a64e8759a0a6bd222b1e9680ab048a95e555ed582098248f0a275`, native SHA-256 `b8cf5dfe41f9cab9fbd5ca85907515737224f8659e99300887a65d880d2935f4`. Version 67 is retained for rollback. Primary/compatibility players receive the same shell change while retaining their assets and earlier desktop qualification; there is no new standalone performance window. Game assets and private access credentials are excluded from this repository.
 
-## Unreleased live WebGL integration
+## Current worker career purchases and transfer
 
-The candidate now captures and samples CPU-owned mip chains before queuing
-vertices, including fixed/Q-based level selection, mip filtering, per-level
-wraps and palette decoding before filtering. Automatic TEX0 mip-address actions
-now update runtime state; register replay restores the final mip addresses after
-backend side effects. MIPTBP changes, CPU uploads and snapshots invalidate the
-affected views. Native mip layout/action checks and the old register replay
-negative control pass. Asset-free Chrome/Firefox checks agree on 109,440 sampler
-pixels, 1,920 ordered/opaque bridge pixels and 7,936 runtime pixels. Forced
-level-zero sampling must fail the oracle. These are discrete model checks;
-continuous-Q approximation and exact hardware rounding remain unqualified.
-GPU-owned/aliasing mip views and unsupported layouts retain the native fallback.
-See [mip fixture details](../tests/webgl_mips/README.md).
+The current source shell and unchanged qualified WebGPU worker passed another
+ordinary career save/transfer check. A legitimately earned career card started
+with $3,515, Spin 1.0 and Tricks 1.0. The normal lodge shop purchased Spin 2.0
+and Tricks 2.0 for $2,500, leaving $1,015. The game overwrote PLAYER1 and
+reported Save complete. The actual player Export card button downloaded the
+8,650,752-byte updated card; the original imported card remained unchanged.
 
-A subsequent ordinary Firefox run entered Snow Jam and visibly reached 4%
-course progress with 199,751 mip batches and zero level-zero approximation
-batches. Its 20.46-second racing window delivered 400 fresh images (19.55/s),
-with a 103.04 ms maximum interval and audio reaching zero. No application errors
-were reported. An earlier script stopped at the briefing; its 18.10/s window
-is not a race measurement. These checks do not qualify a completed race,
-hardware fidelity or release performance.
+A fresh headed Firefox profile imported that download through the player UI,
+loaded PLAYER1 through the game, entered playable mountain gameplay and returned
+to the lodge. The shop displayed Spin 2.0, Tricks 2.0 and $1,015. Acceleration
+and Speed remained 1.2; Edging, Stability and Toughness remained 1.0. Existing
+collectible progress also remained 1/5. Both browser sessions paused cleanly
+and closed with no application errors or warnings.
 
+This functional check used headed Chromium and Firefox on Linux at 1280×800,
+the documented WebGPU enablement settings and simulated standard-controller
+input. There were no guest-memory/card edits, altered game rules or native
+observer wrappers. It adds purchase and subsequent save-transfer coverage;
+it is not a new timing qualification or proof of later-peak progression.
 
-Destination samplers are now assigned once per linked shader program. Alpha-test
-failure passes update a scalar uniform while retaining the shading block's
-std140 offsets, instead of uploading the full block for every phase change.
-Independent sampler-lifetime and alpha-phase fixtures pass in both desktop
-browsers, including partial masks, destination-alpha tests, all eight alpha
-comparisons, all four failure actions and missing-uniform controls. The phase
-fixture checks 26,624 color/depth pairs, including 32 deferred sequences that
-retain intermediate results without exporting RAM between passes. Uniform
-buffer uploads fall from 1,297 to 898. These counts describe the fixture's work.
+## Later-peak loading and interaction checks
 
-Two matched Firefox briefing windows delivered 14.80 and 15.07 fresh images/s
-with the preceding implementation, versus 15.75 and 15.92/s with these changes.
-Weighted throughput rises from 14.94 to 15.84/s, approximately 6%. Candidate
-maximum intervals are 100.36 and 100.56 ms, and audio still reaches zero. This
-bounded comparison fails the release performance requirement; it does not
-qualify a complete race, physical output or phone compatibility.
+The unchanged WebGPU worker entered Peak 3's The Throne and Peak 2's Ruthless
+backcountry in headed Chromium 156 and Firefox 158.0.1 on Linux at 1280×800,
+using the documented WebGPU enablement settings. The checks exercised transport,
+loading, cinematic skipping, controller movement and acknowledged host pause.
+Ordinary terrain collisions and wipeouts were retained; Firefox also recovered
+from a Ruthless wipeout through normal Square-button presses and resumed riding.
+Both browsers closed with no application errors or warnings.
 
-Framebuffer-to-host transfers now check GL errors before copying temporary readback
-pixels into GS RAM. The preceding implementation silently changed RAM after an
-injected fault. Both desktop browsers pass 32 fault/retry cases across four pixel
-layouts and four rectangle shapes, with complete RAM comparisons and exact packed
-output after retry. The preceding implementation and a control that suppresses
-error reporting fail the new assertion. The full backend fixture matrix passes
-in both browsers. This is a correctness fix; it does not establish a speed gain.
+These checks used a separate QA card made from the public
+[Apollo SSX 3 save](https://bucanero.github.io/apollo-saves/PS2/SLUS20772/).
+The source archive is pinned to Apollo commit
+`6715bd86c736a7808e9101eb4199aa79e59fbe57`. Standard mymc++ 3.2.0 PSV import
+preserved all three save-file payloads byte-for-byte in a new card, which the
+player imported and the game loaded through their ordinary UIs. The source
+save's original earnings method is unverified. This is later-course access
+coverage, not evidence of earning its unlocks. No save or game assets were
+added to this repository, and the separately earned Zoe career was unchanged.
 
-Private profiling found thousands of native fallback draws per frame in a slow
-briefing. Almost all sampled fallback passes requested mip filtering, which the
-ordered path previously rejected; the native fallback samples level zero.
-The new CPU-owned mip path covers a guarded subset of those requests.
-An explicitly approximate level-zero batching trial still submitted only about
-18 fresh images/s, so enabling that approximation would not meet the performance
-target. Sampled palettes usually contain varying alpha, ruling out a blanket
-opaque-material shortcut. Remaining mip aliases/layouts, destination-dependent
-batching and frame delivery remain engineering work before performance
-qualification.
-
-The draft WebGL branch now implements the runtime GPU API and can build a private game player, rather than only replaying captured commands. The normal backend and hosted release are unchanged. This candidate requires Asyncify, native internal resolution and the window-owned runtime; the split game/presentation worker is not integrated.
-
-Asset-free checks pass in headed Chromium 156 and Firefox 158 with WebGPU withheld and no GPU feature flags or Firefox preferences. Each browser verifies 64 distinct asynchronous frames (188,416 exact pixels), synchronous display, offset download, actual drawing/export, uncached local copy, snapshot restoration including a partial RGB24 transfer, rejection of invalid snapshot metadata without VRAM mutation, and host-yield requests for synchronous rendering work. A fresh native build passes 18 CTest cases, and all 23 JavaScript regression suites pass. CI now compiles the live WebGL probe in addition to the standalone backend fixtures; hardware browser runs remain separate.
-
-The WebGL shell now enables the copy presenter's capacity waits. Previously its synchronous readbacks used the compatibility setting intended for WebGPU's asynchronous completion, allowing rendering to continue with a full copy queue while browser automation timed out. A paired Chromium check used identical completed JS/Wasm/data binaries: the old HTML setting timed out; changing only copy pacing reached the main menu, paused, resumed and paused again. The source policy regression rejects the preceding shell; all 23 JavaScript suites pass.
-
-A fresh immutable build then passed Firefox keyboard and simulated standard-controller navigation through character, peak, mode and event selection, with repeated native pause acknowledgements and no application errors. The first Snow Jam briefing renders, but a short 12.195-second instrumented window delivered only 165 fresh images (13.53/s), with a 133.66 ms maximum interval and an audio queue reaching zero. This fails performance requirements and is not a completed-race qualification. Earlier temporary driver argument errors and one diagnostic attempt that read assets during linking are excluded; subsequent tests use copied immutable bundles with recorded hashes.
-
-The depth-alias path now retains validated private framebuffer attachments until their resource owner or dimensions change, copies the mapped source bounds and scissors destination writes. Six asset-free ownership/mapping cases compare full target images against forced attachment validation and full-surface copies, including replacement, reset, resize, nonzero coordinates and disjoint rectangles. Native and hybrid runs pass in both browsers, comparing 458,752 pixels per mode. In the native thin-region fixture, validation calls fell from 136 to 8 and copied depth pixels from 4,456,448 to 536; these are fixture work counts, not game-speed measurements. The runtime's 64-frame drawing/export/snapshot probe also passes in both browsers.
-
-A separate immutable Firefox game build with this change delivered 141 fresh images over 10.454 seconds (13.49/s), with a 164.22 ms maximum interval and audio reaching zero. This does not demonstrate an improvement over the preceding 13.53/s briefing window. A private pipelined-readback trial was slower at 10.70/s and was rejected. Neither trial changes the hosted release or establishes playable performance.
-
-The WebGL build now excludes the synchronous `CGSH_OpenGL` and `CGSHandler` methods from Asyncify suspension instrumentation, retaining the existing synchronous EE/VU worker exclusions. Rendering drains before the host yields; those excluded methods must not suspend. WebGPU keeps its preceding exclusion list and instrumented rendering path. The runtime probe uses the same selected list and passes in both browsers. Canonical CMake probe output is byte-identical to the tested private probe; the actual game reproduces its Wasm, HTML, data and symbol map exactly, with JavaScript differing only in three absolute data-package identifiers for the output directory.
-
-Separate normal-menu Firefox runs reached visually verified Snow Jam briefings. Two baseline windows delivered 13.50 and 13.53 fresh images/s; two exclusion-candidate windows delivered 14.66 and 14.62/s, approximately an 8% improvement. Candidate maximum intervals were 100.74 and 126.60 ms, and both audio queues reached zero. These short instrumented software-submission windows establish a bounded comparison, not playable performance or physical output qualification. The canonical build independently delivered 14.51/s over 16.198 seconds, with a 138.02 ms maximum interval and audio reaching zero. A later private GL-prototype counter diagnostic timed out and is excluded; it supplied no race-performance result. All 23 JavaScript suites pass.
-
-A clean canonical Firefox rerun without prototype hooks entered the normal Snow Jam race, visually showed the start and subsequent 5% course progress, and responded to keyboard input. Its 21.366-second race-start window submitted 329 fresh images (15.40/s), with 333 native frames, a 170.42 ms maximum interval, 295 intervals over 25 ms, audio reaching zero and no application errors. Native pause acknowledgements succeeded and the browser closed. This is a short race-entry functional check and a failed performance window, not a completed-race or fidelity qualification.
-
-Runtime VRAM exports now validate pending GL errors before returning success, including exports satisfied by clean cached RAM. Previously the runtime relied on the shared cache helper, whose clean-cache early return skipped that check; the old implementation fails the new clean-export assertion in both browsers. The check lives at the runtime export boundary, preserving the helper’s internal cache fast path. The runtime probe passes six injected native GL-error cases per browser: dirty export, clean export, snapshot, synchronous display, asynchronous display and CPU-display fallback. Failed exports/snapshots preserve caller buffers and a clean retry returns exact pixels. A control that hides driver errors fails the dirty-export assertion in both browsers.
-
-A private trial removing per-alias error queries did not improve the matched Firefox briefing: 14.63 fresh images/s versus the baseline's 14.87/s across two windows each. It was rejected, and the preceding per-alias checks are retained. Its later short race-entry measurement is excluded from release qualification. A subsequent helper-level check also produced failed performance windows and was narrowed to the runtime export boundary; that intermediate build is not the final source. The final runtime-boundary build passed ordinary-menu Firefox navigation into Snow Jam with native pause acknowledgements and no application errors. Its 15.494-second briefing window delivered 220 fresh images (14.20/s); its 15.553-second race-start window delivered 244 (15.69/s), with a 133.70 ms maximum interval and audio reaching zero. These are failed performance windows, not a completed-race or fidelity qualification.
-
-The experimental candidate is not production ready and has no qualified gameplay performance window. Full-game rendering and performance, broader lifecycle checks, worker integration, context recovery, snapshot interchange and physical phone/controller/audio qualification remain open. Reproducible build and browser-test commands are in [building](building.md#experimental-live-webgl-runtime). Game files, generated game binaries, captures and private credentials are excluded from the public source.
+After entering The Throne, Chromium advanced another 900 native fields and
+Firefox another 300; after entering Ruthless, both advanced another 600 before
+inspection. These are short functional checks, including falls and slow movement,
+not full-course completions or new timing qualifications. Normal later-peak
+unlocks and complete progression remain unverified.
 
 ## Opt-in live statistics and current worker qualification
 
@@ -126,7 +835,13 @@ Chrome documents a WebGPU compatibility mode targeting older graphics APIs, star
 
 A private feasibility test selected the existing CPU GS rasterizer in the runtime-worker environment while retaining the established hardware GPU presenter and test flags. The actual SSX 3 title rendered, but its 30.578-second window averaged only 18.546471 fresh submissions/s, with an 83.150 ms maximum interval, 563 intervals over 25 ms and 1,006,688 missing stereo frames. There were no application errors/warnings. Native pause and a frozen frame count were verified; the browser closed and the display returned to 60 Hz. This is a rejected CPU-headroom test, not a default-browser fallback or gameplay qualification. An initial helper-generation error stopped before browser launch and is retained separately.
 
-The current GS renderer uses WebGPU compute/storage operations, and the separate presenter also requires WebGPU. Providing default-browser support where hardware WebGL 2 is available requires a GPU-backed renderer and presenter, not just removing the feature check. An existing PS2 OpenGL renderer's interfaces and permissive source license were inspected, but no third-party renderer was integrated. Required integration work includes register/image submission, VRAM/CLUT coherence, framebuffer/interlace handling, context/thread ownership, reset/state behavior, and presentation that preserves bounded ownership and timing. A software fallback that misses the performance target was not shipped. Version 68 and all native/hosting assets remain unchanged by this audit; default-browser compatibility and physical-device qualification stay open.
+The GS renderer and separate presenter require WebGPU. Supporting WebGL-only
+configurations would require another renderer and presenter; that experiment
+has been stopped in favor of the selected WebGPU release target. The capability
+audit above is retained as evidence of the tested platform limits, rather than
+as a promise to implement another backend. Version 68 and its native/hosting
+assets were unchanged by that audit.
+
 
 ## Version67 FPS status update and 120 Hz qualification
 
@@ -146,7 +861,7 @@ Both passed the unchanged 25 ms actual-submission/fresh-image and 50 ms audio/em
 Version 67 deployed successfully with the same owner-only audience. All three actual served application documents matched the packaged desktop/primary/compatibility shells exactly, allowing only the two reviewed hosting script templates. All compiled native/JavaScript/helper assets remain byte-identical. The independent hosted Firefox race passed 300.904 seconds at 59.999983 fresh submissions/s, maximum interval 23.380 ms, with zero replacements, overwritten images, queue underflows, missing audio, clipping or application errors/warnings. Its audio/emulation-clock difference was 10 ms. The actual results screen showed Zoe fifth at 03:45. The hosted Chromium race also passed 300.645 seconds at 60.002550 submissions/s, maximum interval 21.860 ms, with zero image/audio loss, replacements, pool underflows, clipping or application errors/warnings. Its audio/emulation-clock difference was 16.000 ms; the rendered results showed Zoe sixth at 03:53. Firefox recorded 15 known hosting-cookie warnings separately; Chromium recorded 0. Both hosted checks used the actual served application document without replacement, reached normal rendered race results, acknowledged native pause, closed cleanly and restored the original display mode. These are bounded desktop qualifications; the remaining physical-device and complete-game sign-offs stay open.
 
 
-## Version67 current-worker two-player racing
+## Historical version67 worker two-player racing
 
 The actual version 67 desktop worker was cold-started in separate headed Chromium and Firefox sessions on Linux at 120 Hz, 1280×800 and DPR 1. The served application document matched the qualified shell exactly; immutable assets and disc were unchanged. Normal Multi Play menus used the keyboard to select Zoe as Player 1 and a second simulated standard gamepad to select Moby as Player 2. All Bragging Rights options remained Off/No. Separate views of both riders were verified before each accepted measurement. No native fixture, guest/card edit, unlock code or altered game rule was used.
 
@@ -161,7 +876,7 @@ Chromium's actual Multi Play Results screen showed Player 2 fourth at 03:42 and 
 
 A separate bounded Firefox diagnostic captured a 26.98 ms submission interval after 20.277 seconds of split-screen play. An overlapping native `PCanvasManager::Msg_GetSnapshot` wait lasted 14.745 ms; three images were queued before the missed/late callback, the clock remained near 8.33 ms and the upload took 0.98 ms. No overlapping GC/CC pause marker or JavaScript canvas readback was recorded. Six snapshot waits occupied 56.10 ms in the 20.595-second profile, with a 15.31 ms maximum. This narrows the captured delay to a native snapshot wait; it does not establish the caller, a fix, or the cause of every unprofiled delay. Profiling changes scheduling and is separate from normal qualification. The diagnostic paused and closed cleanly, restored the display, and exited with the expected timing-gate failure.
 
-Current-worker split-screen controls and Chromium timing are verified within this environment; Firefox's unchanged 25 ms submission/fresh-image gate remains a production issue. The earlier single-player qualifications do not cover this failure. No runtime or hosting change was made during these checks.
+These version67 checks verified split-screen controls and Chromium timing within this environment; Firefox's 25 ms submission/fresh-image gate remained a production issue at that checkpoint. The earlier single-player qualifications did not cover that failure. The version68 opt-in statistics fix and subsequent five-minute two-player qualifications above supersede this status. No runtime or hosting change was made during the version67 checks themselves.
 
 ## Current worker first-use career
 
@@ -284,7 +999,10 @@ The peak-controlled primary passed all 14 native interaction checkpoints and a 6
 
 ## Remaining sign-off
 
-- Real iPhone and Android browser compatibility, sustained performance, memory pressure, thermal behavior and touch play. Agent device access is currently unavailable; desktop viewport emulation is not device qualification.
+Physical-phone testing is outside the current release scope at the owner's
+request. Phone compatibility, sustained performance, memory pressure, thermal
+behavior and touch play are unqualified; they are not a pending release gate.
+
 - Physical USB/Bluetooth controller mappings, disconnect/reconnect behavior and latency, plus physical speaker/headphone/Bluetooth audio and A/V synchronization.
 - Full normal progression, unlocks, medals and broader courses/modes. The recorded race windows and earlier save/recovery checks do not establish complete game coverage.
 - Physical display delivery and historical rare timing events. CPU submissions, completion notifications and screenshots alone do not prove physical scanout timing.

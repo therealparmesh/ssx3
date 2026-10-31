@@ -19,6 +19,7 @@ let browser, monitor;
   frameMetrics=frameMetrics.replace('try{new PerformanceObserver',"try{if(PerformanceObserver.supportedEntryTypes.includes('longtask'))new PerformanceObserver");
   await page.evaluateOnNewDocument('if(typeof GPUBuffer!=="undefined"){'+frameMetrics+'}');
   await page.evaluateOnNewDocument(fs.readFileSync(__dirname+'/browser_audio_metrics.js','utf8'));
+  await page.evaluateOnNewDocument(fs.readFileSync(__dirname+'/browser_source_clock.js','utf8'));
   await page.evaluateOnNewDocument(() => {
     if (typeof AudioWorkletNode === 'undefined' || typeof AudioWorklet === 'undefined') return;
     window.qaAV = {buffer:new SharedArrayBuffer(256),states:[],processorInstrumented:false};
@@ -52,6 +53,7 @@ let browser, monitor;
     qaAV.ints=new Int32Array(qaAV.buffer,0,16); qaAV.ints[8]=0x7fffffff;
     audio.addEventListener('statechange',()=>qaAV.states.push({state:audio.state,frame:Module._ps2web_frames(),paused:Module.paused}));
     qaAV.start={frame:Module._ps2web_frames(),time:performance.now(),audioTime:audio.currentTime,sampleRate:audio.sampleRate,baseLatency:audio.baseLatency??null,outputLatency:audio.outputLatency??null};
+    qaAV.start.sourceClock=ssx3SourceClock.capture(Module,wasmMemory);
     qaInstall();qaPhase("opening-film-and-title");qaActive(true);Atomics.store(qaAV.ints,0,1);
   });
   const start = await page.evaluate(()=>qaAV.start);
@@ -64,7 +66,7 @@ let browser, monitor;
     await new Promise(resolve=>setTimeout(resolve,1000));
   }
   clearInterval(monitor); monitor=null;
-  await page.evaluate(()=>{qaActive(false);Atomics.store(qaAV.ints,0,0); qaAV.end={frame:Module._ps2web_frames(),time:performance.now(),audioTime:audio.currentTime};});
+  await page.evaluate(()=>{qaActive(false);Atomics.store(qaAV.ints,0,0); qaAV.end={frame:Module._ps2web_frames(),time:performance.now(),audioTime:audio.currentTime,sourceClock:ssx3SourceClock.capture(Module,wasmMemory)};});
   await page.click('#pause');
   await page.waitForFunction(()=>Module._ps2web_pause_ready()===1&&audio.state==='suspended');
   const paused = await page.evaluate(()=>({frame:Module._ps2web_frames(),audioTime:audio.currentTime}));
@@ -89,12 +91,15 @@ let browser, monitor;
       states:qaAV.states,failed:!!Module.failed,bufferedSurface:Module.bufferedSurface,checks:['actual 48 kHz stereo worklet output','actual presentation submission intervals','pause freezes simulation and audio clock','explicit resume restores audio and simulation','simulated audio suspension pauses game and resumes']};
   });
   result.audioVsFrameElapsedDifferenceMs=1000*((result.end.audioTime-result.start.audioTime)-(result.end.frame-result.start.frame)/60);
+  try { result.sourceClock=require('./browser_source_clock.js').compare(result.start.sourceClock,result.end.sourceClock); }
+  catch(error) { result.sourceClockError=error.message; }
   result.errors=errors;
   fs.writeFileSync(output+'/result.json',JSON.stringify(result,null,2));
   console.log(JSON.stringify(result));
   assert.equal(result.audio.nativeFramesConsumed+result.audio.underrunFrames,result.audio.frames);
   assert.deepEqual(errors,[]); assert.equal(result.failed,false); assert(result.audio.frames>=48000*28);
-  assert(Math.abs(result.audioVsFrameElapsedDifferenceMs)<50, "Audio and emulated frame clocks diverged");
+  assert(!result.sourceClockError,result.sourceClockError);
+  assert(result.sourceClock.passed, 'Source audio and native field clocks diverged: '+JSON.stringify(result.sourceClock.differenceMs));
   assert.equal(result.presentation.longRafGaps,0);assert.equal(result.presentation.overwritten,0);
   assert(result.presentation.actualSubmissions.intervals>0,'Actual presentation submissions must be measured');
   assert.equal(result.presentation.actualSubmissions.longGaps,0,'Actual submission gaps above 25 ms must fail even with regular RAF timestamps');

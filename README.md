@@ -1,6 +1,6 @@
 # SSX 3
 
-An experimental SSX 3 (USA, PlayStation 2) browser port built on [ps2-web-recomp](https://github.com/snuri00/ps2-web-recomp). The Emotion Engine executable is statically translated to C++ and compiled to WebAssembly; the remaining console hardware runs in the runtime, with WebGPU graphics and stereo AudioWorklet output.
+An SSX 3 (USA, PlayStation 2) browser port built on [ps2-web-recomp](https://github.com/snuri00/ps2-web-recomp). The Emotion Engine executable is statically translated to C++ and compiled to WebAssembly; the remaining console hardware runs in the runtime, with WebGPU graphics and stereo AudioWorklet output.
 
 This repository contains the runtime, recompiler, browser player, build scripts and source regression tests. Supply your own disc image. ROMs, BIOS files, generated game translations, compiled game assets and memory cards are excluded.
 
@@ -17,11 +17,11 @@ Open `http://127.0.0.1:8620/` in a WebGPU-capable browser. The local server supp
 
 The build verifies the executable's SHA-1 before translating it: `77114dfd1205eaccf1ccc18c5f9650097fa78bd8` (`SLUS_207.72`). Other regions/revisions are not supported by the SSX 3 wrapper.
 
-The default build uses JSPI and modern Wasm exception handling. A separate Asyncify build is available for browsers missing those features; see [build instructions](docs/building.md). WebGPU, shared memory and cross-origin isolation are required by both builds. Firefox on Linux may require `dom.webgpu.enabled=true` in `about:config`.
+The default SSX 3 build uses the dedicated Asyncify game worker and a separate WebGPU presentation worker, matching the architecture used for the desktop checks. Build, play and local-host scripts select `build/web-ssx3-asyncify-worker` consistently. The wrapper generates its browser translation without tail calls while retaining the native translation. WebGPU, shared memory and cross-origin isolation are required. Firefox on Linux may require `dom.webgpu.enabled=true` in `about:config`. Other browser variants are described in the [build instructions](docs/building.md).
 
 ## Controls
 
-Connect a standard USB/Bluetooth controller and press a button to activate it. Browser gamepad mappings support two controller slots; physical-device qualification remains incomplete. Touch controls appear on phones and can be enabled with `?touch` for layout testing.
+Connect a standard USB/Bluetooth controller, click Play to enable sound, and press a controller button to activate it. Browser gamepad mappings support two controller slots, both sticks, analog trigger pressure and stable player assignments when a controller disconnects. Start/Options is the game's Start button. After returning from a hidden tab, use Resume to continue. See the [browser gamepad checks](tests/browser_gamepad/README.md) for reproducible native-worker verification. Touch controls appear on phones and can be enabled with `?touch` for layout testing.
 
 Keyboard positions follow [PCSX2's layout](https://github.com/PCSX2/pcsx2/blob/master/pcsx2/Input/InputManager.cpp), with Space added for jump/select:
 
@@ -58,11 +58,15 @@ Save career progress in the game first: **Mcomm → Options → Save game**, or 
 
 ## Status and testing
 
-Version 68 is deployed privately with live statistics moved to the existing `?debug` mode. Separate five-minute hosted two-player Snow Jam windows passed at 120 Hz: Firefox 60.000005 fresh submissions/s with a 19.180 ms maximum interval; Chromium 60.002325 with a 20.080 ms maximum. Both riders finished in each run. There was no image/audio loss, clipping or application error. All 50 asset-free CI suites pass. See [current release status](docs/release-status.md) for exact builds, scope and retained earlier failures, and [validation scope](docs/validation.md) for historical evidence and limitations.
+The tagged [WebGPU desktop release](docs/webgpu-v70.md) records the supported target, release checks and limitations. Build it from your own disc image; generated game binaries and disc data are not distributed in this repository.
 
-The Linux timing tests explicitly enable WebGPU: Firefox uses `dom.webgpu.enabled=true`; Chromium uses `--enable-unsafe-webgpu --enable-features=Vulkan`. Fresh automation profiles without those overrides do not start the game on the tested AMD Linux host. Hardware WebGL 2 is available there, but this build has no WebGL renderer. Default-browser startup therefore remains an open compatibility requirement.
+Version 70 is deployed privately with aligned audio pacing and a fully primed three-image queue at startup/resume. Separate five-minute hosted Gravitude race/results windows at 120 Hz passed: Chromium 60.002494 submissions/s with a 21.47 ms maximum interval; Firefox 60.000035 with a 19.20 ms maximum. Both passed the source-audio clock tolerance with no image/audio loss, clipping or application errors. Both hosted browsers also passed 27 native-worker keyboard/gamepad checkpoints, and source CI passes. These windows include racing and results; they do not establish successful qualifier advancement. See [current release status](docs/release-status.md) for exact builds, scope and retained earlier failures, and [validation scope](docs/validation.md) for historical evidence and limitations.
 
-Real iPhone/Android performance, physical controllers, Bluetooth audio and full-game coverage remain unqualified. These results are not a universal 60 fps or bug-free guarantee.
+WebGPU is the production graphics backend. The slower WebGL experiment is separate from this build and is not a production fallback. A compatible hardware WebGPU adapter is required; the player explains missing browser capabilities before starting.
+
+The Linux timing tests explicitly enable WebGPU: Firefox uses `dom.webgpu.enabled=true`; Chromium uses `--enable-unsafe-webgpu --enable-features=Vulkan`. Fresh automation profiles without those overrides do not start the game on the tested AMD Linux host. Firefox support therefore depends on WebGPU availability in that browser/platform configuration.
+
+Physical-phone testing is outside the current release scope. These desktop results do not qualify phone performance, Bluetooth latency, physical audio/display delivery or full-game coverage, and are not a universal 60 fps or bug-free guarantee.
 
 Asset-free checks can run without a disc image:
 

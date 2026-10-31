@@ -21,6 +21,78 @@ DisplaySource source(std::uint32_t seed) {
     const std::uint32_t widths[] = {32, 64, 128, 64}, heights[] = {16, 32, 64, 16};
     return {0, (widths[(seed-1)%4]+63)/64, ps2::gs::PSMCT32, 0, 0, widths[(seed-1)%4], heights[(seed-1)%4], false};
 }
+
+constexpr DisplaySource color_source{0, 1, ps2::gs::PSMCT32, 0, 0, 32, 16, false};
+void fill_color(std::uint32_t rgba) {
+    const std::vector<std::uint32_t> input(color_source.width * color_source.height, rgba);
+    ps2::gs::State transfer{};
+    transfer.bitbltbuf = static_cast<std::uint64_t>(color_source.fbw) << 48;
+    transfer.trxreg = color_source.width | (static_cast<std::uint64_t>(color_source.height) << 32);
+    ps2::gs::gpu::image_begin(transfer);
+    ps2::gs::gpu::image_data(reinterpret_cast<const std::uint8_t *>(input.data()), input.size() * 4);
+}
+void color_rectangle(bool textured, std::uint32_t rgba) {
+    ps2::gs::State state{};
+    state.prim = 6u | (textured ? 0x110u : 0x40u);
+    state.prmodecont = 1;
+    state.colclamp = 1;
+    auto &context = state.ctx[0];
+    context.frame = static_cast<std::uint64_t>(color_source.fbw) << 16;
+    context.zbuf = 1ull << 32;
+    context.scissor = (static_cast<std::uint64_t>(color_source.width - 1) << 16) |
+                      (static_cast<std::uint64_t>(color_source.height - 1) << 48);
+    // PSMCT32, 32x16 texture, neutral alpha, MODULATE. Reading and writing
+    // the same framebuffer follows the game's final color-pass path.
+    context.tex0 = (1ull << 14) | (5ull << 26) | (4ull << 30) | (1ull << 34);
+    context.clamp = 1u | (1u << 2);
+    context.alpha = 0x44; // (source - destination) * source alpha / 128 + destination
+    ps2::gs::Vertex vertices[2]{};
+    for (auto &vertex : vertices) {
+        vertex.r = rgba & 255u;
+        vertex.g = (rgba >> 8) & 255u;
+        vertex.b = (rgba >> 16) & 255u;
+        vertex.a = rgba >> 24;
+        vertex.q = 1;
+    }
+    vertices[1].x = vertices[1].u = color_source.width * 16;
+    vertices[1].y = vertices[1].v = color_source.height * 16;
+    ps2::gs::gpu::draw(state, vertices, 2);
+}
+void expect_color(std::uint32_t rgb, std::uint32_t scale) {
+    std::vector<std::uint32_t> output;
+    std::uint32_t width = 0, height = 0;
+    check(ps2::gs::gpu::display(color_source, output, width, height), "Color fixture readback");
+    check(width == color_source.width * scale && height == color_source.height * scale,
+          "Color fixture scaled dimensions");
+    check(output.size() == static_cast<std::size_t>(width) * height, "Color fixture pixel count");
+    for (auto value : output) check((value & 0xFFFFFFu) == rgb, "GS fade and modulation pixels");
+}
+void check_fade_and_modulation(std::uint32_t scale) {
+    // Fixed expected colors, independent of the renderer's shader helpers.
+    const std::uint32_t cases[][3] = {
+        {0x80FFFFFFu, 0x80808080u, 0xFFFFFFu},
+        {0x80FFFFFFu, 0x807F5279u, 0xFDA3F1u}, // White -> RGB241/163/253 in the captured final tint pass.
+        {0x80C08040u, 0x807F5279u, 0xBE523Cu},
+        {0x806496C8u, 0x80FFFFFFu, 0xC7FFFFu},
+    };
+    for (const auto &sample : cases) {
+        fill_color(sample[0]);
+        color_rectangle(true, sample[1]);
+        expect_color(sample[2], scale);
+    }
+    const std::uint32_t fades[][2] = {
+        {0, 0x4B1F11u}, {64, 0xA58F88u}, {128, 0xFFFFFFu},
+    };
+    for (const auto &sample : fades) {
+        fill_color(0x804B1F11u);
+        color_rectangle(false, 0xFFFFFFu | (sample[0] << 24));
+        expect_color(sample[1], scale);
+    }
+    fill_color(0x804B1F11u);
+    color_rectangle(false, 0x80FFFFFFu);
+    color_rectangle(true, 0x807F5279u);
+    expect_color(0xFDA3F1u, scale);
+}
 }
 #ifdef PS2_GPU_WEBGL
 #include <array>
@@ -153,6 +225,8 @@ int main() {
     verify_runtime_mips();
     EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true,glFaults:6});});
 #endif
-    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4});},received,pixels,hash,scale,offset);
+    check_fade_and_modulation(scale);
+    ps2::gs::gpu::wait_idle();
+    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,combinedFadeTint:true});},received,pixels,hash,scale,offset);
     return 0;
 }

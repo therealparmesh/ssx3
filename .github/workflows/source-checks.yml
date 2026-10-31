@@ -27,14 +27,20 @@ jobs:
         run: cmake --build build/checks --parallel 2
       - name: Run native regression checks
         run: ctest --test-dir build/checks --output-on-failure
+      - name: Check browser build and local-play workflow
+        run: python3 scripts/test_web_workflow.py
       - name: Check browser JavaScript regressions
         run: |
+          node --check scripts/test_browser_gamepad.cjs
+          node --check scripts/test_browser_media.cjs
+          node --check tests/browser_gamepad/worker_observer.js
           node scripts/test_disc_fetch.cjs
           node scripts/test_frame_presentation.cjs
           node scripts/test_frame_status.cjs
           node scripts/test_queue_submit.cjs
           node scripts/test_frame_metrics.cjs
           node scripts/test_audio_metrics.cjs
+          node scripts/test_audio_source_clock.cjs
           node scripts/test_audio_refill.cjs
           node scripts/test_queue_wait.cjs
           node scripts/test_yield_tasks.cjs
@@ -51,6 +57,7 @@ jobs:
           node scripts/test_pixel_producer.cjs
           node scripts/test_pixel_presenter.cjs
           node scripts/test_pixel_presenter_prefetch.cjs
+          node scripts/test_pixel_presenter_priming.cjs
           node scripts/test_readback_progress.cjs
 
   wasm-vu-jit:
