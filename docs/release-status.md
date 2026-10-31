@@ -364,6 +364,39 @@ explicitly diagnostic-only; no earlier failure is reclassified. The post-window
 screen showed Moby's top-five time 03:15; Continue/Save Records were not selected.
 Hosting remains unchanged.
 
+## Captured image availability deficit and rejected headroom experiment
+
+A local Firefox diagnostic with native sampling recorded a 25.20 ms actual image
+interval. Its private presenter history showed 8–9 ms callback intervals and
+uploads below 1 ms, but a 32.38 ms gap between frame arrivals. The ready-image
+queue was empty when the clock requested presentation. This identifies image
+availability as the limiting condition in that profiled event; it does not
+establish the upstream cause or attribute the earlier 33.30 ms failure. Earlier
+native samples and delay markers were evicted before collection, preventing a
+CPU/GC attribution. The profile remains diagnostic-only.
+
+An experiment added 800 source samples (one 60 Hz field, approximately 16.7 ms)
+to the aligned copy reserve, taking it from 40 ms to 56.67 ms while retaining 64 ms
+for direct surfaces. It passed all 19 native suites and rebuilt successfully
+(native SHA-256 `3c38c333f4ed38901b2193a0ea40587196163bb3315e0700afa1ea1fba7073f6`).
+A fresh unprofiled Firefox Gravitude window lasted 300.709 seconds at 59.998478
+fresh submissions/s, but one actual interval reached 25.26 ms at approximately
+11.3 seconds. Its full source-clock interval [+18.61, +24.06] ms passed, with no
+missing audio, image overwrites/replacements, pool underflow, clipping or
+application errors/warnings. It fails the unchanged 25 ms image gate, so the
+extra-field source change was reverted and the experiment was not selected or
+deployed. Its code patch, binary and failed result remain retained privately.
+
+The next profiler collector stops automatically after the first gap above 25 ms,
+using a reserved private shared-counter cell from presenter to page. It also
+copies schema metadata per snapshot so the private serializer cannot omit
+repeated field labels. Controls verify that near-limit 24.62 ms events do not
+signal, while 25.26 ms events do, without changing the release gate. A real
+browser synthetic-control run verified renderer-to-page notification, automatic
+close, retained native timing markers and 0.24 ms native/private marker alignment.
+That abbreviated synthetic run supplies no gameplay, clock or release
+qualification. No original failure is reclassified and hosting is unchanged.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified
