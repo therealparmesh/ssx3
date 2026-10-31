@@ -14,6 +14,36 @@ the WebGPU release.
 
 As of 2026-10-30, saved version 68 is running on the owner-private hosted site. Live statistics are now opt-in through the existing `?debug` mode. Normal play keeps the diagnostic HUD inactive, preventing its text updates from triggering native Firefox canvas snapshot waits. Both staged and actual hosted desktop browsers passed separate five-minute two-player race/results windows with near-60 fresh submissions/s and no actual interval over 25 ms. These results qualify their stated desktop configurations; complete game progression and physical audio/display delivery remain unqualified.
 
+## Later-peak timing qualification remains open
+
+A new five-minute Ruthless freeride comparison used the current source shell,
+unchanged qualified native assets, and a separate sourced QA career card. Both
+headed browsers ran at 1280×800 CSS pixels, DPR 1, with a calibrated 120 Hz
+refresh rate and the documented Linux WebGPU settings. Ordinary controller
+inputs included movement, wipeout recovery and reset. This checks later-peak
+runtime behavior; it does not establish full-course completion or earned unlocks.
+
+| Browser | Fresh submissions/s | Longest actual interval | Missing image/audio frames | Native/audio clock difference | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Chromium 156 | 60.002467 | 19.70 ms | 0 / 0 | +71.33 ms | Fails 50 ms clock tolerance |
+| Firefox 158 | 60.000094 | 18.90 ms | 0 / 0 | +44.67 ms | Passes this window |
+
+Both windows had no submission interval above 25 ms, producer replacements,
+output clipping, or application errors/warnings. The Chromium clock failure
+remains unresolved and prevents a broader later-peak qualification. Boundary
+handoffs totaled only 3.47 ms, insufficient to explain its 71.33 ms difference.
+A separate 60-second Chromium diagnostic found matching native video/source-audio
+elapsed time; converter output and queue changes accounted for that diagnostic's
+28.67 ms difference. It does not supersede the failed five-minute window.
+A private candidate aligned the emulation high-water threshold with the existing
+40 ms copy-path rate-control target. It retained 60.002606 submissions/s, a
+19.05 ms maximum actual interval and no image/audio loss, but its clock difference
+was 96.00 ms. It was rejected. Boundary source-audio and native-video elapsed
+time matched exactly; conversion removed 94.67 ms of output, with a further
+-9.33 ms queue change in the independent ring-counter diagnostic. These are
+software-clock measurements, not physical A/V synchronization measurements.
+The hosted runtime has not changed as a result of these tests.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified
