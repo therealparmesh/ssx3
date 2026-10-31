@@ -23,15 +23,16 @@ refresh rate and the documented Linux WebGPU settings. Ordinary controller
 inputs included movement, wipeout recovery and reset. This checks later-peak
 runtime behavior; it does not establish full-course completion or earned unlocks.
 
-| Browser | Fresh submissions/s | Longest actual interval | Missing image/audio frames | Native/audio clock difference | Result |
+| Browser | Fresh submissions/s | Longest actual interval | Missing image/audio frames | Native/output-count difference | Original check |
 | --- | ---: | ---: | ---: | ---: | --- |
 | Chromium 156 | 60.002467 | 19.70 ms | 0 / 0 | +71.33 ms | Fails 50 ms clock tolerance |
-| Firefox 158 | 60.000094 | 18.90 ms | 0 / 0 | +44.67 ms | Passes this window |
+| Firefox 158 | 60.000094 | 18.90 ms | 0 / 0 | +44.67 ms | Passes original check |
 
 Both windows had no submission interval above 25 ms, producer replacements,
-output clipping, or application errors/warnings. The Chromium clock failure
-remains unresolved and prevents a broader later-peak qualification. Boundary
-handoffs totaled only 3.47 ms, insufficient to explain its 71.33 ms difference.
+output clipping, or application errors/warnings. These clock results compare
+native field duration with post-resampling output sample counts. They remain
+recorded under the original check; source-audio clock qualification is still open. Boundary handoffs totaled only 3.47 ms, insufficient
+to explain its 71.33 ms difference.
 A separate 60-second Chromium diagnostic found matching native video/source-audio
 elapsed time; converter output and queue changes accounted for that diagnostic's
 28.67 ms difference. It does not supersede the failed five-minute window.
@@ -49,6 +50,25 @@ intervals of 25.33 / 25.57 ms. Allowing one field ahead measured +14.00 ms and o
 26.08 ms interval. Both averaged approximately 60 fresh submissions/s with no
 missing audio, image replacements or application errors/warnings. Both remain
 unpublished; a clock pass alone is insufficient for release qualification.
+Further two-field/copy-wait variants also failed delivery timing (25.20 / 26.01 ms
+maxima) with no missing audio. They are not selected.
+
+An independent asset-free regression now encodes a time code into the actual
+PCM passed through the current converter and limiter. At ratio 0.9997, it checks
+108,968 decoded sample positions over approximately five minutes of source audio.
+The native field rate relative to output duration is 60.018067 fields/s. Raw
+output counts differ from native duration by 90.00 ms, while decoded source-audio
+time differs by only 0.3125 ms; the conservative source-clock interval is
+[-1.160, +1.160] ms. A 100 ms video offset and an approximately 85 ms increase in
+buffered source-audio delay both fail the unchanged 50 ms tolerance. This is a
+counterexample to treating resampled output counts as the source clock, not a new
+browser pass or a physical A/V measurement. See the regression in
+[tests/audio_source_clock.cpp](../tests/audio_source_clock.cpp) and
+[Libretro's explanation of dynamic rate control](https://docs.libretro.com/development/cores/dynamic-rate-control/).
+
+The browser verifier needs a resampling-aware source-clock observation and new
+unchanged-runtime measurements before the later-peak check can be signed off.
+The unpublished native pacing candidates are not selected for release.
 The hosted runtime has not changed as a result of these tests.
 
 ## Current browser gamepad verification
