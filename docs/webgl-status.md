@@ -2,6 +2,54 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Private GPU presentation trials
+
+Three display-transfer alternatives were tested against the fence-backed
+copy presenter. None is selected or included in the hosted WebGPU release.
+These are ordinary-menu, partial Snow Jam race windows at 1280×800/DPR 1,
+with WebGPU withheld, default Performance effects, no GPU feature overrides,
+and no overlapping build or profiler. Scene variation prevents treating these
+windows as deterministic speed comparisons.
+
+| Private presentation path | Chromium images/s | Firefox images/s |
+| --- | ---: | ---: |
+| ImageBitmap queue with intermediate 2D scaling | 58.91 | 34.28 |
+| GPU logical resolve and full-size BitmapRenderer transfer | not qualified | 30.45 |
+| Same-context source FBO and three-texture FIFO | 58.32 | 45.99 |
+
+All three trials pass the real renderer API fixture in both browsers,
+including 32 additional FIFO frames and 90,560 independently checked logical
+pixels, varying source sizes, odd interlaced crops and bounded capacity waits.
+The same-context trial redirects both synchronous and asynchronous source
+exports to its FBO. Snapshot/error checks exposed restoration of a deleted
+shader program; the corrected trial passes the injected-error boundary and
+suppressed-error negative control. These logical-pixel checks do not qualify
+every final viewport size or the remaining production lifecycle work.
+
+The same-context trial removes display readbacks and ImageBitmap transfers,
+but still fails delivery and audio requirements. Chromium presents 1,167
+images over 20.011 seconds, with a 43.40 ms maximum interval and 38 intervals
+above 25 ms. Firefox presents 921 images over 20.024 seconds, with a 51.86 ms
+maximum interval and 302 intervals above 25 ms. Neither normal gameplay run
+logs application errors or warnings.
+
+Actual AudioWorklet read-counter instrumentation observes 23,712 underrun
+frames in Chromium (0.494 seconds at 48 kHz) and 221,600 in Firefox
+(4.617 seconds). The full-size BitmapRenderer Firefox trial records 467,968
+underrun frames (9.749 seconds). In all three instrumented windows, source
+audio and native video clocks remain within the 50 ms synchronization bound
+while progressing too slowly in real time. A passing source-clock comparison
+therefore cannot substitute for real-time presentation and zero actual audio
+underruns; the existing media gate requires all of them. The same immutable same-context game also passes all 27 native keyboard and
+simulated standard-controller checks in both browsers, including all buttons,
+analog pressure, independent sticks/D-pad, disconnect/reconnect, two-controller
+reordering, API denial/recovery, hidden-tab suspension and restoration of held
+inputs before native resume. Both sessions report zero application errors and
+warnings. These are browser API checks, not physical-controller certification.
+The trials remain private diagnostics, with context/resource cleanup,
+CPU-region fallback, long-run stability and completed-race qualification still
+open.
+
 ## Fence-backed display readbacks
 
 The copy presenter now submits pixel-pack-buffer readbacks before collecting
