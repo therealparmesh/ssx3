@@ -16,7 +16,8 @@ As of 2026-10-31, saved version 70 is running on the owner-private hosted site
 with aligned audio pacing and full three-image startup/resume priming. The
 selected correction and its staged Firefox/Chromium qualification are recorded
 below. Post-publication checks verify the selected live release, exact asset
-bytes and isolation headers; a new hosted gameplay window remains outstanding.
+bytes and isolation headers. New hosted five-minute Gravitude race/results
+windows pass in both desktop browsers, as recorded below.
 Live statistics remain opt-in through `?debug`. The preceding version 68 passed
 staged and hosted five-minute two-player race/results windows; version 69 passed
 staged five-minute later-peak windows. These results qualify their stated
@@ -562,10 +563,74 @@ isolation, range, upload, fallback and immutable-asset checks. Post-publication
 HTTP checks verify that both desktop user agents select this release, its ten
 raw assets match the tested bytes, and the isolation headers remain present.
 An unauthenticated game-page request returned403. The Site retains its sole
-owner allowlist with no external visitors/groups. A new hosted gameplay timing
-window remains outstanding; the five-minute qualifications above are staged.
+owner allowlist with no external visitors/groups. The subsequent hosted
+qualification is recorded below; the five-minute windows above are staged.
 Full game progression, every physical controller/output and universal zero-drop
 behavior remain unqualified.
+
+## Version70 hosted timing, input and media verification
+
+Fresh headed Firefox and Chromium profiles loaded the actual owner-private
+version70 documents and immutable assets over HTTPS. Authentication headers were
+restricted to the exact Site origin; no application response was replaced.
+Ordinary menu/controller inputs loaded the separate QA career and entered
+Gravitude. Actual qualifier rules and the countdown were visually verified
+before measurement. Each window used 1280×800 CSS pixels, DPR1 and calibrated
+120 Hz, with the documented Linux WebGPU settings. No screenshots, builds or
+profiling ran inside either window.
+
+| Browser | Duration | Submissions/s | Maximum actual interval | Maximum fresh-RAF interval | Source-clock bounds |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Firefox | 300.647 s | 60.000035 | 19.20 ms | 17.38 ms | [-10.46, -5.54] ms |
+| Chromium | 300.458 s | 60.002494 | 21.47 ms | 16.67 ms | [-4.46, +0.46] ms |
+
+Both pass the unchanged submission-rate, 25 ms interval, zero-loss and 50 ms
+source-clock gates, with no overwritten/replaced images, pool underflow, missing
+audio, full-scale/clipped PCM or application errors/warnings. Chromium's raw
+post-resampling output-count difference was +74.67 ms; its independently bounded
+source clock passes. The windows include racing and the results tail, not five
+minutes of uninterrupted active racing. Chromium's rendered qualifier result
+shows Moby sixth at 04:03 with advancement refused. Firefox's end screen shows
+Moby's 03:29 entry in Top 5 Record Times; no subsequent qualification, saved
+record, reward or earned unlock is claimed. Both ended acknowledged-paused and
+their test browsers closed with exit0.
+
+The known Firefox hosting diagnostic, exactly `Cookie “__cf_bm” has been rejected
+for invalid domain.`, occurred fifteen times via pageerror and was retained
+separately. Two startup-only harness probes ended before measurement while this
+event path was identified. Classification tests cover both console/pageerror
+paths and retain every other error/warning in the original gate. No measured
+failure was reclassified. Earlier fixed-delay setup screenshots showed movies
+or loading rather than gameplay; adaptive ordinary navigation and the verified
+countdown provide the gameplay evidence instead.
+
+Both hosted browsers also passed all 27 native-worker input checkpoints. These
+check actual keyboard events, all sixteen standard controller buttons, two
+controller slots, sticks, analogue trigger pressure, reconnect/reordering,
+temporary API denial/recovery, real tab visibility loss, stopped guest frames,
+neutral paused input and held-input restoration before native unpause. Native
+Gamepad API access was checked before installing synthetic controller snapshots.
+There were no application errors/warnings. Firefox retained thirteen identical
+hosting-cookie diagnostics separately. These instrumented checks establish the
+browser/native input path, not physical controller mappings or latency.
+
+Separate hosted media runs imported the QA card through the normal UI and
+measured ten seconds of actual AudioWorklet PCM across the loading-to-freeride
+transition. Firefox delivered 482,304 frames (195,628 with unequal stereo
+channels, peak0.670); Chromium delivered 480,256 (158,711 stereo, peak0.624).
+Neither lost samples or emitted full-scale PCM. The start images still show
+loading; the end images show actual freeride, so these are not ten seconds of
+continuous audible gameplay. The five-minute race windows above independently
+check sustained stereo output.
+
+Both media runs then verified that explicit pause freezes native frames and the
+audio clock, Resume restores both, a simulated AudioContext suspension pauses
+the native game, and a fresh gesture resumes it. Both ended acknowledged-paused
+and closed with exit0, with no application errors/warnings. Firefox retained
+fifteen identical hosting-cookie diagnostics separately. These checks use
+software sample counters and lifecycle observations; physical output fidelity,
+speaker/headphone routing and end-to-end A/V synchronization are not measured.
+No application or hosted asset changed during this verification.
 
 ## Current browser gamepad verification
 
