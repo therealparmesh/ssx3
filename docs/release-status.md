@@ -23,6 +23,8 @@ staged and hosted five-minute two-player race/results windows; version 69 passed
 staged five-minute later-peak windows. These results qualify their stated
 configurations; complete game progression and physical audio/display delivery
 remain unqualified.
+The subsequent Much-2-Much functional check also retained a nearly uniform pink
+exit-transition frame; its video follow-up remains open below.
 
 ## Retained later-peak timing investigation
 
@@ -631,6 +633,45 @@ fifteen identical hosting-cookie diagnostics separately. These checks use
 software sample counters and lifecycle observations; physical output fidelity,
 speaker/headphone routing and end-to-end A/V synchronization are not measured.
 No application or hosted asset changed during this verification.
+
+## Version70 Much-2-Much functional coverage
+
+The actual owner-private version70 Chromium player loaded the separately sourced
+QA career and entered Peak3 Much-2-Much Big Air through ordinary Transport menus.
+The baseline event information showed No medal and an existing 185,000 record.
+This card is used for course access only; its original unlock/earnings provenance
+is unverified and supplies no earned-unlock evidence.
+
+The first Heat1 finished and posted 1,280 points. Heat2 landed an 8,200-point
+double-front-flip/900 grab combo, but the rider subsequently spent too long in
+the pipe and the timer expired. The standings posted zero for that heat and
+correctly refused advancement, sixth with 1,280 combined. Restart confirmation
+returned to Heat1. That retry finished and posted 8,180 points. Its second heat
+also landed an 8,180-point combo but timed out, posting zero; the final standings
+again refused advancement, sixth with 8,180 combined. HUD totals during Heat2
+include Heat1 and are not independent heat scores. No medal, reward, new record
+or successful advancement was earned. The timeouts and wipeouts remain retained
+as gameplay outcomes; they do not establish an application defect.
+
+Normal Transport returned to Select Peak. Final acknowledged-paused card reads
+still matched the imported 8,650,752-byte card at SHA-256
+`33379fb6211a9a774675df3c260cab87df95494d61457382fb837a2de2ce1237`,
+with all write revisions zero and no pending write. No in-game save was made.
+The test browser closed with exit0 and no application errors/warnings. Inputs
+used normal simulated standard-controller polling, without a native observer,
+guest-memory/card edits, native save-state fixtures or altered rules. This adds a new
+course's scored finish, timeout, restart, standings and return coverage; it is
+not a new performance window, Firefox course check or complete progression.
+
+**Exit-transition video follow-up remains open.** An intermediate screenshot
+after selecting Transport shows a nearly uniform pink image with a faint skip
+prompt (98.18% of the game-image crop has RGB241/163/253). A later image, after
+600 additional native frames, shows the correct Select Peak menu. This single
+frame does not establish its duration, cause or parity with the original game;
+the exit animation is not visually qualified. Earlier screenshots prematurely
+named transport/world/finish/standings are excluded from those claims when they
+actually show a menu, loading, movie or active play. Select press/hold requests
+also do not supply conclusive repositioning evidence in this run.
 
 ## Current browser gamepad verification
 
