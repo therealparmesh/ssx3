@@ -23,8 +23,8 @@ staged and hosted five-minute two-player race/results windows; version 69 passed
 staged five-minute later-peak windows. These results qualify their stated
 configurations; complete game progression and physical audio/display delivery
 remain unqualified.
-The subsequent Much-2-Much functional check also retained a nearly uniform pink
-exit-transition frame; its video follow-up remains open below.
+The subsequent Much-2-Much exit-transition color observation is resolved below:
+the captured pink matches the game's explicit final tint pass.
 
 ## Retained later-peak timing investigation
 
@@ -663,15 +663,59 @@ guest-memory/card edits, native save-state fixtures or altered rules. This adds 
 course's scored finish, timeout, restart, standings and return coverage; it is
 not a new performance window, Firefox course check or complete progression.
 
-**Exit-transition video follow-up remains open.** An intermediate screenshot
+An intermediate screenshot
 after selecting Transport shows a nearly uniform pink image with a faint skip
 prompt (98.18% of the game-image crop has RGB241/163/253). A later image, after
 600 additional native frames, shows the correct Select Peak menu. This single
 frame does not establish its duration, cause or parity with the original game;
-the exit animation is not visually qualified. Earlier screenshots prematurely
+the exit animation was not visually qualified at that checkpoint. The subsequent
+source/pixel investigation is recorded below. Earlier screenshots prematurely
 named transport/world/finish/standings are excluded from those claims when they
 actually show a menu, loading, movie or active play. Select press/hold requests
 also do not supply conclusive repositioning evidence in this run.
+
+## Much-2-Much exit tint resolved
+
+Unpaused screenshot sequences reproduce the exit image as part of a gradual
+fade from Moby using his Mcomm into Select Peak. The same color appears with
+Original visual effects enabled, so skipping the decorative functions is not
+required for the observation. Captures and GPU observers are diagnostics only;
+they supply no new performance qualification.
+
+A read-only observer of the actual GS draw uploads records white untextured
+fade triangles with rising alpha, followed by a final textured MODULATE pass.
+That later pass reads and writes framebuffer0 as PSMCT32, disables alpha
+blending and uses vertex RGBA(121,82,127,128). For a white texel, its fixed-point
+modulation yields RGB(241,163,253), exactly matching the earlier uniform frame.
+The final pass, rather than the preceding white fade alone, explains the pink.
+No runtime color correction is warranted for this observation. This resolves
+the specific captured exit color, not all cinematics or whole-game rendering.
+
+The observer forwards uploads unchanged. Its parser fixtures check raw
+HEAPU8 offsets, arena guard words, source colors and bounds, textured records,
+invalid/small-record rejection and inactive behavior; an actual live control
+also produces valid draw records. Earlier empty probes used an overly narrow
+geometry filter or omitted the arena guard word and remain excluded. An initial
+paused control observed no uploads and is not evidence of missing rendering.
+The final Original capture used held viewport control at1280×800/DPR1 after a
+secondary debugging connection cleared its own viewport override. Earlier
+cropped Original setup images are excluded from viewport comparison. No guest
+memory, card, rules or application assets were edited.
+
+The asset-free GS GPU fixture now checks four fixed modulation colors, three
+white-fade alpha levels and a complete white fade followed by that same tint.
+It renders through the actual C++ renderer and WGSL shaders, checks every output
+pixel, and exercises same-frame framebuffer texture feedback. Chromium and
+Firefox each pass normal uploads, mapped staging and 2× rendering with no page,
+GPU validation or fixture errors. The previous64-frame ordering/resize/readback
+checks remain intact. The new cases use fixed expected pixels, including the
+observed RGB241/163/253, without importing a game asset or copying shader helpers.
+
+Both the menu return and byte-identical final QA card were verified before the
+diagnostic browser and helpers closed cleanly. Read-only paused GPU storage
+copies used additional diagnostic queue commands and are excluded from timing.
+The selected runtime, immutable assets, private hosting and acceptance gates
+remain unchanged.
 
 ## Current browser gamepad verification
 
