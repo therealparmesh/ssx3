@@ -48,6 +48,28 @@ are in [browser gamepad checks](../tests/browser_gamepad/README.md).
 
 The current shell is from source `f85e4af96277d92b39f272412f5d633024ac6792`, with hosting source `43e95691bdd160427bd4c195b0b24479e308c075`. Native assets are unchanged: desktop runtime source `43fb1f0b293353a4880d26c0302deaec1ebaf69e`, immutable release `289893fc3b9a64e8759a0a6bd222b1e9680ab048a95e555ed582098248f0a275`, native SHA-256 `b8cf5dfe41f9cab9fbd5ca85907515737224f8659e99300887a65d880d2935f4`. Version 67 is retained for rollback. Primary/compatibility players receive the same shell change while retaining their assets and earlier desktop qualification; there is no new standalone performance window. Game assets and private access credentials are excluded from this repository.
 
+## Current worker career purchases and transfer
+
+The current source shell and unchanged qualified WebGPU worker passed another
+ordinary career save/transfer check. A legitimately earned career card started
+with $3,515, Spin 1.0 and Tricks 1.0. The normal lodge shop purchased Spin 2.0
+and Tricks 2.0 for $2,500, leaving $1,015. The game overwrote PLAYER1 and
+reported Save complete. The actual player Export card button downloaded the
+8,650,752-byte updated card; the original imported card remained unchanged.
+
+A fresh headed Firefox profile imported that download through the player UI,
+loaded PLAYER1 through the game, entered playable mountain gameplay and returned
+to the lodge. The shop displayed Spin 2.0, Tricks 2.0 and $1,015. Acceleration
+and Speed remained 1.2; Edging, Stability and Toughness remained 1.0. Existing
+collectible progress also remained 1/5. Both browser sessions paused cleanly
+and closed with no application errors or warnings.
+
+This functional check used headed Chromium and Firefox on Linux at 1280×800,
+the documented WebGPU enablement settings and simulated standard-controller
+input. There were no guest-memory/card edits, altered game rules or native
+observer wrappers. It adds purchase and subsequent save-transfer coverage;
+it is not a new timing qualification or proof of later-peak progression.
+
 ## Opt-in live statistics and current worker qualification
 
 The version 67 split-screen Firefox failure remains recorded below. A new passive DOM/native profile captured seven in-window snapshot waits, each starting 1.30–2.20 ms after an FPS-label mutation. No other DOM changes, JavaScript canvas readbacks or overlapping GC/CC pause were recorded. The delayed 25.10 ms submission interval included an 11.84 ms snapshot wait. A private paint-containment prototype still produced a 25.38 ms interval and a 13.31 ms snapshot wait, so it was rejected.
