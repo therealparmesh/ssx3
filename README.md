@@ -58,7 +58,7 @@ Save career progress in the game first: **Mcomm → Options → Save game**, or 
 
 ## Status and testing
 
-Version 68 is deployed privately with live statistics moved to the existing `?debug` mode. Separate five-minute hosted two-player Snow Jam windows passed at 120 Hz: Firefox 60.000005 fresh submissions/s with a 19.180 ms maximum interval; Chromium 60.002325 with a 20.080 ms maximum. Both riders finished in each run. There was no image/audio loss, clipping or application error. All 50 asset-free CI suites pass. See [current release status](docs/release-status.md) for exact builds, scope and retained earlier failures, and [validation scope](docs/validation.md) for historical evidence and limitations.
+Version 69 is deployed privately with a native pause/resume audio-pacing fix. Its rebuilt binary passed separate five-minute staged Ruthless gameplay windows at 120 Hz: Chromium 60.002481 fresh submissions/s with a 19.02 ms maximum interval; Firefox 59.999911 with a 19.44 ms maximum. Both passed the source-audio clock tolerance with no image/audio loss, clipping or application errors. Each browser also passed 27 native controller checkpoints, and source CI passes. The preceding version 68 passed hosted two-player Snow Jam windows in both browsers. See [current release status](docs/release-status.md) for exact builds, scope and retained earlier failures, and [validation scope](docs/validation.md) for historical evidence and limitations.
 
 WebGPU is the production graphics backend. The slower WebGL experiment is separate from this build and is not a production fallback. A compatible hardware WebGPU adapter is required; the player explains missing browser capabilities before starting.
 

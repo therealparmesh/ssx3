@@ -12,7 +12,7 @@ it did not replace the hosted release. WebGL work has stopped and is not a
 production fallback. Its rendering/performance failures are not regressions of
 the WebGPU release.
 
-As of 2026-10-30, saved version 68 is running on the owner-private hosted site. Live statistics are now opt-in through the existing `?debug` mode. Normal play keeps the diagnostic HUD inactive, preventing its text updates from triggering native Firefox canvas snapshot waits. Both staged and actual hosted desktop browsers passed separate five-minute two-player race/results windows with near-60 fresh submissions/s and no actual interval over 25 ms. These results qualify their stated desktop configurations; complete game progression and physical audio/display delivery remain unqualified.
+As of 2026-10-31, saved version 69 is running on the owner-private hosted site with the native audio-pacing pause correction described below. Live statistics remain opt-in through `?debug`. The preceding version 68 passed staged and hosted five-minute two-player race/results windows; the version 69 binary passed new staged five-minute later-peak windows in both desktop browsers. These results qualify their stated configurations; complete game progression and physical audio/display delivery remain unqualified.
 
 ## Later-peak timing qualification remains open
 
@@ -129,7 +129,7 @@ Both browsers ended with acknowledged native pause and closed cleanly. These
 new passes do not reclassify the earlier Firefox failure or establish its exact
 cause. They qualify this staged binary and these desktop configurations, not
 whole-game progression, every controller, physical A/V delivery or universal
-60 fps. The hosted version remains unchanged pending release of this candidate.
+60 fps.
 
 The same staged binary subsequently passed all 27 native browser input
 checkpoints in each browser: keyboard channels, all sixteen standard buttons,
@@ -138,6 +138,23 @@ API denial/recovery, focus loss, neutral acknowledged pause and held-input
 restoration before resume. Both runs had no application errors/warnings and
 closed cleanly. These instrumented input checks are separate from performance
 measurement and do not certify every physical gamepad or Bluetooth connection.
+
+Source commit `4188a2b` passed the native Clang and pinned-SDK Wasm CI jobs,
+including all 18 CTest checks. The existing owner-private site was published as
+version 69 from Sites source `dd6dd6c`. All immutable release objects were
+uploaded and byte/gzip-verified before publication. Both desktop user-agent
+routes return the exact packaged application document, allowing only the two
+previously observed exact hosting-script templates. Health reports desktop
+release `baf65c7f0a8ec629c06372a5f59fcc6426b486da5d0d5ec408624f0f47f0aad6`;
+disc range requests pass and anonymous access is rejected with HTTP 401.
+Fresh live Chromium and Firefox sessions then reached the rendered title screen,
+called the real browser Gamepad API, and passed keyboard Escape pause, frozen
+native fields and resume progress. Both closed paused without application
+errors/warnings. Firefox reported 13 previously known Cloudflare cookie-domain
+notifications separately. An initial smoke driver classified those page-error
+notifications incorrectly; its failed result is retained, and the corrected
+exact-message classification passed a fresh Firefox run. These are live
+functional smoke checks, not additional five-minute timing windows.
 
 ## Current browser gamepad verification
 
