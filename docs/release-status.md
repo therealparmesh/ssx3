@@ -42,6 +42,13 @@ was 96.00 ms. It was rejected. Boundary source-audio and native-video elapsed
 time matched exactly; conversion removed 94.67 ms of output, with a further
 -9.33 ms queue change in the independent ring-counter diagnostic. These are
 software-clock measurements, not physical A/V synchronization measurements.
+A subsequent private audio-consumption field clock kept source-video and audio
+clock agreement within tolerance but did not pass delivery timing. With no extra
+preparation allowance it measured -1.33 ms clock difference and two actual image
+intervals of 25.33 / 25.57 ms. Allowing one field ahead measured +14.00 ms and one
+26.08 ms interval. Both averaged approximately 60 fresh submissions/s with no
+missing audio, image replacements or application errors/warnings. Both remain
+unpublished; a clock pass alone is insufficient for release qualification.
 The hosted runtime has not changed as a result of these tests.
 
 ## Current browser gamepad verification
