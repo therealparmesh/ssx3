@@ -505,7 +505,12 @@ void pace() {
         g_next_frame = 0.0;
     }
     if (g_audio.active.load()) {
-        while (audio_queued_ms() > 80.0 && !g_paused.load()) usleep(1000);
+        // A pause observed during backpressure must be acknowledged here,
+        // before another native field. Recheck the reserve after resume too.
+        while (g_paused.load() || audio_queued_ms() > 80.0) {
+            if (g_paused.load()) wait_while_paused();
+            else usleep(1000);
+        }
         g_next_frame = 0.0;
         return;
     }

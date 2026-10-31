@@ -238,6 +238,8 @@ if(PS2_RUNTIME_TESTS AND NOT EMSCRIPTEN)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(NAME audio-producer-backpressure COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_audio_producer.py" --cxx "${CMAKE_CXX_COMPILER}")
+    add_test(NAME audio-pause-backpressure COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_audio_pacing.py" --cxx "${CMAKE_CXX_COMPILER}")
     add_test(NAME web-disc-cache COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_disc_cache.py"
         --cxx "${CMAKE_CXX_COMPILER}")

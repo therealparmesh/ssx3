@@ -1087,3 +1087,14 @@ boundaries. No runtime or hosting change is required for the corrected verifier.
 
 The new unchanged-runtime Ruthless measurements and the retained Firefox
 source-clock failure are summarized in [release status](release-status.md).
+
+### Pause during native audio backpressure
+
+`python3 scripts/test_audio_pacing.py` extracts the production pause, queue and
+pacing functions into a threaded asset-free fixture. It requests pause while
+the audio queue is above its 80 ms pacing budget, requires acknowledgement
+without advancing the native field, and checks that the field remains frozen
+even if audio drains during pause. Resume must recheck the queue before
+continuing. The same fixture deliberately substitutes the old escaping loop
+and a post-loop pause wait that omits the budget recheck; both must fail for
+their specific regressions. CTest runs this as `audio-pause-backpressure`.

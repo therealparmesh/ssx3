@@ -94,6 +94,51 @@ or earned unlocks. No historical failed window is reclassified as a pass.
 The unpublished native pacing candidates are not selected for release.
 The hosted runtime has not changed as a result of these tests.
 
+## Native pause acknowledgement during audio pacing
+
+An asset-free threaded reproduction found that a pause arriving inside the
+audio-backpressure loop could let pacing return without acknowledging pause.
+The corrected loop acknowledges pause before continuing and rechecks the
+unchanged 80 ms queue budget after resume. The regression also rejects the
+original loop and a naive post-loop pause wait that skips the budget recheck.
+All four native audio CTest checks, 32 input/pause scenarios and the 59-check
+source-clock verifier pass. A local full native build with GCC 13 cannot compile
+the existing Clang vector intrinsics; full source CI uses Clang separately.
+
+The pinned SDK rebuilt the runtime and host from source. The final staged player
+differs from the preceding qualified player only in `ps2web.wasm` and its gzip;
+data, shell, JavaScript glue and worker helpers match exactly. Native SHA-256 is
+`6327ae7e09c0feedd6652dfb764e2a222bbfb9e331ea204b761f13ff68ca20fe`.
+Fresh visible browsers imported the separate sourced QA card through the UI,
+reached Ruthless normally and ran independent five-minute gameplay windows.
+Both used 1280×800, DPR 1 and calibrated 120 Hz with the documented Linux WebGPU
+settings. No screenshot, build, profiling or native diagnostic request occurred
+inside either measurement window.
+
+| Browser | Duration | Fresh submissions/s | Longest actual interval | Source-clock difference interval | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Chromium 156 | 300.449 s | 60.002481 | 19.02 ms | [-46.70, -41.30] ms | Pass |
+| Firefox 158 | 300.663 s | 59.999911 | 19.44 ms | [-37.33, -32.00] ms | Pass |
+
+Both had zero actual submission intervals over 25 ms, lost/overwritten images,
+producer replacements, pool underflows, missing audio, clipped/full-scale PCM
+or application errors/warnings. The entire source-clock interval passes the
+unchanged 50 ms tolerance. Raw post-resampling output-count differences were
++52.00 and +55.33 ms; these remain diagnostics rather than the source-clock gate.
+Both browsers ended with acknowledged native pause and closed cleanly. These
+new passes do not reclassify the earlier Firefox failure or establish its exact
+cause. They qualify this staged binary and these desktop configurations, not
+whole-game progression, every controller, physical A/V delivery or universal
+60 fps. The hosted version remains unchanged pending release of this candidate.
+
+The same staged binary subsequently passed all 27 native browser input
+checkpoints in each browser: keyboard channels, all sixteen standard buttons,
+both sticks/trigger pressure, two-player assignment, disconnect/reconnect,
+API denial/recovery, focus loss, neutral acknowledged pause and held-input
+restoration before resume. Both runs had no application errors/warnings and
+closed cleanly. These instrumented input checks are separate from performance
+measurement and do not certify every physical gamepad or Bluetooth connection.
+
 ## Current browser gamepad verification
 
 The current source shell was rebuilt using the pinned SDK with the qualified
