@@ -12,7 +12,16 @@ it did not replace the hosted release. WebGL work has stopped and is not a
 production fallback. Its rendering/performance failures are not regressions of
 the WebGPU release.
 
-As of 2026-10-31, saved version 69 is running on the owner-private hosted site with the native audio-pacing pause correction described below. Live statistics remain opt-in through `?debug`. The preceding version 68 passed staged and hosted five-minute two-player race/results windows; the version 69 binary passed new staged five-minute later-peak windows in both desktop browsers. These results qualify their stated configurations; complete game progression and physical audio/display delivery remain unqualified.
+As of 2026-10-31, saved version 70 is running on the owner-private hosted site
+with aligned audio pacing and full three-image startup/resume priming. The
+selected correction and its staged Firefox/Chromium qualification are recorded
+below. Post-publication checks verify the selected live release, exact asset
+bytes and isolation headers; a new hosted gameplay window remains outstanding.
+Live statistics remain opt-in through `?debug`. The preceding version 68 passed
+staged and hosted five-minute two-player race/results windows; version 69 passed
+staged five-minute later-peak windows. These results qualify their stated
+configurations; complete game progression and physical audio/display delivery
+remain unqualified.
 
 ## Retained later-peak timing investigation
 
@@ -541,10 +550,22 @@ qualification. No guest state or audio/scoring rules were edited.
 All 19 native suites, the 28 browser-JavaScript workflow commands, and build/play
 workflow checks pass locally. The local source-clock test used its supported
 explicit native-fixture path; an excluded runner attempt requested an unbuilt
-artifact belonging to a separate Wasm CI job. Complete GitHub CI remains required.
-The correction is selected in source, but the hosted site remains version69
-pending CI and packaging/publication checks. Full game progression, every
-physical controller/output and universal zero-drop behavior remain unqualified.
+artifact belonging to a separate Wasm CI job. [Complete GitHub CI](https://github.com/therealparmesh/ssx3/actions/runs/41208542362)
+passed for runtime commit `4aa0b55289ed60facd76ff08dc9b5d8c204e3b7c`.
+
+Version70 was published privately from Site source commit
+`c925c6e79fd8bf81aaca92117705a8ac94ede3d3`, using desktop release
+`891ffd5a693e41d8903ce130291cb42d69ee4ee7ebca16bd5fc7c4e1b36381a3`.
+All 20 raw/gzip assets were uploaded and verified before publication. The
+packaged Worker artifact passed ESM validation and the existing routing,
+isolation, range, upload, fallback and immutable-asset checks. Post-publication
+HTTP checks verify that both desktop user agents select this release, its ten
+raw assets match the tested bytes, and the isolation headers remain present.
+An unauthenticated game-page request returned403. The Site retains its sole
+owner allowlist with no external visitors/groups. A new hosted gameplay timing
+window remains outstanding; the five-minute qualifications above are staged.
+Full game progression, every physical controller/output and universal zero-drop
+behavior remain unqualified.
 
 ## Current browser gamepad verification
 
