@@ -360,17 +360,24 @@ Attr attr_of(const Setup &s, const Vertex &v) {
     return a;
 }
 
-Attr lerp3(const Attr &a, const Attr &b, const Attr &c, float wa, float wb, float wc) {
+Attr lerp3(const Attr &a, const Attr &b, const Attr &c, float wa, float wb, float wc, bool gouraud) {
     Attr r;
-    r.r = a.r * wa + b.r * wb + c.r * wc;
-    r.g = a.g * wa + b.g * wb + c.g * wc;
-    r.b = a.b * wa + b.b * wb + c.b * wc;
-    r.a = a.a * wa + b.a * wb + c.a * wc;
+    if (gouraud) {
+        r.r = a.r * wa + b.r * wb + c.r * wc;
+        r.g = a.g * wa + b.g * wb + c.g * wc;
+        r.b = a.b * wa + b.b * wb + c.b * wc;
+        r.a = a.a * wa + b.a * wb + c.a * wc;
+    } else {
+        // Flat attributes come directly from the final vertex. Interpolating
+        // copies of that value can round a constant down by one.
+        r.r = c.r; r.g = c.g; r.b = c.b; r.a = c.a;
+    }
     r.s = a.s * wa + b.s * wb + c.s * wc;
     r.t = a.t * wa + b.t * wb + c.t * wc;
     r.q = a.q * wa + b.q * wb + c.q * wc;
     r.f = a.f * wa + b.f * wb + c.f * wc;
-    r.z = a.z * wa + b.z * wb + c.z * wc;
+    // Float barycentric weights need not sum to exactly one in double.
+    r.z = (a.z == b.z && b.z == c.z) ? a.z : a.z * wa + b.z * wb + c.z * wc;
     return r;
 }
 
@@ -381,12 +388,6 @@ void triangle(const Setup &s, const Vertex *v) {
     const float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
     if (area == 0.0f) return;
     Attr a0 = attr_of(s, v[0]), a1 = attr_of(s, v[1]), a2 = attr_of(s, v[2]);
-    if (!s.iip) {
-        a0.r = a1.r = a2.r;
-        a0.g = a1.g = a2.g;
-        a0.b = a1.b = a2.b;
-        a0.a = a1.a = a2.a;
-    }
     const int minx = std::max(s.scax0, static_cast<int>(std::ceil(std::min({x0, x1, x2}))));
     const int maxx = std::min(s.scax1, static_cast<int>(std::ceil(std::max({x0, x1, x2}))) - 1);
     const int miny = std::max(s.scay0, static_cast<int>(std::ceil(std::min({y0, y1, y2}))));
@@ -408,7 +409,7 @@ void triangle(const Setup &s, const Vertex *v) {
             const float w0 = e0 * inv;
             const float w1 = e1 * inv;
             const float w2 = 1.0f - w0 - w1;
-            plot(s, x, y, lerp3(a0, a1, a2, w0, w1, w2));
+            plot(s, x, y, lerp3(a0, a1, a2, w0, w1, w2, s.iip));
         }
     }
 }
@@ -442,12 +443,11 @@ void line(const Setup &s, const Vertex *v) {
     const float x0 = (static_cast<float>(v[0].x) - static_cast<float>(s.ofx)) / 16.0f, y0 = (static_cast<float>(v[0].y) - static_cast<float>(s.ofy)) / 16.0f;
     const float x1 = (static_cast<float>(v[1].x) - static_cast<float>(s.ofx)) / 16.0f, y1 = (static_cast<float>(v[1].y) - static_cast<float>(s.ofy)) / 16.0f;
     Attr a = attr_of(s, v[0]), b = attr_of(s, v[1]);
-    if (!s.iip) a = Attr{b.r, b.g, b.b, b.a, a.s, a.t, a.q, a.f, a.z};
     const int steps = static_cast<int>(std::max(std::fabs(x1 - x0), std::fabs(y1 - y0)));
     for (int i = 0; i < std::max(steps, 1); ++i) {
         const float t = steps ? static_cast<float>(i) / static_cast<float>(steps) : 0.0f;
         plot(s, static_cast<int>(std::lround(x0 + (x1 - x0) * t)), static_cast<int>(std::lround(y0 + (y1 - y0) * t)),
-             lerp3(a, b, b, 1.0f - t, t, 0.0f));
+             lerp3(a, b, b, 1.0f - t, t, 0.0f, s.iip));
     }
 }
 
