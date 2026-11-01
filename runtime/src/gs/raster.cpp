@@ -363,10 +363,11 @@ Attr attr_of(const Setup &s, const Vertex &v) {
 Attr lerp3(const Attr &a, const Attr &b, const Attr &c, float wa, float wb, float wc, bool gouraud) {
     Attr r;
     if (gouraud) {
-        r.r = a.r * wa + b.r * wb + c.r * wc;
-        r.g = a.g * wa + b.g * wb + c.g * wc;
-        r.b = a.b * wa + b.b * wb + c.b * wc;
-        r.a = a.a * wa + b.a * wb + c.a * wc;
+        // Equal components must survive floating-point weight rounding exactly.
+        r.r = (a.r == b.r && b.r == c.r) ? a.r : a.r * wa + b.r * wb + c.r * wc;
+        r.g = (a.g == b.g && b.g == c.g) ? a.g : a.g * wa + b.g * wb + c.g * wc;
+        r.b = (a.b == b.b && b.b == c.b) ? a.b : a.b * wa + b.b * wb + c.b * wc;
+        r.a = (a.a == b.a && b.a == c.a) ? a.a : a.a * wa + b.a * wb + c.a * wc;
     } else {
         // Flat attributes come directly from the final vertex. Interpolating
         // copies of that value can round a constant down by one.

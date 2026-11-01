@@ -21,17 +21,23 @@ constexpr unsigned background = 0x6f123456, flat = 0x40a7c953, z = 175;
 void test(bool line, bool reverse, bool clip, unsigned mode) {
     using namespace ps2::gs;
     const bool gouraudDepthOnly = mode == 2;
+    const bool constantAlpha = mode == 3;
+    const bool mixedColor = mode == 4;
     const unsigned depthValue = mode == 0 ? 0 : z;
     std::memset(memory(), 0, kMemorySize);
     State s{};
     s.prmodecont = s.colclamp = 1;
-    s.prim = (line ? 1u : 3u) | (gouraudDepthOnly ? 8u : 0u);
+    s.prim = (line ? 1u : 3u) | ((gouraudDepthOnly || constantAlpha || mixedColor) ? 8u : 0u) | (constantAlpha ? 64u : 0u);
     auto &c = s.ctx[0];
     c.xyoffset = 16384ull | (16384ull << 32);
     c.frame = 1ull << 16;
     if (gouraudDepthOnly) c.frame |= 0xffffffffull << 32;
     c.zbuf = 128ull | (1ull << 24);
     c.test = 0x30000;
+    if (constantAlpha) {
+        c.alpha = 0x81; // (Cd - Cs) * As / 128 + 0: identity for Cs=0, As=128.
+        c.frame |= 0xff000000ull << 32;
+    }
     c.scissor = (63ull << 16) | (63ull << 48);
     if (clip) c.scissor = 9ull | (39ull << 16) | (11ull << 32) | (45ull << 48);
     for (unsigned y = 0; y < 64; ++y)
@@ -58,6 +64,12 @@ void test(bool line, bool reverse, bool clip, unsigned mode) {
     auto &last = v[line ? 1 : 2];
     last.r = flat & 255; last.g = (flat >> 8) & 255;
     last.b = (flat >> 16) & 255; last.a = flat >> 24;
+    if (constantAlpha)
+        for (auto &vertex : v) {
+            vertex.r = vertex.g = vertex.b = 0; vertex.a = 128;
+        }
+    if (mixedColor)
+        for (auto &vertex : v) vertex.g = vertex.b = vertex.a = 128;
     raster::draw(s, v, line ? 2 : 3);
     unsigned covered = 0;
     for (unsigned y = 0; y < 64; ++y)
@@ -67,8 +79,12 @@ void test(bool line, bool reverse, bool clip, unsigned mode) {
             if (rgba != background || depth != 0) {
                 ++covered;
                 expect(depth == depthValue, "Equal vertex depths must remain constant");
-                expect(rgba == (gouraudDepthOnly ? background : flat),
-                       "Flat color must equal the final vertex exactly");
+                if (mixedColor)
+                    expect((rgba & 0xffffff00u) == 0x80808000u,
+                           "Constant channels must survive a varying red component");
+                else
+                    expect(rgba == ((gouraudDepthOnly || constantAlpha) ? background : flat),
+                           "Flat or constant-alpha color must remain exact");
             }
         }
     expect(covered > 0, "Regression shape must draw pixels");
@@ -82,11 +98,11 @@ int main() {
         for (bool line : {false, true})
             for (bool reverse : {false, true})
                 for (bool clip : {false, true})
-                    for (unsigned mode = 0; mode < 3; ++mode) {
+                    for (unsigned mode = 0; mode < 5; ++mode) {
                         test(line, reverse, clip, mode);
                         ++cases;
                     }
-        std::printf("PASS %u flat color and constant depth cases\n", cases);
+        std::printf("PASS %u flat color, constant channels and constant depth cases\n", cases);
         return 0;
     } catch (const std::exception &e) {
         std::fprintf(stderr, "FAIL: %s\n", e.what());
