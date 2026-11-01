@@ -311,6 +311,54 @@ two controllers, analog inputs, API recovery and pause/resume. Physical pads are
 not tested. No new performance qualification is claimed for this correctness
 change; the hosted WebGPU release remains unchanged.
 
+
+Two further private vertex formats preserve exact 12.4 positions, 24-bit depth,
+8-bit fog and every color/STQ bit in six words, with the original eight-word
+format retained whenever the checks fail. A reserved high format bit avoids
+colliding with existing packet hints. The first layout packs records into
+RGBA32UI texels; the second uses two RGB32UI texels per vertex and separate
+packed/raw textures to permit safe fallback switches. Each passes twenty native
+aligned/unaligned layouts plus rejection/alias guards, twenty integer-GPU
+reconstruction layouts, two corrupted-data controls, four malformed-payload
+checks, 1,094 ordered and 3,360 mip comparisons, and sixteen large rendered
+comparisons per browser. NaN payloads and signed zero in STQ remain intact;
+positions that cannot round-trip exactly use the original representation.
+Both native probes and all 599 shared gameplay images also match per browser.
+
+Actual RGBA-layout upload counters show approximately 24.98% fewer vertex bytes,
+including padding. Its isolated Wasm encoder processes 12.288 million vertices
+in 51–58 ms across five runs, excluding browser upload/draw costs. These byte and
+microbenchmark results do not establish a game-speed gain. Repeated RGBA-layout
+windows average 57.95 versus 59.15 images/s in Chromium and 45.14 versus 44.66 in
+Firefox, baseline versus candidate. Individual Firefox baselines are 49.36/40.92
+and candidates 49.59/39.73; the slow windows remain included. The RGB-layout
+comparison averages 54.32 versus 55.74 in Chromium and 43.90 versus 41.62 in
+Firefox, again with substantial session variation. Every window retains
+frame-gap/audio failures. Neither format demonstrates a dependable cross-browser
+gain; both were removed from the working runtime. Fresh RGB-candidate keyboard
+and simulated gamepad checks pass all 28 native checkpoints per browser without
+application errors or warnings.
+
+The fixed-window observations begin only about 5–9 seconds after page load.
+A separate unchanged-build Firefox check repeats the identical saved-state
+window in three new pages within one browser session. It measures 49.65, 47.14
+and 49.28 images/s, cold then two repeats; all have audio underruns and maximum
+intervals of 48.18–57.06 ms. A warmed reload does not remove the performance
+failure. This does not isolate compiler tiering or establish steady-state
+performance across the full game.
+
+Further analysis of the existing Firefox profile uses matching Mozilla build
+identifiers and its [native symbolication service](https://github.com/firefox-devtools/profiler/blob/main/docs-developer/symbolication.md).
+Previously unnamed CanvasRenderer callers include texture subimage uploads,
+shared-memory mapping cleanup and draw submission, as well as event-loop wake
+frames. These are sampled caller attributions over thread-specific diagnostic
+ranges, not additive self times or a new gameplay benchmark. A separate submitted
+batch counter finds 6,402 batches in the 600-field window that meet the existing
+hardware conditions except for complete-channel framebuffer masking. No sampled
+batch qualifies solely by allowing PSMCT24 or alpha-failure KEEP. Extending the
+per-channel mask path is an unimplemented candidate, not a measured speedup.
+The main branch and hosted WebGPU release remain unchanged.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,
