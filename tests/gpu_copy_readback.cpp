@@ -83,6 +83,36 @@ void check_constant_alpha(std::uint32_t scale) {
     ps2::gs::gpu::draw(state, vertices, 3);
     expect_color(0x2814c8u, scale);
 }
+void check_varying_color(std::uint32_t scale) {
+    fill_color(0x802814c8u);
+    ps2::gs::State state{};
+    state.prim = 3u | 8u;
+    state.prmodecont = state.colclamp = 1;
+    auto &context = state.ctx[0];
+    context.frame = 1ull << 16;
+    context.zbuf = 1ull << 32;
+    context.scissor = (31ull << 16) | (15ull << 48);
+    ps2::gs::Vertex vertices[3]{};
+    const unsigned xy[3][2] = {{1, 1}, {29, 1}, {1, 15}};
+    const unsigned red[3] = {0, 128, 255};
+    for (unsigned i = 0; i < 3; ++i) {
+        vertices[i].x = xy[i][0] * 16; vertices[i].y = xy[i][1] * 16;
+        vertices[i].r = red[i]; vertices[i].g = vertices[i].b = vertices[i].a = 128;
+        vertices[i].q = 1;
+    }
+    ps2::gs::gpu::draw(state, vertices, 3);
+    std::vector<std::uint32_t> output;
+    std::uint32_t width = 0, height = 0;
+    check(ps2::gs::gpu::display(color_source, output, width, height), "Varying-color readback");
+    check(width == color_source.width * scale && height == color_source.height * scale,
+          "Varying-color scaled dimensions");
+    // Independent GS sample coordinates: R=floor(128*(x-1)/28+255*(y-1)/14).
+    // Every selected value is away from an integer boundary. Green/blue stay 128.
+    const unsigned samples[3][3] = {{4, 4, 68}, {18, 2, 95}, {2, 10, 168}};
+    for (const auto &sample : samples)
+        check((output[sample[1] * scale * width + sample[0] * scale] & 0xffffffu) ==
+                  (0x808000u | sample[2]), "Varying red and constant green/blue remain exact");
+}
 void check_fade_and_modulation(std::uint32_t scale) {
     // Fixed expected colors, independent of the renderer's shader helpers.
     const std::uint32_t cases[][3] = {
@@ -158,8 +188,9 @@ int main() {
         check(value==pixel(63,40*128+x),"Nonzero-offset synchronous VRAM readback");
     }
     check_constant_alpha(scale);
+    check_varying_color(scale);
     check_fade_and_modulation(scale);
     ps2::gs::gpu::wait_idle();
-    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,combinedFadeTint:true});},received,pixels,hash,scale,offset);
+    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,combinedFadeTint:true});},received,pixels,hash,scale,offset);
     return 0;
 }
