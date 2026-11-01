@@ -140,6 +140,59 @@ windows still failed frame-gap/audio gates. The trial was rejected and its
 runtime changes were removed; synthetic vertex reduction is not a demonstrated
 cross-browser gameplay improvement.
 
+A private native-presentation handoff then avoided graphics-state queries only
+outside protected native GS calls or at an explicit frame-capacity wait. Native
+upload observations stayed inside the protected scopes, and both browsers passed
+35 generic and 35 handoff lifecycle cases, borrowed/denied-handoff state checks,
+CPU uploads, viewport checks, native probes and 599 shared images. Repeated windows
+averaged 59.09 versus 58.96 images/s in Chromium and 47.31 versus 47.14 in Firefox,
+baseline versus handoff. It was rejected and removed; the generic presenter remains.
+
+A separate private SIMD PSMCT32 upload prototype converts complete 8×2 columns
+while preserving the scalar fallback for partial rows, wrapping and aliased
+source memory. Its full-memory differential checks pass 1,469 cases, including
+dirty flags and transfer cursors. A wrong-shuffle control fails, as does a control
+without the restored-cursor overflow guard. In separate repeated Node/Wasm micro
+benchmarks, 1,000 uploads of 256×256 pixels took about 11 ms unchanged or 25 ms
+changed, versus 122 or 151 ms for the scalar implementation. These are isolated
+conversion measurements, not browser frame-rate results.
+
+Both compiled browser probes and all 599 shared game images pass on that SIMD
+build. Its repeated gameplay windows averaged 56.26 versus 54.71 images/s in
+Chromium and 46.93 versus 46.95 in Firefox, preceding private cache prototype
+versus SIMD candidate. Large slow windows remain in these averages; no overall
+gameplay gain is established. Frame-gap and audio gates still fail. The SIMD
+prototype stays private and unselected. Fresh native controller checks pass all
+28 checkpoints in each browser, with no application errors or warnings, using
+simulated standard gamepads.
+
+A separately instrumented build counted uploads over native fields 3600–4200.
+Both browsers reported identical counts: 74,020 PSMCT32 calls and 271,161,216
+offered pixels, all handled by the SIMD path. Missed narrow/partial upload coverage
+does not explain this window's remaining performance. These counters do not prove
+broader gameplay coverage or turn diagnostic timing into qualification.
+
+A matching symbol-map build was then sampled with Firefox's
+[built-in profiler extension](https://firefox-source-docs.mozilla.org/remote/webdriver-bidi/Extensions.html#profiler-module).
+Profiler requests are asynchronous: start was requested at native field 3600 and
+acknowledged at 3639; stop was requested at 4200 and acknowledged at 4207. An
+interior 10.81-second sample region contains 9.23 seconds of main content-thread
+CPU time. WebGL texture uploads account for 2.43 seconds inclusively; 1.80 seconds
+are attributed to the nearest identifiable `dataTexture` caller. Those values
+overlap and must not be added. PSMCT32 conversion accounts for about 0.10 seconds.
+Native frames are partly unsymbolicated, so caller attribution is approximate.
+This profile directs investigation toward upload/submission costs; it is not a
+qualified frame-rate run or proof of a specific browser/driver defect.
+
+A subsequent private copy staged shared vertex-data inputs in ordinary immutable
+buffers. Its Wasm binaries are byte-identical to the SIMD baseline. Forced-shared
+fixtures pass all 1,094 ordered and 3,360 mip comparisons per browser, and both
+native probes and 599 shared game images pass. Repeated windows nevertheless
+regress: Chromium averages 59.82 versus 56.59 images/s and Firefox 49.64 versus
+47.63, baseline versus copy. All gap/audio gates fail. The copy was rejected and
+removed. These later baseline windows do not establish a controlled SIMD speedup
+over the earlier cache prototype. The hosted WebGPU release remains unchanged.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,
