@@ -60,6 +60,8 @@ jobs:
           node scripts/test_pixel_presenter_prefetch.cjs
           node scripts/test_pixel_presenter_priming.cjs
           node scripts/test_readback_progress.cjs
+          node --check scripts/browser_fixed_frame_metrics.js
+          node --check scripts/test_browser_fixed_state.cjs
 
   wasm-vu-jit:
     runs-on: ubuntu-24.04

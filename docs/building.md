@@ -99,6 +99,41 @@ Asyncify uses `web/sync-webgl-functions.json` for this backend, including the ex
 
 This remains an experimental integration. Full-game transitions, rendering accuracy, frame pacing, context loss/recovery, old snapshot interchange, audio and physical devices still require qualification. Native RAM export rejects unsupported overlapping physical layouts rather than silently overwriting them. Passing the asset-free probe does not establish a playable or performant full game.
 
+### Repeatable private race measurements
+
+Use a compatible private save state with the window-owned WebGL player to
+compare the same native field range across fresh browser sessions:
+
+```sh
+SSX3_TEST_URL=http://127.0.0.1:8723/ps2web.html \
+SSX3_TEST_STATE_URL=/private-race.state \
+SSX3_TEST_FIRST_FRAME=3600 SSX3_TEST_LAST_FRAME=4200 \
+SSX3_TEST_OUTPUT=/tmp/ssx3-fixed-performance \
+node scripts/test_browser_fixed_state.cjs firefox performance
+```
+
+Choose boundaries after the saved state's frame and allow warm-up before the
+first boundary. Supply your own compatible state; the repository includes no
+game snapshot. The player's existing `state` URL option loads it. The tool does
+not add save-state exports or alter the production player.
+
+`chrome` selects Chromium. `PUPPETEER_MODULE`, `SSX3_FIREFOX_BIN` and
+`SSX3_CHROMIUM_BIN` select local tools. Runs use fresh headed browsers,
+1280×800/DPR 1, WebGPU withheld, no GPU feature flags/preferences and neutral
+keyboard/gamepad input. The range is captured inside native frame callbacks;
+missing either exact boundary fails the measurement. Results retain fresh copy
+submissions, native fields, actual AudioWorklet underruns, source-clock bounds,
+renderer work counts, application errors/warnings and a screenshot taken after
+acknowledged pause. A successful command validates the measurement, not a 60 fps
+or release requirement; inspect its rates, gaps and underruns separately.
+
+Run `oracle` instead of `performance` in separate sessions to record SHA-256
+hashes of native image bytes every 30 fields. Compare matching field numbers
+before relying on performance comparisons. Hashing perturbs timing; oracle runs
+are not performance evidence. Matching sampled hashes establish only those
+observations, not full-game determinism or fidelity. Keep results, snapshots and
+game assets outside Git.
+
 ## GPU readback regression without game assets
 
 With the pinned SDK activated, build the optional fixture against the actual GS renderer and shaders:

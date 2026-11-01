@@ -131,6 +131,54 @@ application errors or warnings. Worker pixel,
 lifecycle and resource qualification remain incomplete; the source build
 still rejects WebGL worker mode and these prototypes are not shipped.
 
+## Same-state race benchmark and further rejected trials
+
+A new private state capture restores the same Snow Jam race entry in fresh
+Firefox sessions. Two ordinary-player oracle runs agree on all 20 SHA-256
+observations of native image bytes at fields 3600, 3630, …, 4170. This establishes
+those sampled observations, not complete determinism or full-game fidelity.
+The repository now includes a [fixed-state browser driver](../scripts/test_browser_fixed_state.cjs)
+that needs no extra exports in the player. It observes the exact native-field
+boundaries inside callbacks, actual copy submissions, actual AudioWorklet
+underruns and source-clock bounds. Hashing runs separately from performance.
+A late-boundary negative control fails rather than silently shifting the range.
+See [usage](building.md#repeatable-private-race-measurements).
+
+With the ordinary unchanged WebGL player, fields 3600–4200 produce:
+
+| Browser | Fresh images/s | Native fields/s | Longest image interval | Actual underrun frames at 48 kHz |
+| --- | ---: | ---: | ---: | ---: |
+| Chromium 156 | 53.27 | 53.27 | 39.01 ms | 60,256 |
+| Firefox 158 | 36.64 | 39.76 | 65.98 ms | 242,592 |
+
+Both use headed Linux browsers, 1280×800/DPR 1, no GPU feature flags or Firefox
+preferences, and WebGPU withheld. The source clocks pass, pages render the race,
+pause is acknowledged and there are no application errors/warnings. Both fail
+release delivery/audio requirements. This is a bounded private-race measurement,
+not a completed race, physical output check or new hosted release. A first
+port of the driver omitted the audio observer's subframe availability guard;
+that script error was corrected before these measurements.
+
+Two other renderer trials remain unselected. Skipping unused mip texture/sampler
+bindings preserves both browsers' mip, ordered and native API oracles, including
+untextured packets with unused reserved TEX1 bits. It avoids 365,585 and 344,886
+level bindings in two Firefox windows but delivers 37.40/38.24 images/s against
+bracketing original controls at 37.92/38.53. It establishes no gameplay gain.
+
+A separate opaque route for whole-byte RGBA32 framebuffer masks passes 32
+additional exact color/depth cases in both browsers, plus the original native
+API probe and original-path controls. A deliberately ignored channel mask fails
+pixel comparisons with no GL error. The verification snapshot explicitly resets
+its own color-write mask before reading the target. An ordinary-menu candidate
+window delivers 40.46 images/s versus a fresh control's 43.52; these are naturally
+varying scenes. The subsequent same-state comparison uses identical private
+QA Wasm in all four runs, exact fields 3600–4200 and unchanged source-clock checks.
+Two controls together deliver 40.683 native fields/s and 37.259 images/s; two
+mask candidates deliver 40.608 native fields/s and 37.461 images/s. Actual audio
+underruns total 452,672 and 455,072 frames, respectively. Reduced fixture work
+and one faster run do not establish a repeatable throughput gain. The mask route
+is not selected. Runtime, renderer and hosted release remain unchanged.
+
 ## Further allocation and upload trials
 
 A bounded, reentrant-safe, thread-local packed-vertex cache passes the native
