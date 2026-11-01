@@ -148,4 +148,28 @@ const errors=[], warnings=[];
   }
   console.log(JSON.stringify({mode,first,last,images:metric.images,fps:metric.fps,nativeFps:metric.nativeFps,maxGap:metric.maxGap,
     underrunFrames:metric.av.underrunFrames,pixelHashes:observation.pixelHashes.length}));
-})().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{if(browser)await browser.close()});
+})().catch(async error=>{
+  console.error(error);process.exitCode=1;
+  // Image-comparison failures already retain complete results and raw pixels.
+  // Preserve the otherwise-lost player state when an earlier step times out.
+  if(!fs.existsSync(path.join(out,'result.json'))) {
+    let state=null, probeError=null, screenshotError=null;
+    try {
+      if(!page || page.isClosed()) throw Error('Test page is unavailable');
+      state=await page.evaluate(()=>({
+        title:document.title, hidden:document.hidden, isolated:crossOriginIsolated,
+        nativeFrame:globalThis.Module?._ps2web_frames?.(),
+        failed:!!globalThis.Module?.failed, paused:globalThis.Module?.paused,
+        audioState:typeof audio==='undefined'?null:audio.state,
+        startText:document.getElementById('start')?.textContent,
+        pauseText:document.getElementById('pause')?.textContent,
+      }));
+    } catch(probe) { probeError=probe.message; }
+    try {
+      if(page && !page.isClosed()) await page.screenshot({path:path.join(out,'failure.png')});
+    } catch(probe) { screenshotError=probe.message; }
+    fs.writeFileSync(path.join(out,'failure.json'),JSON.stringify({
+      error:error.message, state, probeError, screenshotError, errors, warnings,
+    },null,2)+'\n');
+  }
+}).finally(async()=>{if(browser)await browser.close()});

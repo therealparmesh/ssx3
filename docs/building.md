@@ -191,6 +191,12 @@ with failure. Those files contain tightly packed RGBA bytes at the dimensions
 recorded in the result. Missing overlap also fails. References and raw images
 remain private inputs and outputs; do not commit them.
 
+If a run fails before writing `result.json`, the driver retains `failure.json`
+with the current native frame, pause/visibility/audio state and collected browser
+errors. It also attempts `failure.png` before closing the browser; probe or
+screenshot failures are recorded separately. A timeout remains a failed run.
+Image-comparison failures keep their existing complete result and raw pixels.
+
 Hashing perturbs timing; oracle runs are not performance evidence. Matching
 sampled hashes establish only those observations, not full-game determinism or
 fidelity. Keep results, snapshots and game assets outside Git.
