@@ -15,21 +15,22 @@ let browser;
       headless: false, extraPrefsFirefox: { 'dom.webgpu.enabled': true } }
     : { browser: 'chrome', executablePath: process.env.CHROMIUM_EXECUTABLE || '/usr/bin/chromium',
       headless: false, args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan'] });
-  const results = [], modes = ['normal', 'staged', 'scale2', 'negative-constant'];
+  const results = [], modes = ['normal', 'staged', 'scale2', 'negative-constant', 'negative-varying'];
   if (process.env.SSX3_GPU_TEST_PROFILE === '1') modes.push('profile');
   for (const mode of modes) {
     const page = await browser.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.evaluateOnNewDocument((constantFault) => {
+    await page.evaluateOnNewDocument((fault) => {
       // Firefox also installs init scripts in the initial, insecure blank tab.
       if (typeof GPUAdapter === 'undefined') return;
       window.qaConstantFaults = 0;
-      if (constantFault) {
+      if (fault) {
         const createShaderModule = GPUDevice.prototype.createShaderModule;
         GPUDevice.prototype.createShaderModule = function(descriptor) {
           const fixed = 'return select(value, a, (a == b) & (a == c));';
           if (descriptor.code.includes(fixed)) {
-            descriptor = {...descriptor, code: descriptor.code.replace(fixed, 'return value;')};
+            descriptor = {...descriptor, code: descriptor.code.replace(fixed,
+              fault === 'negative-varying' ? 'return a;' : 'return value;')};
             ++qaConstantFaults;
           }
           return createShaderModule.call(this, descriptor);
@@ -53,7 +54,7 @@ let browser;
         const original = prototype[key];
         prototype[key] = function () { ++qaGpu[field]; return original.apply(this, arguments); };
       }
-    }, mode === 'negative-constant');
+    }, mode.startsWith('negative-') ? mode : null);
     const url = new URL(base);
     url.search = mode === 'staged' ? '?staged' : mode === 'scale2' ? '?scale=2' : mode === 'profile' ? '?profile' : '';
     await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -67,14 +68,14 @@ let browser;
     results.push(result);
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
     assert.equal(result.validation, null);
-    if (mode === 'negative-constant') {
+    if (mode.startsWith('negative-')) {
       assert.equal(result.constantFaults, 1, 'Inject the legacy interpolation into the real shader');
       assert.equal(result.native, null);
-      assert(result.errors.some(text => text.includes('PROBE_FAIL: GS fade and modulation pixels')),
+      assert(result.errors.some(text => text.includes(mode === 'negative-varying' ? 'PROBE_FAIL: Varying red and constant green/blue remain exact' : 'PROBE_FAIL: GS fade and modulation pixels')),
         'Detect wrong color pixels with valid GPU operations');
       await page.evaluate(() => { Module.onHalt = () => {}; Module.uploadBuffers?.dispose(); qaDevice.destroy(); });
       await page.close();
-      console.log('PASS negative-constant: legacy shader rejected');
+      console.log('PASS', mode, 'incorrect interpolation rejected');
       continue;
     }
     assert.deepEqual(result.errors, []);
@@ -86,6 +87,7 @@ let browser;
     assert.equal(result.native.modulationCases, 4);
     assert.equal(result.native.fadeCases, 3);
     assert.equal(result.native.constantAlphaCases, 1);
+    assert.equal(result.native.varyingColorCases, 3);
     assert.equal(result.native.combinedFadeTint, true);
     assert(result.native.nonzeroSourceOffset >= 8192);
     if (mode === 'staged') assert(result.uploads.staged > 0, 'Exercise actual mapped staging');

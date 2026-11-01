@@ -12,7 +12,7 @@ on WebGPU availability in that browser/platform configuration.
 
 The near-60 results below belong to the WebGPU build. A separate experimental
 WebGL renderer measured 19.55 fresh images/s during a short race-entry check;
-it did not replace the hosted release. WebGL work has stopped and is not a
+it did not replace the hosted release. WebGL remains experimental in a separate branch and is not a
 production fallback. Its rendering/performance failures are not regressions of
 the WebGPU release.
 

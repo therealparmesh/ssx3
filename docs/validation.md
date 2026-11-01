@@ -18,6 +18,34 @@ performance qualification or a hosted deployment.
 
 See [current release status](release-status.md) for the latest deployed candidate, corrected-environment desktop checks and outstanding production qualification. Sections below preserve historical outcomes; a later passing window does not erase an earlier failure.
 
+The GPU fixture also checks three independently calculated red interpolation
+values with constant green and blue channels, at native and doubled scale. A
+second shader fault that forces the first vertex color fails these checks in
+both browsers. This guards against turning the constant-component correction
+into an incorrect constant-color shortcut.
+
+A private early-return shader trial matched 600 successive native prepared
+images in each browser, but GPU timestamp stress measurements increased raster
+cost. The trial was rejected; the corrected shader remains unchanged.
+
+## Held production-worker rebuild (2026-11-01)
+
+The fresh production WebGPU worker built from `6388223` passes 27 native input
+checkpoints in each headed Chromium 156 / Firefox 158 browser. On the current
+60 Hz desktop, separate 30-second saved-race windows passed the existing
+25-ms submission, zero image/audio loss and source-clock gates in both browsers.
+These windows do not replace ordinary cold-start gameplay qualification.
+
+Ordinary-menu Chromium samples failed: a 15-second window averaged 60.00046
+submissions/s but had a 25.615-ms maximum interval and 64 missing stereo frames;
+a following 60-second window averaged 59.71888/s, with a 70.545-ms maximum and
+13,120 missing stereo frames. A SHA-verified download of the live v70 runtime
+also failed a separate 60-second ordinary-menu control: 59.98650/s, a 34.285-ms
+maximum and 192 missing stereo frames. Neither run had application errors.
+The failures are retained. No new release was published from this rebuild;
+these observations do not establish a cause or invalidate the scope of earlier
+passing release measurements.
+
 ## Optional GPU completion observations
 
 A CPU-only timing rule can miss delayed GPU work. A private Chromium control put timestamped compute work on the visible draw's critical path: the fragment shader consumed its output and checked an independently computed hash. Changing the expected hash produced magenta pixels; the correct hash produced the expected gray pixels. Initial/final checksum reads also matched the CPU reference. An earlier workload without a render-resource dependency was rejected because independent GPU work may overlap graphics.
