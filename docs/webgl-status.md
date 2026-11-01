@@ -2,6 +2,40 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Follow-up diagnostics
+
+Link-time optimization was tested privately on the JSPI build. Two direct
+600-field windows per variant/browser averaged 58.83 versus 58.84 images/s in
+Chromium and 44.88 versus 44.72 in Firefox, without versus with ThinLTO. The Wasm
+file grew from 28,306,065 to 28,956,343 bytes. Runtime probes passed, but the first
+Chromium oracle differed on image sequence 402, so timing remained diagnostic.
+The compiler option was rejected; it is not selected in this branch.
+
+Subsequent mismatch capture also found an outlier in the retained, unoptimized
+JSPI build at image sequence 635. A matching-hash reference captured on a later
+run localized it to ten pixels at x=476–479, y=209–211 on the right-hand HUD
+meter. Alpha was unchanged. The cause remains unproved; this does not establish
+that compiler optimization introduced or resolved the intermittent discrepancy.
+Raw captures remain private and failed image observations are retained.
+
+A separate native queue-wake trial did not improve the Firefox diagnostic:
+45.64 versus 45.27 images/s with its policy disabled/enabled. Emulation and VU
+threads spent approximately 50% and 79% waiting; the renderer's queue/capacity
+wait counter was approximately 4%. That counter excludes browser-yield
+suspensions. A separate instrumented run measured those at approximately 4% of
+wall time and direct-presenter suspensions at approximately 1.5%. These are
+bounded diagnostics, not a complete CPU utilization profile or qualification.
+The wake trial was rejected.
+
+An exhaustive hardware reverse-subtract prototype tested 8,912,896 pixels per
+browser, including preserved alpha and over-range source controls. Its proposed
+rounding correction still differed in 196,902 color components in each browser;
+an uncorrected negative control also failed. It was rejected without changing
+the integer renderer. A later GL-call diagnostic observed 483,179 texture uploads
+in the fixed window. That instrumentation substantially reduced frame rate and
+is excluded from performance qualification; it directs the next investigation
+toward upload and submission costs.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,
