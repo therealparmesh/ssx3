@@ -46,6 +46,15 @@ snapshot restore; see [mip fixtures](../webgl_mips/README.md).
 
 ## Coverage
 
+- **Texture transfers:** 480 cases compare all 4 MB of VRAM, the transfer cursor
+  and dirty result against the original per-pixel algorithm after 4,320 calls.
+  PSMCT32, PSMCT16/16S, PSMT8 and PSMT4 cover partial units, empty/excess input,
+  odd row lengths, page/coordinate/VRAM wrapping, zero/odd buffer widths,
+  completed transfers and repeated uploads. Row/page chunks reuse address work;
+  the nibble path uses the existing swizzle table and preserves the other nibble.
+  Invalid row cursors retain the original path. Adding `bench` to the fixture URL
+  also compares changed 256×256 upload timings after warm-up; these do not
+  qualify game performance.
 - **Population:** 393,216 pixels per browser. Every 16-bit word in PSMCT16 and
   PSMCT16S is checked after initial and dirty-page upload; pseudorandom PSMCT32
   values provide controls. Host RGBA8 views must use GS RGB/alpha expansion.

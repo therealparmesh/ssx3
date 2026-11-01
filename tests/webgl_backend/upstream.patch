@@ -16,16 +16,39 @@
  	m_trxCtx.nDirty = false;
  }
  
-@@ -982,7 +984,7 @@
+@@ -982,7 +984,30 @@
  
  	auto pSrc = reinterpret_cast<const typename Storage::Unit*>(pData);
  
 -	for(unsigned int i = 0; i < nLength; i++)
++ // Within a row/page, only the swizzled X offset changes. Preserve transfer
++ // cursor and coordinate/VRAM wrapping at every chunk boundary.
++ if(trxReg.nRRW && m_trxCtx.nRRX < trxReg.nRRW) {
++  const auto* offsets=Indexor.GetPageOffsets();
++  uint32 input=0;
++  while(input<nLength && m_trxCtx.nRRY<trxReg.nRRH) {
++   uint32 x=(m_trxCtx.nRRX+trxPos.nDSAX)&2047, y=(m_trxCtx.nRRY+trxPos.nDSAY)&2047;
++   uint32 localX=x%Storage::PAGEWIDTH;
++   uint32 count=std::min({nLength-input,uint32(trxReg.nRRW-m_trxCtx.nRRX),Storage::PAGEWIDTH-localX});
++   uint32 page=(x/Storage::PAGEWIDTH)+(y/Storage::PAGEHEIGHT)*(trxBuf.nDstWidth*64)/Storage::PAGEWIDTH;
++   uint32 base=trxBuf.GetDstPtr()+page*CGsPixelFormats::PAGESIZE;
++   const auto* row=offsets+(y%Storage::PAGEHEIGHT)*Storage::PAGEWIDTH+localX;
++   for(uint32 j=0;j<count;j++) {
++    auto* pixel=reinterpret_cast<typename Storage::Unit*>(m_pRAM+((base+row[j])&(RAMSIZE-1)));
++    auto value=pSrc[input+j];
++    if(*pixel!=value){*pixel=value;nDirty=true;}
++   }
++   input+=count;m_trxCtx.nRRX+=count;
++   if(m_trxCtx.nRRX==trxReg.nRRW){m_trxCtx.nRRX=0;++m_trxCtx.nRRY;}
++  }
++  return nDirty;
++ }
++
 +	for(unsigned int i = 0; i < nLength && m_trxCtx.nRRY < trxReg.nRRH; i++)
  	{
  		uint32 nX = (m_trxCtx.nRRX + trxPos.nDSAX) % 2048;
  		uint32 nY = (m_trxCtx.nRRY + trxPos.nDSAY) % 2048;
-@@ -1006,35 +1008,23 @@
+@@ -1006,35 +1031,23 @@
  	return nDirty;
  }
  
@@ -78,11 +101,37 @@
  }
  
  bool CGSHandler::TransferWriteHandlerPSMT4(const void* pData, uint32 nLength)
-@@ -1048,14 +1038,14 @@
+@@ -1048,14 +1061,40 @@
  
  	auto pSrc = reinterpret_cast<const uint8*>(pData);
  
 -	for(unsigned int i = 0; i < nLength; i++)
++ if(trxReg.nRRW && m_trxCtx.nRRX < trxReg.nRRW) {
++  using Storage=CGsPixelFormats::STORAGEPSMT4;
++  const auto* offsets=Indexor.GetPageOffsets();
++  uint32 input=0,half=0;
++  while(input<nLength && m_trxCtx.nRRY<trxReg.nRRH) {
++   uint32 x=(m_trxCtx.nRRX+trxPos.nDSAX)&2047, y=(m_trxCtx.nRRY+trxPos.nDSAY)&2047;
++   uint32 localX=x%Storage::PAGEWIDTH;
++   uint32 available=std::min(nLength-input,uint32(Storage::PAGEWIDTH))*2-half;
++   uint32 count=std::min({available,uint32(trxReg.nRRW-m_trxCtx.nRRX),Storage::PAGEWIDTH-localX});
++   uint32 page=(x/Storage::PAGEWIDTH)+(y/Storage::PAGEHEIGHT)*(trxBuf.nDstWidth*64)/Storage::PAGEWIDTH;
++   uint32 base=trxBuf.GetDstPtr()+page*CGsPixelFormats::PAGESIZE;
++   const auto* row=offsets+(y%Storage::PAGEHEIGHT)*Storage::PAGEWIDTH+localX;
++   for(uint32 j=0;j<count;j++) {
++    uint32 shift=(row[j]&1)*4;
++    auto* pixel=m_pRAM+((base+(row[j]>>1))&(RAMSIZE-1));
++    uint8 value=(pSrc[input]>>(half*4))&15;
++    uint8 next=(*pixel&~(15u<<shift))|(value<<shift);
++    if(*pixel!=next){*pixel=next;dirty=true;}
++    half^=1;input+=half==0;
++   }
++   m_trxCtx.nRRX+=count;
++   if(m_trxCtx.nRRX==trxReg.nRRW){m_trxCtx.nRRX=0;++m_trxCtx.nRRY;}
++  }
++  return dirty;
++ }
++
 +	for(unsigned int i = 0; i < nLength && m_trxCtx.nRRY < trxReg.nRRH; i++)
  	{
  		uint8 nPixel[2];
@@ -95,7 +144,7 @@
  		{
  			uint32 nX = (m_trxCtx.nRRX + trxPos.nDSAX) % 2048;
  			uint32 nY = (m_trxCtx.nRRY + trxPos.nDSAY) % 2048;
-@@ -1090,7 +1080,7 @@
+@@ -1090,7 +1129,7 @@
  
  	auto pSrc = reinterpret_cast<const uint8*>(pData);
  
@@ -104,7 +153,7 @@
  	{
  		//Pixel 1
  		uint32 nX = (m_trxCtx.nRRX + trxPos.nDSAX) % 2048;
-@@ -1109,6 +1099,7 @@
+@@ -1109,6 +1148,7 @@
  			m_trxCtx.nRRY++;
  		}
  
@@ -112,7 +161,7 @@
  		//Pixel 2
  		nX = (m_trxCtx.nRRX + trxPos.nDSAX) % 2048;
  		nY = (m_trxCtx.nRRY + trxPos.nDSAY) % 2048;
-@@ -1140,7 +1131,7 @@
+@@ -1140,7 +1180,7 @@
  
  	auto pSrc = reinterpret_cast<const uint8*>(pData);
  
@@ -121,7 +170,7 @@
  	{
  		uint32 nX = (m_trxCtx.nRRX + trxPos.nDSAX) % 2048;
  		uint32 nY = (m_trxCtx.nRRY + trxPos.nDSAY) % 2048;
-@@ -1209,8 +1200,9 @@
+@@ -1209,8 +1249,9 @@
  		uint32 y = (m_trxCtx.nRRY + trxPos.nSSAY) % 2048;
  		auto pixel = indexor.GetPixel(x, y);
  		dst[i + 0] = (pixel >> 0) & 0xFF;
@@ -133,7 +182,7 @@
  		m_trxCtx.nRRX++;
  		if(m_trxCtx.nRRX == trxReg.nRRW)
  		{
-@@ -2198,6 +2190,17 @@
+@@ -2198,6 +2239,17 @@
  	m_mailBox.SendCall(std::move(function));
  }
  
