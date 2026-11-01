@@ -1,5 +1,5 @@
 // Test-only logical-frame capture. Never linked into the game player.
-globalThis.ssx3CaptureWebglFrame = function (gl, frame) {
+globalThis.ssx3ReadWebglFrame = function (gl, frame) {
   const previous = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
   const pack = gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);
   const names = [
@@ -42,9 +42,11 @@ globalThis.ssx3CaptureWebglFrame = function (gl, frame) {
       ),
       y * frame.width * 4,
     );
+  return new ImageData(pixels, frame.width, frame.height);
+};
+globalThis.ssx3CaptureWebglFrame = function (gl, frame) {
+  const image = ssx3ReadWebglFrame(gl, frame);
   const canvas = new OffscreenCanvas(frame.width, frame.height);
-  canvas
-    .getContext("2d")
-    .putImageData(new ImageData(pixels, frame.width, frame.height), 0, 0);
+  canvas.getContext("2d").putImageData(image, 0, 0);
   return canvas;
 };

@@ -31,6 +31,33 @@ An earlier copy run also differed on one image; a later private upload trial
 captured a 12-pixel texture discrepancy. Additional diagnostic reads did not
 establish its cause. The failed observations remain open evidence.
 
+Current-source commit `de9866c` passed
+[source CI](https://github.com/therealparmesh/ssx3/actions/runs/41272626640).
+The clean game bundle contains no test-only capture hooks. `copy/direct/direct/copy`
+comparisons used the same compiled JS/Wasm/data in fresh sessions, with two
+600-field windows per path/browser (fields 3600–4200). All renderer work counts
+matched exactly. Mean results were:
+
+| Browser | Copy images/s | Direct images/s | Worst direct interval | Mean missing stereo PCM frames |
+| --- | ---: | ---: | ---: | ---: |
+| Chromium 156 | 53.53 | 55.38 | 37.61 ms | 40,688 |
+| Firefox 158 | 37.52 | 45.05 | 51.60 ms | 156,672 |
+
+Direct Chromium windows varied from 53.39 to 57.37 images/s; both Firefox windows
+were close to 45. Final-source image oracles again matched all 599 common image
+sequences in each browser, keeping both unmatched window-edge observations.
+The input checks also passed 27 checkpoints per browser on the rebuilt player.
+These bounded results establish an improvement and failed release gates, not
+completion of the overall production goal.
+
+The public fixed-state tool now also supports the direct presenter, injecting
+test-only texture capture only in oracle mode. Its direct runs matched all 599
+shared image hashes in each browser; Firefox copy matched all 600. Chromium copy
+differed at prepared-image sequence 403 in this run. That failure is retained
+alongside the preceding intermittent differences; these checks do not resolve
+the open image discrepancy. Both browsers passed the updated CPU capture fixture
+and compiled direct-runtime probe.
+
 The direct path is not production ready and must not replace WebGPU until its
 current-source performance, audio and longer gameplay paths qualify. Reproduction
 commands are in [building](building.md#opt-in-direct-webgl-presentation).

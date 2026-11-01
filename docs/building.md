@@ -162,6 +162,10 @@ renderer work counts, application errors/warnings and a screenshot taken after
 acknowledged pause. A successful command validates the measurement, not a 60 fps
 or release requirement; inspect its rates, gaps and underruns separately.
 
+The measurement tool selects the active presenter automatically; append `?direct`
+to the WebGL player URL for the opt-in path. Its oracle captures GPU texture
+bytes directly without putting capture hooks in the game bundle.
+
 Run `oracle` instead of `performance` in separate sessions to record SHA-256
 hashes of native image bytes every 30 prepared images. `SSX3_TEST_ORACLE_EVERY=1`
 records each prepared image during the window. Compare `imageSequence`, dimensions
