@@ -359,6 +359,53 @@ batch qualifies solely by allowing PSMCT24 or alpha-failure KEEP. Extending the
 per-channel mask path is an unimplemented candidate, not a measured speedup.
 The main branch and hosted WebGPU release remain unchanged.
 
+
+The complete-channel-mask path was then implemented privately for PSMCT32 only,
+using fixed-function component write masks while retaining every other hardware
+eligibility condition. Partial-bit masks and masked 16-bit targets keep the
+ordered path. An expanded 1,222-case bridge matrix passes in each browser,
+including all sixteen component masks, depth modes, FBA, textures/filtering and
+explicit routing guards. Both intentional depth/order controls and twenty
+allocation/retry checks still pass. The preceding implementation fails the new
+hardware-routing assertion. Forty-eight larger comparisons per browser also
+match, including fractional geometry, distinct preserved channels and three
+target sizes.
+
+Both compiled native probes pass, and Chromium matches all 599 shared game
+images. The first Firefox oracle instead fails at image sequence 526: twenty-three
+world pixels differ, with unchanged alpha and RGB differences reaching 90 levels.
+An unchanged retained-build capture matches the original reference and localizes
+those differences. This is larger than the earlier isolated rounding observations.
+The failure is retained; there is no performance qualification or selected runtime
+change for this prototype.
+
+A private diagnostic then records normalized GS register writes, effective
+vertex attributes, uploaded image words and display registers at presentation
+boundaries. A forced-ordered baseline matches the image reference; one candidate
+run fails at sequence 461 and a candidate repeat matches. Every recorded GS-input
+fingerprint and count matches the baseline over 691 comparable boundaries in the
+failed run and 692 in the clean repeat. Retained raw command words for boundaries
+523–530 also have identical SHA-256 hashes across all three runs; sequence 461 is
+outside that raw retention range. These are GS-input comparisons, not complete
+GL API histories or proof of the cause.
+
+A separate diagnostic copies the initial target color/depth and replays each
+newly eligible batch through both hardware and forced-ordered paths. A GPU
+comparison checks color and depth before returning a one-pixel difference flag.
+With explicit high-precision depth samplers, 7,762 candidate batches and 7,738
+forced-ordered control batches match. A deliberate one-pixel corruption detects
+one changed color and one changed depth value. This diagnostic introduces copies,
+queries and synchronous reads; its passing result does not exclude a state,
+resource-lifetime or timing problem in the ordinary pipeline. Diagnostic timing
+is excluded from qualification, and native input tracing was removed from the
+working source after the captures.
+
+The normal private candidate also passes all 28 keyboard/simulated-gamepad native
+checkpoints in both browsers, without application errors or warnings. Those
+input checks do not clear the failed image oracle. The masked path remains
+private and unselected while investigation moves to GL calls and resource-update
+histories. Main and the hosted WebGPU release remain unchanged.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,
