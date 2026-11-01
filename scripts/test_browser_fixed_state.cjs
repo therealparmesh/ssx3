@@ -6,6 +6,8 @@ const sourceClock = require('./browser_source_clock.js');
 const kind = process.argv[2] || 'firefox', mode = process.argv[3] || 'performance';
 assert(['firefox', 'chrome'].includes(kind));
 assert(['performance', 'oracle'].includes(mode));
+const oracleEvery = Number(process.env.SSX3_TEST_ORACLE_EVERY || 30);
+assert(Number.isSafeInteger(oracleEvery) && oracleEvery > 0, 'SSX3_TEST_ORACLE_EVERY must be a positive integer');
 const first = Number(process.env.SSX3_TEST_FIRST_FRAME), last = Number(process.env.SSX3_TEST_LAST_FRAME);
 assert(Number.isSafeInteger(first) && first >= 0 && Number.isSafeInteger(last) && last > first,
   'Set SSX3_TEST_FIRST_FRAME and SSX3_TEST_LAST_FRAME to native field boundaries');
@@ -50,17 +52,18 @@ const errors=[], warnings=[];
   await page.waitForFunction(()=>window.Module&&(Module.failed||document.getElementById('start').textContent==='Play SSX 3'),{timeout:120000});
   assert(await page.evaluate(()=>crossOriginIsolated && navigator.gpu===undefined && !Module.failed));
   // Oracle hashing is separate from performance runs. Observe the native image
-  // bytes before page scaling, and tag them with the native field at delivery.
-  await page.evaluate(({oracle,first,last})=>{
-    Module.qaImages=[];Module.qaHashJobs=[];
+  // bytes before page scaling. Prepared-image sequence identifies each queued
+  // copy; the native counter at delivery can be shared by multiple images.
+  await page.evaluate(({oracle,first,last,oracleEvery})=>{
+    Module.qaImages=[];Module.qaHashJobs=[];Module.qaImageSequence=0;
     if(!oracle)return;
     Object.defineProperty(Module,'blitFrames',{configurable:true,get(){return undefined},set(frames){
       Object.defineProperty(Module,'blitFrames',{value:frames,configurable:true,writable:true});
       const push=frames.push;
       frames.push=function(frame){
-        const nativeFrame=Module._ps2web_frames();
-        if(nativeFrame>=first&&nativeFrame<last&&nativeFrame%30===0){
-          const record={nativeFrame,width:frame.image.width,height:frame.image.height};Module.qaImages.push(record);
+        const nativeFrame=Module._ps2web_frames(),imageSequence=++Module.qaImageSequence;
+        if(nativeFrame>=first&&nativeFrame<last&&imageSequence%oracleEvery===0){
+          const record={imageSequence,nativeFrame,width:frame.image.width,height:frame.image.height};Module.qaImages.push(record);
           Module.qaHashJobs.push(crypto.subtle.digest('SHA-256',frame.image.data).then(bytes=>{
             record.sha256=Array.from(new Uint8Array(bytes),n=>n.toString(16).padStart(2,'0')).join('');
           }));
@@ -68,7 +71,7 @@ const errors=[], warnings=[];
         return push.call(this,frame);
       };
     }});
-  },{oracle:mode==='oracle',first,last});
+  },{oracle:mode==='oracle',first,last,oracleEvery});
   await page.bringToFront();await page.click('#start');
   await page.waitForFunction(()=>Module.failed||Module._ps2web_frames()>0,{timeout:90000});
   assert(await page.evaluate(()=>!Module.failed&&Module.ps2GpuBackend==='webgl'&&!Module.workerRuntime),
@@ -85,7 +88,7 @@ const errors=[], warnings=[];
   assert(!observation.failed);assert.deepEqual(errors,[]);assert.deepEqual(warnings,[]);
   if(mode==='oracle')assert(observation.pixelHashes.length>0,'Pixel oracle must observe native images');
   await page.screenshot({path:path.join(out,'window-end.png')});
-  const result={mode,browser:await browser.version(),explicitGpuOverrides:false,webgpuWithheld:true,
+  const result={mode,oracleEvery,browser:await browser.version(),explicitGpuOverrides:false,webgpuWithheld:true,
     origin:url.origin,playerPath:url.pathname,viewport:{width:1280,height:800,dpr:1},metric,observation,errors,warnings,
     limits:'Measurement only. Oracle hashing perturbs timing; compare performance runs separately. Game/state data remain private. Not a complete-race, display scanout, physical audio or release qualification.'};
   fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');

@@ -128,11 +128,16 @@ acknowledged pause. A successful command validates the measurement, not a 60 fps
 or release requirement; inspect its rates, gaps and underruns separately.
 
 Run `oracle` instead of `performance` in separate sessions to record SHA-256
-hashes of native image bytes every 30 fields. Compare matching field numbers
-before relying on performance comparisons. Hashing perturbs timing; oracle runs
-are not performance evidence. Matching sampled hashes establish only those
-observations, not full-game determinism or fidelity. Keep results, snapshots and
-game assets outside Git.
+hashes of native image bytes every 30 prepared images. `SSX3_TEST_ORACLE_EVERY=1`
+records each prepared image during the window. Compare `imageSequence`, dimensions
+and hashes across runs. The accompanying `nativeFrame` is the emulation counter
+observed when copying the image, not its source identifier: two queued images can
+be copied at the same counter value. Window edges may therefore cover different
+prepared-image sequences; retain those bounds when comparing records.
+
+Hashing perturbs timing; oracle runs are not performance evidence. Matching
+sampled hashes establish only those observations, not full-game determinism or
+fidelity. Keep results, snapshots and game assets outside Git.
 
 ## GPU readback regression without game assets
 
