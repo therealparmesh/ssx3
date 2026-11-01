@@ -1,0 +1,108 @@
+<!doctype html><title>Direct WebGL presenter lifecycle</title>
+<p id="status">Testing presenter resource ownership and cancellation.</p>
+<canvas id="canvas" width="128" height="96"></canvas>
+<script>
+  const canvas = document.querySelector("canvas"),
+    gl = canvas.getContext("webgl2", { antialias: false });
+  if (!gl) throw Error("Requires WebGL2");
+  const qa = {
+    live: new Map(),
+    calls: {},
+    fail: null,
+    halted: 0,
+    presented: 0,
+    rafs: new Map(),
+    serial: 0,
+  };
+  for (const kind of [
+    "Program",
+    "Shader",
+    "Texture",
+    "Framebuffer",
+    "VertexArray",
+  ]) {
+    qa.live.set(kind, new Set());
+    const create = gl["create" + kind].bind(gl),
+      destroy = gl["delete" + kind].bind(gl);
+    gl["create" + kind] = (...args) => {
+      const n = (qa.calls[kind] = (qa.calls[kind] || 0) + 1);
+      if (qa.fail?.kind === kind && qa.fail.at === n) return null;
+      const value = create(...args);
+      if (value) qa.live.get(kind).add(value);
+      return value;
+    };
+    gl["delete" + kind] = (object) => {
+      qa.live.get(kind).delete(object);
+      return destroy(object);
+    };
+  }
+  for (const [method, kind] of [
+    ["getShaderParameter", "compile"],
+    ["getProgramParameter", "link"],
+    ["checkFramebufferStatus", "framebufferStatus"],
+  ]) {
+    const original = gl[method].bind(gl);
+    gl[method] = (...args) => {
+      const n = (qa.calls[kind] = (qa.calls[kind] || 0) + 1);
+      if (qa.fail?.kind === kind && qa.fail.at === n)
+        return kind === "framebufferStatus"
+          ? gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT
+          : false;
+      return original(...args);
+    };
+  }
+  window.requestAnimationFrame = (callback) => {
+    const id = ++qa.serial;
+    qa.rafs.set(id, callback);
+    return id;
+  };
+  window.cancelAnimationFrame = (id) => qa.rafs.delete(id);
+  qa.step = (time) => {
+    const callbacks = Array.from(qa.rafs.values());
+    qa.rafs.clear();
+    for (const fn of callbacks) fn(time);
+  };
+  var Module = {
+    canvas,
+    ps2WebglCanvas: canvas,
+    onHalt() {
+      qa.halted++;
+      this.failed = true;
+    },
+    onPresent() {
+      qa.presented++;
+    },
+  };
+  var GL = {
+    framebuffers: [null],
+    getNewId(array) {
+      return Math.max(1, array.length);
+    },
+  };
+  Object.defineProperty(Module, "surfaceFrames", {
+    configurable: true,
+    set(frames) {
+      Object.defineProperty(Module, "surfaceFrames", {
+        value: frames,
+        writable: true,
+        configurable: true,
+      });
+      const shift = frames.shift;
+      frames.shift = function () {
+        const frame = shift.call(this);
+        if (frame && Module.qaBitmapFrame)
+          Module.qaBitmapFrame(frame, ssx3CaptureWebglFrame(gl, frame));
+        return frame;
+      };
+    },
+  });
+  qa.meta = { x: 0, y: 0, width: 16, height: 16, physical: 16, wide: false };
+  qa.empty = () => ({
+    resources: Array.from(qa.live, ([kind, set]) => [kind, set.size]),
+    registered: GL.framebuffers.filter(Boolean).length,
+    rafs: qa.rafs.size,
+  });
+</script>
+<script src="frame-clock.js"></script>
+<script src="capture.js"></script>
+<script src="presenter.js"></script>

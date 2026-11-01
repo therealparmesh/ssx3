@@ -22,13 +22,32 @@ let browser;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => window.qaProbe?.result || window.qaProbe?.errors.length, { timeout: 60000 });
   const result = await page.evaluate(() => ({
+    renderer:(()=>{const gl=Module.ps2WebglCanvas.getContext('webgl2'),info=gl.getExtension('WEBGL_debug_renderer_info');return gl.getParameter(info?info.UNMASKED_RENDERER_WEBGL:gl.RENDERER);})(),
+    directSurface:!!Module.webglDirectSurface, directFrames:qaProbe.bitmaps, cpuSurface:qaProbe.cpuSurface,
     native: qaProbe.result, mips: qaProbe.mips, submission: qaProbe.registerSubmission, slices: qaProbe.renderSlices, integration: qaProbe.webglIntegration, errors: qaProbe.errors,
     readbacks: {...Module.ps2WebglReadbacks?.stats}, messages: qaProbe.messages, backend: Module.ps2GpuBackend, isolated: crossOriginIsolated,
     webgpuAbsent: navigator.gpu === undefined, title: document.title, url: location.href,
   }));
+  result.browserVersion = await browser.version();
   result.browser = kind; result.pageErrors = errors; result.readbackWarnings = readbackWarnings;
   fs.writeFileSync(path.join(output, kind + '.json'), JSON.stringify(result, null, 2));
   assert.equal(result.backend, 'webgl');
+  const query=new URL(url).searchParams;
+  const direct=query.has('direct')&&!query.has('copy')&&!query.has('nosurface');
+  assert.equal(result.directSurface,direct);
+  if(direct){
+    assert.equal(result.directFrames.frames,32);
+    assert.equal(result.directFrames.pixels,90560);
+    assert.equal(result.directFrames.stats.canceled,0);
+    assert.equal(result.cpuSurface.frames,24);
+    assert.equal(result.cpuSurface.pixels,2484);
+    assert.equal(result.cpuSurface.priorFaultRejected,true);
+    assert.equal(result.cpuSurface.stats.produced,56);
+    assert.equal(result.cpuSurface.stats.presented,56);
+    assert.equal(result.cpuSurface.stats.canceled,0);
+    assert(result.cpuSurface.stats.maximumQueued<=3);
+  }
+
   assert.equal(result.isolated, true);
   assert.equal(result.webgpuAbsent, true);
   assert.deepEqual(result.errors, []);

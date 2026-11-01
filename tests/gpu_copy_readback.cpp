@@ -172,6 +172,10 @@ void verify_register_submission() {
 }
 #endif
 
+#ifdef PS2_GPU_WEBGL
+#include "gpu_direct_surface.inc"
+#endif
+
 int main() {
     ps2::gs::init();
     check(ps2::gs::gpu::mode() == ps2::gs::gpu::Mode::primary, "Actual GS GPU initialization");
@@ -370,6 +374,9 @@ int main() {
     verify_register_submission();
     verify_render_slices();
     EM_ASM({window.qaProbe.webglIntegration=({snapshot:true,drawExport:true,localCopy:true,partialRgb24:true,rejectedSnapshot:true,browserYield:true,glFaults:6,readbackLifecycle:true});});
+#endif
+#ifdef PS2_GPU_WEBGL
+    if (EM_ASM_INT({return !!Module.webglDirectSurface;})) verify_direct_surface();
 #endif
     check_fade_and_modulation(scale);
     ps2::gs::gpu::wait_idle();

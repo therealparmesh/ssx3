@@ -2,10 +2,44 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Opt-in direct presenter follow-up
+
+The experimental branch now includes the same-context GPU presenter behind
+`?direct`; the default copy presenter and hosted WebGPU release are unchanged.
+The follow-up adds CPU-region fallback, bounded pending submissions,
+resource/partial-initialization cleanup and exactly-once completion. The prior
+prototype could call a completion callback twice if it threw; the corrected
+path preserves the original exception. Fractional destination sizes now use a
+full-canvas viewport and explicit edge coverage instead of truncating the
+viewport and clipping image edges.
+
+Asset-free checks exercise 34 lifecycle scenarios per browser, foreign GL-state
+and resource ownership, ten CPU images and 20 resampling cases. The compiled
+runtime extension checks 32 GPU images and 24 CPU-region images, including four
+PS2 formats, halved rows and rejection of an earlier GL fault. Browser automation
+uses standard simulated gamepads; 27 native keyboard/gamepad checkpoints passed
+per browser on the hardened private player. Separate fixed-state image oracles
+matched all 599 shared prepared-image sequences against the copy renderer in
+each browser; the adjacent window-edge observations remain separate.
+
+Before the viewport correction and redundant state-query removal, single
+600-field diagnostic comparisons measured 52.43 versus 56.12 images/s in
+Chromium and 36.32 versus 44.16 in Firefox (copy versus direct). Both direct
+windows still had audio underruns and maximum intervals above 25 ms. These
+numbers are not a qualification of the final source or full-game fidelity.
+An earlier copy run also differed on one image; a later private upload trial
+captured a 12-pixel texture discrepancy. Additional diagnostic reads did not
+establish its cause. The failed observations remain open evidence.
+
+The direct path is not production ready and must not replace WebGPU until its
+current-source performance, audio and longer gameplay paths qualify. Reproduction
+commands are in [building](building.md#opt-in-direct-webgl-presentation).
+
 ## Private GPU presentation trials
 
-Three display-transfer alternatives were tested against the fence-backed
-copy presenter. None is selected or included in the hosted WebGPU release.
+Three initial display-transfer alternatives were tested against the fence-backed
+copy presenter. Those initial variants were not selected or included in the hosted
+WebGPU release.
 These are ordinary-menu, partial Snow Jam race windows at 1280×800/DPR 1,
 with WebGPU withheld, default Performance effects, no GPU feature overrides,
 and no overlapping build or profiler. Scene variation prevents treating these

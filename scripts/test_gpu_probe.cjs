@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
 const shell = fs.readFileSync(process.env.SSX3_TEST_PROBE_SHELL || path.join(__dirname, '../web/shell.html'), 'utf8');
-const policyStart = shell.indexOf('function preferFrameCopy()');
+const policyStart = shell.indexOf('function preferWebglSurface()');
 const policyEnd = shell.indexOf('\nvar Module', policyStart);
 assert(policyStart >= 0 && policyEnd > policyStart);
 const policy = shell.slice(policyStart, policyEnd);
@@ -27,12 +27,16 @@ for (const [mode, userAgent, query, expected, backend = 'webgpu'] of [
   ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0', '', true, 'webgl'],
   ['asyncify', 'Mozilla/5.0 (iPhone) Version/26.0 Mobile Safari/604.1', '', true, 'webgl'],
   ['asyncify', 'Mozilla/5.0 (Linux; Android 16) Chrome/156.0', '', true, 'webgl'],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', 'direct', false, 'webgl'],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', 'direct&copy', true, 'webgl'],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', 'direct&nosurface', true, 'webgl'],
+  ['asyncify', 'Mozilla/5.0 (X11; Linux x86_64) Firefox/158.0', 'direct', false, 'webgpu'],
 ]) {
   assert.equal(vm.runInNewContext(policy.replaceAll('@PS2_WEB_ASYNC@', mode).replaceAll('@PS2_GPU_BACKEND@', backend) + '\npreferFrameCopy()', {
-    navigator: { userAgent }, params: new URLSearchParams(query),
+    navigator: { userAgent }, params: new URLSearchParams(query), webglBackend: backend === 'webgl',
   }), expected, 'Select the qualified presentation path while preserving the explicit copy request');
 }
-console.log('Presentation selection: 18 browser/build/explicit-request cases passed');
+console.log('Presentation selection: 22 browser/build/explicit-request cases passed');
 // Verify the actual settings code against both stored preferences and URL overrides.
 const scaleSettings = shell.slice(shell.indexOf("const scaleSelect ="), shell.indexOf("const aspectSelect ="));
 for (const webglBackend of [false, true]) for (const [query, saved, expected] of [

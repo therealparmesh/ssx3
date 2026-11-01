@@ -99,6 +99,41 @@ Asyncify uses `web/sync-webgl-functions.json` for this backend, including the ex
 
 This remains an experimental integration. Full-game transitions, rendering accuracy, frame pacing, context loss/recovery, old snapshot interchange, audio and physical devices still require qualification. Native RAM export rejects unsupported overlapping physical layouts rather than silently overwriting them. Passing the asset-free probe does not establish a playable or performant full game.
 
+### Opt-in direct WebGL presentation
+
+The experimental WebGL build accepts `?direct` to keep completed display images
+in a three-texture GPU queue. `copy` and `nosurface` override it; the default is
+still the copy presenter. This option is absent from the production WebGPU
+build. Regions crossing the native framebuffer limits use the existing CPU
+display conversion, then upload into the same GPU queue.
+
+Run the live runtime probe with `SSX3_TEST_URL` ending in
+`gpu_copy_readback.html?direct` and the existing `test_webgl_runtime.cjs` driver.
+It additionally checks 32 ordered GPU images, 24 CPU-region images across four
+pixel formats, and a prior GL fault that must not enqueue an image.
+
+The presenter also has standalone checks without a compiler or game assets:
+
+```sh
+python3 scripts/build_webgl_presenter_fixture.py
+python3 -m http.server 8370 --bind 127.0.0.1 --directory build/webgl-presenter
+# In a second terminal; repeat with firefox:
+node scripts/test_webgl_presenter.cjs chrome
+node scripts/test_webgl_presenter_cpu.cjs chrome
+node scripts/test_webgl_presenter_state.cjs chrome
+node scripts/test_webgl_presenter_viewport.cjs chrome
+```
+
+Use `PUPPETEER_MODULE`, `SSX3_WEBGL_PRESENTER_ORIGIN` and `SSX3_TEST_OUTPUT` to
+select local tools, a served fixture directory and private evidence output.
+Tests cover allocation/compile/link failures, resource ownership, context loss,
+external halt, page exit, pause, bounded waits and callbacks that throw. CPU
+images require exact bytes and retain their own input storage while queued.
+Final viewport resampling uses an independent mathematical reference with one
+byte of component tolerance for floating-point quantization; this tolerance
+never applies to native game-image hashes. These checks establish correctness
+of the exercised paths, not near-60 fps or complete-game qualification.
+
 ### Repeatable private race measurements
 
 Use a compatible private save state with the window-owned WebGL player to

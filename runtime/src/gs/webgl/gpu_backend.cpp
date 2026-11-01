@@ -40,6 +40,25 @@ EM_JS(int, ps2_webgl_readback_collect, (int id, void* target, unsigned bytes), {
 });
 // clang-format on
 
+
+EM_JS_DEPS(ps2_webgl_gpu_source,"$GL,$ps2webFrameClock");
+EM_JS(int,ps2_webgl_gpu_source,(int width,int height),{return Module.webglGpuPresenter.source(width,height);});
+EM_JS_DEPS(ps2_webgl_gpu_frame,"$Asyncify");
+EM_JS(int,ps2_webgl_gpu_frame,(int x,int y,int width,int height,int physical,int wide),{
+    return Asyncify.handleSleep(done=>Module.webglGpuPresenter.enqueue({x,y,width,height,physical,wide},done));
+});
+
+EM_JS_DEPS(ps2_webgl_gpu_pixels,"$Asyncify");
+EM_JS(int,ps2_webgl_gpu_pixels,(const unsigned char* pixels,int width,int height,int wide),{
+    return Asyncify.handleSleep(done=>{
+        if(HEAPU8.buffer!==wasmMemory.buffer)updateMemoryViews();
+        pixels >>>= 0;
+        const bytes=width*height*4;
+        if(!Number.isSafeInteger(bytes)||bytes<=0||pixels>HEAPU8.length||bytes>HEAPU8.length-pixels)throw new Error('Invalid CPU display destination');
+        Module.webglGpuPresenter.enqueue({x:0,y:0,width,height,physical:height,wide,pixels:HEAPU8.subarray(pixels,pixels+bytes)},done);
+    });
+});
+
 namespace ps2::gs::gpu {
 namespace {
 constexpr std::size_t words = kMemorySize / 4;
@@ -81,6 +100,11 @@ class Backend final : public CGSH_OpenGL {
         l.psm = src.psm;
         FlipImpl(d);
         m_flipped = false;
+    }
+    void show_into(const DisplaySource &src,unsigned w,unsigned h,GLuint target) {
+        const auto previous=m_presentFramebuffer;m_presentFramebuffer=target;
+        try {show(src,w,h);}catch(...){m_presentFramebuffer=previous;throw;}
+        m_presentFramebuffer=previous;
     }
     void save(std::vector<std::uint32_t> &vram, std::vector<std::uint32_t> &clut) {
         vram.resize(words);
@@ -374,8 +398,13 @@ bool display(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::ui
                 rgba[std::size_t(y) * width + x] = c | 0xff000000;
             }
     } else {
-        ps2_webgl_resize_context(width + src.dbx, physical + src.dby);
-        backend->show(src, width + src.dbx, physical + src.dby);
+        if(EM_ASM_INT({return !!Module.webglDirectSurface;})) {
+            const auto target=ps2_webgl_gpu_source(width+src.dbx,physical+src.dby);
+            backend->show_into(src,width+src.dbx,physical+src.dby,target);
+        } else {
+            ps2_webgl_resize_context(width + src.dbx, physical + src.dby);
+            backend->show(src, width + src.dbx, physical + src.dby);
+        }
         std::vector<std::uint32_t> raw(std::size_t(width) * physical);
         glReadPixels(src.dbx, 0, width, physical, GL_RGBA, GL_UNSIGNED_BYTE, raw.data());
         if (glGetError())
@@ -403,8 +432,13 @@ bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, s
                 return false;
             }
         } else {
-            ps2_webgl_resize_context(src.width + src.dbx, next.physical + src.dby);
-            backend->show(src, src.width + src.dbx, next.physical + src.dby);
+            if(EM_ASM_INT({return !!Module.webglDirectSurface;})) {
+                const auto target=ps2_webgl_gpu_source(src.width+src.dbx,next.physical+src.dby);
+                backend->show_into(src,src.width+src.dbx,next.physical+src.dby,target);
+            } else {
+                ps2_webgl_resize_context(src.width + src.dbx, next.physical + src.dby);
+                backend->show(src, src.width + src.dbx, next.physical + src.dby);
+            }
             next.ticket = ps2_webgl_readback_begin(src.dbx, 0, src.width, next.physical);
             if (!next.ticket)
                 throw std::runtime_error("WebGL display readback submission failed");
@@ -435,10 +469,32 @@ bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, s
     }
 }
 
-bool attach_surface(const SurfaceTarget &) { return false; }
-void resize_surface(std::uint32_t, std::uint32_t) {}
-bool has_surface() { return false; }
-bool present(const DisplaySource &) { return false; }
+bool directSurface=false;
+bool attach_surface(const SurfaceTarget &target) {
+    check();
+    if(target.kind!=SurfaceTarget::Canvas || !EM_ASM_INT({return Module.webglDirectSurface && !!Module.webglGpuPresenter;}))return false;
+    directSurface=true;return true;
+}
+void resize_surface(std::uint32_t,std::uint32_t){}
+bool has_surface(){return directSurface;}
+bool present(const DisplaySource &src){
+    if(!directSurface)return false;
+    drain();
+    const unsigned physical=src.halved?(src.height+1)/2:src.height;
+    if(!src.width || !src.height || !src.fbw || src.width>2048 || src.height>2048)return false;
+    if(src.width+src.dbx>src.fbw*64 || physical+src.dby>1024){
+        std::vector<std::uint32_t> pixels;
+        std::uint32_t width=0,height=0;
+        if(!display(src,pixels,width,height))return false;
+        return ps2_webgl_gpu_pixels(reinterpret_cast<const unsigned char*>(pixels.data()),width,height,
+            EM_ASM_INT({return typeof aspect!=='undefined' && aspect==='16:9';}))!=0;
+    }
+    const auto target=ps2_webgl_gpu_source(src.width+src.dbx,physical+src.dby);
+    backend->show_into(src,src.width+src.dbx,physical+src.dby,target);
+    if(glGetError())throw std::runtime_error("Direct source GL error");
+    return ps2_webgl_gpu_frame(src.dbx,src.dby,src.width,src.height,physical,
+      EM_ASM_INT({return typeof aspect!=='undefined' && aspect==='16:9';}))!=0;
+}
 double busy_ms() { return 0; }
 void stats() {
     if (backend) {

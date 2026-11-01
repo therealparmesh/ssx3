@@ -1125,7 +1125,7 @@ async function chooseGpu() {
     const gl = probe.getContext('webgl2', {failIfMajorPerformanceCaveat: true});
     if (!gl) throw new Error('Hardware WebGL 2 is unavailable. Enable graphics acceleration, then reload.');
     gl.getExtension('WEBGL_lose_context')?.loseContext();
-    Module.presentCopy = true; Module.bufferedSurface = false;
+    Module.presentCopy = preferFrameCopy(); Module.bufferedSurface = preferWebglSurface();
     return 'GPU WebGL 2';
   }
   if (!navigator.gpu) {
@@ -1245,11 +1245,15 @@ function instantiatePlayer(imports, receive) {
   finally { if (source) URL.revokeObjectURL(source); }
   return {};
 }
+function preferWebglSurface() {
+  return webglBackend && params.has('direct') && !params.has('copy') && !params.has('nosurface');
+}
 function preferFrameCopy() {
   // The primary Chromium path on desktop Linux can delay direct surface
   // presentation. The existing copy presenter passed complete local and
   // private HTTPS races without those delays on the qualified desktop.
-  return '@PS2_GPU_BACKEND@' === 'webgl' || params.has('copy') || ('@PS2_WEB_ASYNC@' === 'jspi' &&
+  if (webglBackend) return !preferWebglSurface();
+  return params.has('copy') || ('@PS2_WEB_ASYNC@' === 'jspi' &&
     /Linux/.test(navigator.userAgent) && !/(Android|Mobile)/.test(navigator.userAgent) &&
     /Chrom(?:e|ium)\//.test(navigator.userAgent));
 }
@@ -1265,6 +1269,8 @@ var Module = {
   noSurface: params.has('nosurface'),
   noCard: params.has('nocard'),
   presentCopy: preferFrameCopy(),
+  webglDirectSurface: preferWebglSurface(),
+  bufferedSurface: preferWebglSurface(),
   // Synchronous WebGL readbacks need the copy queue to supply browser waits.
   prepareCopyFrames: webglBackend || '@PS2_WEB_ASYNC@' === 'jspi',
   fullEffects: effects === 'original',
