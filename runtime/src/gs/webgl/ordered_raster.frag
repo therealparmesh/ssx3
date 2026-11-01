@@ -12,15 +12,17 @@ uniform highp usampler2D vertices;
 uniform highp usampler2D bins;
 uniform highp usampler2D lists;
 uniform highp usampler2D sourceTexture;
-uniform sampler2D normalizedTexture;
-uniform sampler2D paletteTexture;
+// Sampler precision controls lookup results independently of highp float.
+// These values also reconstruct GS bytes and palette indices.
+uniform highp sampler2D normalizedTexture;
+uniform highp sampler2D paletteTexture;
 #ifdef ORDERED_MIP_SAMPLING
-uniform sampler2D mipTexture1;
-uniform sampler2D mipTexture2;
-uniform sampler2D mipTexture3;
-uniform sampler2D mipTexture4;
-uniform sampler2D mipTexture5;
-uniform sampler2D mipTexture6;
+uniform highp sampler2D mipTexture1;
+uniform highp sampler2D mipTexture2;
+uniform highp sampler2D mipTexture3;
+uniform highp sampler2D mipTexture4;
+uniform highp sampler2D mipTexture5;
+uniform highp sampler2D mipTexture6;
 #endif
 
 uniform uvec4 settings[8];

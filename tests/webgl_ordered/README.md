@@ -273,3 +273,23 @@ texture. The preceding implementation fails these checks. Expected driver
 warnings from the deliberately invalid calls remain in the browser evidence;
 uncaught application errors still fail verification. These checks qualify helper
 allocation recovery, not recovery of an entire game from context loss.
+
+## Texture lookup precision
+
+Normalized color, palette, mip, framebuffer-copy and presenter samplers explicitly
+use `highp`. GLSL ES 3.00 defaults `sampler2D` to `lowp`; declaring `highp float`
+does not change sampler precision, which determines lookup-result precision.
+These shaders reconstruct GS color bytes and palette indices from normalized
+samples, so their sampler precision must be explicit. See the
+[GLSL ES 3.00 specification](https://registry.khronos.org/OpenGL/specs/es/3.0/GLSL_ES_Specification_3.00.pdf),
+sections 4.5.2–4.5.3 and the chapter 8 introduction. The pinned upstream patch also updates generated
+fragment shaders, including the framebuffer-copy programs.
+
+Fresh checksum-verified upstream preparation/build and headed Chromium/Firefox
+checks pass: 1,094 exact color/depth cases per browser, both depth/order negative
+controls, twenty allocation failure/retry cases, 3,360 mip bridge cases, 13,680
+standalone sampler cases, the upstream GS backend matrix and presenter lifecycle,
+CPU upload, state restoration and viewport checks. This precision correction
+is not established as the cause or resolution of intermittent captured-game
+image differences. It does not qualify WebGL performance or audio and does not
+change the selected WebGPU release.

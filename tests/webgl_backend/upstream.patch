@@ -1125,12 +1125,13 @@
  	shaderBuilder << "out vec4 blendColor;" << std::endl;
  #endif
  
+-	shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
+-	shaderBuilder << "uniform sampler2D g_palette;" << std::endl;
 +#ifdef __EMSCRIPTEN__
 + shaderBuilder << "uniform uint g_alphaPhase;" << std::endl;
 +#endif
- 	shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
--	shaderBuilder << "uniform sampler2D g_palette;" << std::endl;
-+	shaderBuilder << "uniform sampler2D g_palette; uniform highp sampler2D g_destination;" << std::endl;
++	shaderBuilder << "uniform highp sampler2D g_texture;" << std::endl;
++	shaderBuilder << "uniform highp sampler2D g_palette; uniform highp sampler2D g_destination;" << std::endl;
  
  	shaderBuilder << "layout(std140) uniform FragmentParams" << std::endl;
  	shaderBuilder << "{" << std::endl;
@@ -1276,7 +1277,7 @@
  	std::stringstream shaderBuilder;
  
  	const char* test = "	if(false)";
-@@ -676,7 +716,7 @@
+@@ -676,10 +716,10 @@
  	{
  		std::stringstream shaderBuilder;
  		shaderBuilder << GLSL_VERSION << std::endl;
@@ -1284,7 +1285,11 @@
 +		shaderBuilder << "precision highp float; precision highp int;" << std::endl;
  		shaderBuilder << "in vec2 v_texCoord;" << std::endl;
  		shaderBuilder << "out vec4 fragColor;" << std::endl;
- 		shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
+-		shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
++		shaderBuilder << "uniform highp sampler2D g_texture;" << std::endl;
+ 		shaderBuilder << "void main()" << std::endl;
+ 		shaderBuilder << "{" << std::endl;
+ 		shaderBuilder << "	fragColor = texture(g_texture, v_texCoord);" << std::endl;
 @@ -733,13 +773,18 @@
  	{
  		std::stringstream shaderBuilder;
@@ -1293,7 +1298,8 @@
 +		shaderBuilder << "precision highp float; precision highp int;" << std::endl;
  		shaderBuilder << "in vec2 v_texCoord;" << std::endl;
  		shaderBuilder << "out vec4 fragColor;" << std::endl;
- 		shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
+-		shaderBuilder << "uniform sampler2D g_texture;" << std::endl;
++		shaderBuilder << "uniform highp sampler2D g_texture;" << std::endl;
 +        shaderBuilder << "uniform bool g_frame16;" << std::endl;
  		shaderBuilder << "void main()" << std::endl;
  		shaderBuilder << "{" << std::endl;

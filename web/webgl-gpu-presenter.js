@@ -203,12 +203,12 @@ Module.webglGpuPresenter = (() => {
       };
       const logical = program(`#version 300 es
       precision highp float;precision highp int;
-      uniform sampler2D image;uniform ivec4 info;out vec4 color;
+      uniform highp sampler2D image;uniform ivec4 info;out vec4 color;
       void main(){ivec2 p=ivec2(gl_FragCoord.xy);int top=info.z-1-p.y;
         int sy=info.w==2?top:info.y-1-(info.w!=0?top/2:top);color=vec4(texelFetch(image,ivec2(p.x+(info.w==2?0:info.x),sy),0).rgb,1.0);}`);
       const present = program(`#version 300 es
       precision highp float;precision highp int;
-      uniform sampler2D image;uniform ivec2 size;uniform ivec2 replication;
+      uniform highp sampler2D image;uniform ivec2 size;uniform ivec2 replication;
       uniform vec2 destination;uniform vec2 offset;out vec4 color;
       void main(){vec2 pixelMin=gl_FragCoord.xy-0.5;
         vec2 coverage=clamp(min(pixelMin+1.0,offset+destination)-max(pixelMin,offset),vec2(0),vec2(1));

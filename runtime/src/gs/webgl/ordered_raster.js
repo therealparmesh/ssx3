@@ -81,7 +81,7 @@ void main(){uint at=uint(gl_VertexID)*2u;uvec4 v=texelFetch(vertices,ivec2(int(a
         vertexSource,
         `#version 300 es
 precision highp float;precision highp int;
-uniform sampler2D colorSource;uniform highp sampler2D depthSource;uniform uint frameFormat;uniform bool depthRequired;
+uniform highp sampler2D colorSource;uniform highp sampler2D depthSource;uniform uint frameFormat;uniform bool depthRequired;
 layout(location=0) out uvec4 colorOutput;layout(location=1) out uint depthOutput;
 void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(colorSource,p,0)*255.0+vec4(0.5)));if(frameFormat==2u||frameFormat==10u){colorOutput.rgb=(colorOutput.rgb>>3u)<<3u;colorOutput.a=(colorOutput.a&128u)!=0u?128u:0u;}if(!depthRequired){depthOutput=0u;return;}float d=texelFetch(depthSource,p,0).r;depthOutput=d>=1.0?0xffffffffu:uint(d*4294967296.0);}`,
       );
