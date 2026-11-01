@@ -62,6 +62,30 @@ The direct path is not production ready and must not replace WebGPU until its
 current-source performance, audio and longer gameplay paths qualify. Reproduction
 commands are in [building](building.md#opt-in-direct-webgl-presentation).
 
+## Rejected whole-byte mask trial
+
+A private follow-up allowed hardware color-channel masks for PSMCT32 and bypassed
+RGB blending when all RGB bytes were preserved. Partial-byte masks, packed formats,
+destination-alpha tests and the existing depth/alpha guards retained the ordered
+path. Both browsers passed 1,290 bridge and 1,322 kernel color/depth cases, with
+negative controls for depth, ordering and forced masked-channel writes. Runtime
+probes passed, and both game oracles matched all 599 shared image hashes.
+
+Repeated baseline/candidate/candidate/baseline windows used the same fields
+3600–4200, direct presentation, headed 1280×800/DPR 1 sessions and no GPU overrides.
+Chromium averaged 56.96 versus 57.21 images/s; Firefox averaged 44.37 versus 44.91.
+Candidate maximum intervals reached 35.89 ms and 56.72 ms respectively, with audio
+underruns in every window. These small differences relative to session variation
+do not establish meaningful progress toward the release target. The trial was
+rejected; its code and additional fixtures are not selected in this branch.
+
+The retained direct-presenter bundle independently passed another 27 native
+keyboard/controller checkpoints in each browser, including disconnect neutrality
+and resume ordering. Those checks simulate standard browser gamepads; physical
+controllers were not tested. Source commit `6bc4241` passed
+[CI](https://github.com/therealparmesh/ssx3/actions/runs/41274896292).
+The hosted WebGPU release and main branch remain unchanged.
+
 ## Private GPU presentation trials
 
 Three initial display-transfer alternatives were tested against the fence-backed
