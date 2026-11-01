@@ -252,3 +252,12 @@ shader omits depth entirely only with disabled ZTE or ALWAYS plus masked writes.
 It also skips coordinate normalization for flat, untextured, unfogged draws whose
 attributes need no interpolation. `depthFreeOpaqueBatches` counts that subset;
 tests require both depth-free and depth-tested hardware programs to run.
+
+## Slanted flat-attribute coverage
+
+A further 32 cases use slanted, thin, fractional, clipped, reversed and degenerate
+triangles with constant nonzero color/depth. They avoid assuming power-of-two
+barycentric weights and exercise the ordered path. The CPU software model now
+selects flat colors directly and preserves equal depths, with independent native
+and Wasm constant-value regressions. The browser compares full targets against
+that model; no tolerance was added. Both depth/order fault controls remain active.

@@ -1402,6 +1402,23 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
             failure === 1 && mask === 1 ? true : "ordered",
           );
         }
+    const constantShapes = [
+      [[2,3],[61,12],[13,59]],
+      [[3.0625,5.9375],[59.8125,9.125],[17.9375,55.0625]],
+      [[2.0625,3.9375],[59.875,56.125],[58.75,56.4375]],
+      [[-16,-8],[80,37.0625],[1.9375,63.9375]],
+      [[-16.5,1],[70.9375,63],[3,70.5]],
+      [[1,1],[61,62],[60.9375,61.9375]],
+      [[1,1],[61,62],[31,31.5]],
+      [[8.0625,8.9375],[15.9375,9.0625],[9.0625,15.9375]],
+    ];
+    for(let shape=0;shape<constantShapes.length;shape++) for(const reverse of [false,true]) for(const clipped of [false,true]) {
+      const c=baseConfig();c[0]=3|64;c[2]=0x44;c[1]=0x30000;
+      if(clipped){c[11]=9|(39<<16);c[12]=11|(45<<16);}
+      const v=constantShapes[shape].map(([x,y])=>[x,y,175,pack(20,200,60,64)]);
+      if(reverse)[v[0],v[1]]=[v[1],v[0]];
+      run('flat-depth-invariant-'+shape+'-'+reverse+'-'+clipped,c,v,null,'ordered');
+    }
     if (bridge) {
       for (const size of [8, 16, 24, 32, 48]) bridge.targets(size, size);
       const c = baseConfig();
