@@ -291,5 +291,9 @@ controls, twenty allocation failure/retry cases, 3,360 mip bridge cases, 13,680
 standalone sampler cases, the upstream GS backend matrix and presenter lifecycle,
 CPU upload, state restoration and viewport checks. This precision correction
 is not established as the cause or resolution of intermittent captured-game
-image differences. It does not qualify WebGL performance or audio and does not
-change the selected WebGPU release.
+image differences. Subsequent private captured-game runs applying the same
+precision declarations each retained one mismatch among 599 shared images in
+Chromium and Firefox. The Chromium difference affected twelve RGB pixels with
+a maximum component difference of 132; its matching reference image was
+independently retained. This change does not resolve those failures or qualify
+WebGL performance/audio, and does not change the selected WebGPU release.
