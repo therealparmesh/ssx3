@@ -96,7 +96,7 @@
       settings[29] = format === "rgb16" ? 1 : format === "rgb24" ? 2 : 0;
       for (const opaque of [false, true])
         for (const fixed of [false, true])
-          for (const maximum of [0, 1, 3, 6])
+          for (const maximum of [0, 1, 2, 3, 4, 5, 6])
             for (let min = 0; min < 6; min++)
               for (let wrap = 0; wrap < 4; wrap++) {
                 const o = {

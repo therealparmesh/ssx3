@@ -70,6 +70,35 @@ allows the next intermittent discrepancy to be inspected on its first occurrence
 instead of depending on a later reproduction. Game data and captures remain
 outside the repository.
 
+Further retained-build captures found isolated world-image differences: four
+pixels at sequence 519 and six at sequence 403. At the latter frame, both runs
+had identical SHA-256 fingerprints over all 331 ordered packets, including
+settings, vertices, target dimensions and resource IDs. Another failure at
+sequence 559 had matching fingerprints for its 233 ordered packets and all 605
+captured texture update/creation calls, including palette uploads and their
+client-memory bytes. No uploads were skipped. Some startup fingerprints differ,
+so these observations do not prove identical complete GPU histories. Native
+fallback draws, graphics state and shader precision remain to be investigated;
+they do not establish a cause or excuse the failed images.
+
+The private cache's allocation/upload-failure test exposed silent reuse of old
+content. Its corrected path preserves the prior immutable image and dirty flags,
+reports the error, and allows a subsequent retry. Both browsers pass 22 synthetic
+cases, their rebuilt runtime probes and 599 shared game-image comparisons. Debug
+exports were removed. The cache remains unselected.
+
+A separate private specialization precompiled one-, two- and three-level mip
+programs and avoided unused sampler bindings. Both browsers passed 1,094 ordered
+cases, the expanded 3,360 mip bridge cases, all native probes and 599 shared game
+images. Nine linked-program checks confirmed unused mip samplers were absent.
+Repeated Firefox windows averaged 46.19 versus 47.77 images/s, baseline versus
+candidate. Chromium baseline windows were 38.02 and 57.91; candidate windows were
+57.66 and 59.19. The slow baseline is unexplained and remains in the record, so
+these results do not establish a consistent Chromium speedup. Audio and interval
+gates failed. The specialization remains private and unselected. The retained
+bridge suite now exercises every maximum mip level from 0 through 6; both browsers
+pass its 3,360 exact comparisons with the preceding renderer.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,

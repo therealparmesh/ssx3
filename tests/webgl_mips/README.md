@@ -24,9 +24,10 @@ The negative control retains all filtering rules but forces the maximum level
 to zero; it must fail on a nonzero-level pixel. The expected positive hash is
 2510624830.
 
-The bridge checks 1,920 cases / 1,920 exact pixels through both ordered tiles
-and hardware opaque triangles, using UV and STQ coordinates. It also rejects
-an incomplete chain before drawing. The expected hash is 2611237925. All input
+The bridge checks 3,360 cases / 3,360 exact pixels through both ordered tiles
+and hardware opaque triangles, using UV and STQ coordinates and every maximum
+level from 0 through 6. It also rejects an incomplete chain before drawing.
+The expected hash is 2089962517. All input
 textures and palettes are generated locally. No game assets are used.
 
 `ORDERED_MIP_SAMPLING` compiles separate mip-enabled programs, leaving existing

@@ -65,10 +65,10 @@ async function main() {
         assert.match(result.result.error, /Mip mismatch/);
       } else {
         assert.equal(result.result.passed, true, result.result.error);
-        assert.equal(result.result.cases, mode === "bridge" ? 1920 : 13680);
+        assert.equal(result.result.cases, mode === "bridge" ? 3360 : 13680);
         assert.equal(
           result.result.hash,
-          mode === "bridge" ? 2611237925 : 2510624830,
+          mode === "bridge" ? 2089962517 : 2510624830,
         );
         assert.equal(result.result.glError, 0);
       }
