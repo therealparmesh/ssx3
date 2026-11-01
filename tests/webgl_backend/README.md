@@ -129,3 +129,31 @@ full-game performance and physical device/controller qualification remain open.
 See `UPSTREAM-NOTICES.md`. Include the generated `licenses/` directory when
 redistributing compiled fixtures. No ROM, BIOS, game capture, save or generated
 guest executable is downloaded or published by this workflow.
+## Native GL state diagnostic
+
+The optional state observer is test-only and is never linked into the player.
+Its asset-free checks use real WebGL mutations with a minimal bridge to detect
+wrong depth attachments and stale texture/sampler caches. They also install the
+observer against the repository's actual bridge to verify compatibility:
+
+```sh
+node scripts/test_webgl_state_guard.cjs chrome
+node scripts/test_webgl_state_guard.cjs firefox
+```
+
+Use the same external `puppeteer-core` dependency and browser overrides as the
+other browser drivers. Outputs go to a temporary directory, or `SSX3_TEST_OUTPUT`.
+
+For a native game run, add `SSX3_TEST_GL_STATE_GUARD=1` to the
+[fixed-state oracle command](../../docs/building.md#repeatable-private-race-measurements).
+The driver installs the observer before context creation, then wraps the actual
+bridge before Play. It records supported checks, rejects unexercised supported
+checks and rejects observed inconsistencies after preserving `result.json` and
+any differing image bytes. Bridges without the optional reserved-unit caches
+report those capabilities as unavailable; depth checks still apply.
+
+The observer tracks valid 2D texture, sampler and framebuffer API mutations on
+the CPU. It adds no GL queries or draw-by-draw readbacks. It is not a driver-state
+query, complete resource-lifetime verifier or proof of pixel correctness. Existing
+native GL-error checks and the independent image oracle remain required. It is
+restricted to oracle mode: instrumented timing cannot qualify performance.

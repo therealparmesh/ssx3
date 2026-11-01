@@ -406,6 +406,21 @@ input checks do not clear the failed image oracle. The masked path remains
 private and unselected while investigation moves to GL calls and resource-update
 histories. Main and the hosted WebGPU release remain unchanged.
 
+Further private GL-input traces match all 599 shared reference images, but their
+overhead changes scheduling and they have not captured a failing image. A smaller
+state observer does reproduce a failure at sequence 617. A reference-matching
+retained-build capture localizes it to twelve pixels in a 4-by-3 patch, with RGB
+differences up to 152 levels and unchanged alpha. The failure remains retained.
+That run reports no inconsistency across 227,200 target-depth checks, 682,083
+cached-texture checks and 576,795 cached-sampler checks. These observations narrow
+the checked hypotheses; they do not establish the cause or clear image fidelity.
+
+The [state observer and its negative controls](../tests/webgl_backend/README.md#native-gl-state-diagnostic)
+are now reusable from the fixed-state oracle. Both browsers detect deliberate
+depth, texture and sampler faults. The native failing capture and diagnostic
+hashing tools remain private. No renderer optimization or hosted change is
+selected from these results.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,

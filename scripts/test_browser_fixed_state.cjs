@@ -6,6 +6,8 @@ const sourceClock = require('./browser_source_clock.js');
 const kind = process.argv[2] || 'firefox', mode = process.argv[3] || 'performance';
 assert(['firefox', 'chrome'].includes(kind));
 assert(['performance', 'oracle'].includes(mode));
+const stateGuard = process.env.SSX3_TEST_GL_STATE_GUARD === '1';
+assert(!stateGuard || mode === 'oracle', 'GL state guard is diagnostic and requires oracle mode');
 const referencePath = process.env.SSX3_TEST_REFERENCE;
 const minimumSharedImages = Number(process.env.SSX3_TEST_MIN_SHARED_IMAGES || 1);
 assert(Number.isSafeInteger(minimumSharedImages) && minimumSharedImages > 0, 'Minimum shared images must be a positive integer');
@@ -38,6 +40,7 @@ const errors=[], warnings=[];
     executablePath:kind==='firefox' ? process.env.SSX3_FIREFOX_BIN || '/usr/bin/firefox' : process.env.SSX3_CHROMIUM_BIN || '/usr/bin/chromium',
     headless:false, defaultViewport:{width:1280,height:800,deviceScaleFactor:1}});
   page=await browser.newPage();
+  if(stateGuard)await page.evaluateOnNewDocument(fs.readFileSync(path.join(__dirname,'../tests/webgl_backend/state_guard.js'),'utf8'));
   page.on('pageerror',error=>errors.push(error.message));
   page.on('console',message=>{if(message.type()==='error')errors.push(message.text());if(['warn','warning'].includes(message.type()))warnings.push(message.text())});
   await page.evaluateOnNewDocument(()=>{
@@ -66,6 +69,7 @@ const errors=[], warnings=[];
   assert.equal(await page.title(),'SSX 3');
   await page.waitForFunction(()=>window.Module&&(Module.failed||document.getElementById('start').textContent==='Play SSX 3'),{timeout:120000});
   assert(await page.evaluate(()=>crossOriginIsolated && navigator.gpu===undefined && !Module.failed));
+  if(stateGuard)await page.evaluate(()=>ssx3GlStateGuard.install());
   const direct=await page.evaluate(()=>!!Module.webglDirectSurface);
   if(mode==='oracle'&&direct)
     await page.evaluate(fs.readFileSync(path.join(__dirname,'../tests/webgl_presenter/capture.js'),'utf8')+'\nvoid 0;');
@@ -80,6 +84,7 @@ const errors=[], warnings=[];
       const push=frames.push;
       frames.push=function(frame){
         const nativeFrame=Module._ps2web_frames(),imageSequence=++Module.qaImageSequence;
+        if(globalThis.ssx3GlStateGuard)ssx3GlStateGuard.lastPreparedImage=imageSequence;
         if(nativeFrame>=first&&nativeFrame<last&&imageSequence%oracleEvery===0){
           const image=direct?ssx3ReadWebglFrame(Module.ps2WebglCanvas.getContext('webgl2'),frame):frame.image;
           const record={imageSequence,nativeFrame,width:image.width,height:image.height};Module.qaImages.push(record);
@@ -110,7 +115,8 @@ const errors=[], warnings=[];
   assert(metric.images>0&&metric.av.frames>0,'Observe actual images and audio worklet output');
   await page.evaluate(()=>document.getElementById('pause').click());
   await page.waitForFunction(()=>Module._ps2web_pause_ready(),{timeout:30000});
-  const observation=await page.evaluate(async()=>{await Promise.all(Module.qaHashJobs);return{pixelHashes:Module.qaImages,oracleDifferences:Module.qaOracleDifferences,failed:!!Module.failed,backend:Module.ps2GpuBackend}});
+  await page.waitForFunction(()=>Module.qaImages.every(image=>image.sha256),{timeout:30000});
+  const observation=JSON.parse(await page.evaluate(()=>JSON.stringify({pixelHashes:Module.qaImages,oracleDifferences:Module.qaOracleDifferences,failed:!!Module.failed,backend:Module.ps2GpuBackend,glStateGuard:globalThis.ssx3GlStateGuard?.snapshot()||null})));
   assert(!observation.failed);assert.deepEqual(errors,[]);assert.deepEqual(warnings,[]);
   if(mode==='oracle')assert(observation.pixelHashes.length>0,'Pixel oracle must observe native images');
   await page.screenshot({path:path.join(out,'window-end.png')});
@@ -130,6 +136,12 @@ const errors=[], warnings=[];
     limits:'Measurement only. Oracle hashing perturbs timing; compare performance runs separately. Game/state data remain private. Not a complete-race, display scanout, physical audio or release qualification.'};
   fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');
   // Preserve the complete result and raw pixels before rejecting the run.
+  if(stateGuard) {
+    assert(observation.glStateGuard?.installed, 'GL state guard did not install');
+    for(const [category,supported]of Object.entries(observation.glStateGuard.capabilities))
+      if(supported)assert(observation.glStateGuard.checks[category]>0, 'GL state guard did not exercise '+category);
+    assert.deepEqual(observation.glStateGuard.errors,[], 'GL state guard found inconsistent state; see result.json');
+  }
   if(reference) {
     assert(shared >= minimumSharedImages, 'Reference comparison has fewer shared image sequences than required');
     assert.equal(observation.oracleDifferences.length,0,'Reference image mismatch; see result.json and captured RGBA files');
