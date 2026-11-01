@@ -189,12 +189,23 @@ ivec4 sampleTexture(vec2 uv, float q) {
           sampleMipLevel(uv,second,linearFilter)*fraction)/65536;
 #endif
 }
+// Preserve constant components before truncating interpolated colors to integers.
+vec4 interpolateColor(uint a, uint b, uint c, vec3 weights) {
+  vec4 first = rgba(a);
+  vec4 value = first * weights.x + rgba(b) * weights.y + rgba(c) * weights.z;
+  uint differing = (a ^ b) | (a ^ c);
+  if ((differing & 0xffu) == 0u) value.r = first.r;
+  if ((differing & 0xff00u) == 0u) value.g = first.g;
+  if ((differing & 0xff0000u) == 0u) value.b = first.b;
+  if ((differing & 0xff000000u) == 0u) value.a = first.a;
+  return value;
+}
 ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
             uint kind, vec3 weights) {
   float w0 = weights.x, w1 = weights.y, w2 = weights.z;
   vec4 src = rgba(v2.a);
   if ((cfg(0) & 8u) != 0u)
-    src = rgba(v0.a) * w0 + rgba(v1.a) * w1 + rgba(v2.a) * w2;
+    src = interpolateColor(v0.a, v1.a, v2.a, weights);
   ivec4 source = ivec4(src);
   uvec4 t0 = loadVertex(i + 1u), t1 = loadVertex(i + 3u),
         t2 = loadVertex(i + 5u);

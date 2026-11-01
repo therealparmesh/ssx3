@@ -2,6 +2,19 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Constant color correction (2026-11-01)
+
+The ordered WebGL shader and software reference now preserve equal vertex color
+components exactly. An independent alpha-128 identity-blend test caught the
+previous shared error: both implementations dimmed 69 pixels. Comparing them
+to each other had hidden that defect. The independent oracle now checks the CPU
+result as well as GPU output, and deliberately restoring the old shader fails.
+Chromium 156 and Firefox 158 each pass 1,095 bridge cases, 1,127 raw-shader cases,
+all three pixel-fault controls and 20 allocation/retry cases. Rebuilt runtime
+probes also pass their constant-alpha check, 124 mip cases, six GL fault checks
+and readback lifecycle checks in both browsers. This is a correctness fix;
+WebGL gameplay timing and audio remain separate failed release gates.
+
 ## Follow-up diagnostics
 
 Link-time optimization was tested privately on the JSPI build. Two direct

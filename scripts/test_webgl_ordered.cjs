@@ -29,7 +29,7 @@ async function main() {
     defaultViewport: { width: 800, height: 600 },
   });
   try {
-    const modes = ["positive", "negative-depth", "negative-order"];
+    const modes = ["positive", "negative-depth", "negative-order", "negative-constant"];
     if (bridge) modes.push("allocation");
     for (const mode of modes) {
       const page = await browser.newPage();
@@ -52,6 +52,7 @@ async function main() {
         ? new URL("allocation.html", origin)
         : new URL(origin);
       if (bridge) url.searchParams.set("bridge", "1");
+      if (mode === "negative-constant") url.searchParams.set("constantColorFault", "1");
       if (mode === "negative-depth") url.searchParams.set("negative", "1");
       if (mode === "negative-order") url.searchParams.set("reverse", "1");
       await page.goto(url.href, { waitUntil: "load" });
@@ -91,7 +92,7 @@ async function main() {
         assert(!result.error, result.error);
         assert.equal(
           result.passed,
-          bridge ? 1094 : 1126,
+          bridge ? 1095 : 1127,
           "Run the complete fixture matrix",
         );
         assert.equal(logs.length, 0, "No browser or graphics warnings");

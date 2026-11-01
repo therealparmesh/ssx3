@@ -16,7 +16,12 @@
         throw Error(gl.getShaderInfoLog(s));
       return s;
     };
-    const kernelSource = await (await fetch("kernel.frag")).text();
+    let kernelSource = await (await fetch("kernel.frag")).text();
+    if (new URLSearchParams(location.search).has("constantColorFault")) {
+      kernelSource = kernelSource.replace(
+        /vec4 interpolateColor\(uint a,[\s\S]*?\n}/,
+        "vec4 interpolateColor(uint a, uint b, uint c, vec3 weights) { return rgba(a)*weights.x + rgba(b)*weights.y + rgba(c)*weights.z; }");
+    }
     const program = gl.createProgram();
     gl.attachShader(
       program,
@@ -648,6 +653,11 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
         )
       )
         throw Error("CPU reference rejected input");
+      if (name.startsWith("constant-alpha-")) {
+        const cpu = reference.HEAPU32.subarray(outputPtr / 4, outputPtr / 4 + 8192);
+        if (cpu.some((value, i) => value !== analyticExpected[i]))
+          throw Error("CPU constant-alpha invariant failed");
+      }
       const expected =
         analyticExpected ||
         reference.HEAPU32.subarray(outputPtr / 4, outputPtr / 4 + 8192);
@@ -700,6 +710,16 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
       results.push(result);
       if (colorMismatches || depthMismatches)
         throw Error(JSON.stringify(result));
+    }
+    {
+      const c = baseConfig(); c[0] = 3 | 8 | 64; c[1] = 0;
+      c[2] = 0x81; c[4] = 0xff000000; c[13] = 1;
+      const expected = new Uint32Array(8192);
+      expected.fill(c[8], 0, 4096); expected.fill(c[9], 4096);
+      run("constant-alpha-gouraud", c,
+        [[4.125, 5.0625, 200, pack(0, 0, 0, 128)],
+         [59.875, 9.1875, 200, pack(0, 0, 0, 128)],
+         [12.4375, 60.3125, 200, pack(0, 0, 0, 128)]], expected);
     }
     for (let i = 0; i < 81; i++) {
       const c = baseConfig();
