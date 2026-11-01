@@ -131,6 +131,74 @@ application errors or warnings. Worker pixel,
 lifecycle and resource qualification remain incomplete; the source build
 still rejects WebGL worker mode and these prototypes are not shipped.
 
+## Further allocation and upload trials
+
+A bounded, reentrant-safe, thread-local packed-vertex cache passes the native
+API fixture in both browsers. A fresh original-allocation Firefox control
+presents 947 images in 20.008 seconds (47.33/s); the cache candidate presents
+914 in 20.015 seconds (45.67/s). Maximum intervals are 52.68 and 66.00 ms,
+respectively, with actual audio underruns in both. The cache is not selected.
+These naturally varying partial-race windows are not deterministic replay.
+
+Three further JavaScript transport trials preserve that control's Wasm:
+
+| Private transport | Firefox images/s | Maximum interval | Actual underrun frames at 48 kHz |
+| --- | ---: | ---: | ---: |
+| Small vertex batches through a uniform buffer | 11.36 | 199.06 ms | 779,584 |
+| Opaque triangles through instanced integer attributes | 43.17 | 71.54 ms | 236,704 |
+| Existing vertex/index textures through an unpack buffer | 42.57 | 67.62 ms | 246,944 |
+
+The uniform trial passes an expanded 1,065-case exact color/depth matrix in
+both browsers, including its storage boundary, texture fallback, return to
+uniform storage and buffer cleanup. An initial standalone run used the old
+lexical constructor and is excluded; final gates require the new upload
+counters. The attribute trial passes 1,063 cases, including instance order and
+VAO/buffer cleanup. An incorrect instance divisor fails pixels with no GL
+error, proving that the pixel oracle observes the altered data path. The
+unpack trial passes the existing 1,062 cases plus binding restoration, injected
+upload failure/retry and owned-buffer cleanup. All three also pass the real
+runtime API fixture and legacy-path controls in both browsers.
+
+All three ordinary-menu Firefox gameplay windows fail delivery and actual
+AudioWorklet output requirements, despite logging no application errors or
+warnings. The uniform trial's verified race-start screenshot is at GO/0%,
+while the faster control is already near 2%; do not interpret the rates as a
+matched-scene speed ratio. The source clocks remain synchronized while running
+too slowly in real time. No Chromium gameplay qualification was attempted for
+these rejected candidates. None of these caches or transports is selected.
+A separate reverse-blend classifier observes 51,502 such batches among
+168,864 sampled batches but finds no candidates under its conservative
+conditions; no blend change follows from that diagnostic.
+
+## Clock-check cleanup trial
+
+A separate canonical rebuild removes the additional pre-eighth-packet clock
+read from synchronous WebGL, retaining its deadline check after every packet.
+Both browsers pass the native fixture's coalescing, expired short-queue budget
+and presentation-boundary checks, alongside pixels, mips, snapshots, register
+ordering, readback lifecycle and injected-error controls. The standalone Wasm
+GS readback/snapshot check passes all 162 cases. The rebuilt game also passes
+all 27 native keyboard/controller checks in Chromium and Firefox, with no
+application errors or warnings.
+
+Its ordinary-menu Firefox race window nevertheless presents 761 images over
+20.011 seconds (38.03/s), with a 62.16 ms maximum interval and
+292,192 actual underrun frames (6.087 seconds at 48 kHz).
+The fresh control uses a different final Wasm/link layout and naturally varying
+race scenes, so this does not isolate the timing edit's effect. It establishes
+no performance benefit; the timing cleanup is reverted. The preceding source
+implementation remains selected. The shared build archive is restored to the
+canonical backend, with the private presenter archived separately. These trials
+introduce no production renderer or hosting changes.
+
+A separate stock-browser capability check on this Linux test host uses secure,
+cross-origin-isolated pages without GPU feature flags or Firefox preferences.
+Firefox 158.0.1 exposes no WebGPU API in either the window or worker. Chromium
+156.0.8078.47 exposes the API but returns no adapter in either context. Earlier
+WebGPU gameplay qualification used explicit GPU enablement; it does not
+establish default-browser support on this host. This capability observation
+does not characterize other hardware or operating systems.
+
 ## Fence-backed display readbacks
 
 The copy presenter now submits pixel-pack-buffer readbacks before collecting
