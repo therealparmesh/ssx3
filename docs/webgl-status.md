@@ -225,8 +225,50 @@ reference tables, headers, padding and fallback for packets that do not benefit.
 That is a 49.2% payload reduction, not a measured frame-rate gain. A standalone
 native encoder passes 210 aligned/unaligned synthetic layouts, preserving every
 attribute bit and rejecting wrong/out-of-range references in verification.
-Renderer/shader integration and browser performance validation are still pending.
-The production WebGPU release remains unchanged.
+The native encoder was subsequently integrated into a private build. Original
+CPU vertices remain available for binning and validation; only the GPU upload
+uses complete-record references. Each packet selects the smaller representation,
+and reference decoding preserves primitive order and every attribute bit.
+Both browsers pass all 1,094 ordered and 3,360 mip cases with references forced
+on, including the existing depth/order and level-zero negative controls. A
+separate integer-GPU test reconstructs all raw words in 20 layouts per browser,
+including NaN payloads, signed zero and reference tables spanning texture rows.
+Wrong-reference and missing-flag controls fail, and seven malformed packet forms
+are rejected before target use. Eight large rendered comparisons per browser
+also match for opaque/general, flat/Gouraud, linear and mip paths.
+
+Both rebuilt native probes pass, and the candidate matches all 599 shared game
+images in each browser. Its repeated unprofiled fields 3600–4200 nevertheless
+fail performance: Chromium baseline windows measure 59.50/59.67 images/s versus
+59.28/59.26 with references; Firefox baseline windows measure 37.10/47.91 versus
+38.75/36.93. The slow baseline is retained. Candidate maximum intervals reach
+32.90 ms in Chromium and 87.52 ms in Firefox, and every window has audio
+underruns. There is no demonstrated gameplay gain, so the broad reference
+integration is unselected. Its `logicalVertexBytes`/`referencedBatches` counters
+include packets culled before uploading, whereas `vertexUploadBytes` counts
+actual offered upload bytes; their ratio is not an exact upload-saving measure.
+
+Fresh keyboard and simulated standard-controller checks on this private build
+pass all 28 native checkpoints in each browser, with no application errors or
+warnings. Native Gamepad API access is checked before replacing it with the
+synthetic pads. Coverage includes all mapped buttons, both sticks, trigger
+pressure, two controllers, disconnect/reconnect, API denial/recovery, hidden-tab
+neutralization and cached-page event resume. These are software input checks;
+physical hardware remains untested. The hosted WebGPU release is unchanged.
+
+
+A final private JavaScript diagnostic retained references only for batches
+meeting the existing opaque-route conditions. No new shader or native binary
+was built for this diagnostic. Chromium baseline windows were 59.51/59.65
+images/s versus 59.29/58.90; Firefox baselines were 48.71/38.61 versus
+44.84/37.62. One candidate window delivered 598 images across 600 fields.
+Every window retained audio underruns and intervals above 25 ms. The variable
+baselines are retained; this diagnostic supplies no reliable gain or new fidelity
+qualification. Both reference variants were rejected, and the private working
+source/vendor were restored to the preceding SIMD/cache prototype. Immutable
+candidate binaries and their patch/hash records remain private. Reducing the
+number of upload submissions is a remaining investigation, not an implemented
+or measured improvement.
 
 ## Cached-page lifecycle and native stack switching
 
