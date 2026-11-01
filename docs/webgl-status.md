@@ -193,6 +193,41 @@ regress: Chromium averages 59.82 versus 56.59 images/s and Firefox 49.64 versus
 removed. These later baseline windows do not establish a controlled SIMD speedup
 over the earlier cache prototype. The hosted WebGPU release remains unchanged.
 
+Further exact-content diagnostics found limited reuse between whole vertex
+uploads: a 256-entry, 8 MiB cache matched under 1% of their bytes. An exact shadow
+of existing index texture contents matched 10.1% of calls; unchanged tile-header
+rectangles matched 9.7%. Those caches were not implemented. Their diagnostic
+copies/comparisons perturb timing and can alter batching, so counts from separate
+instrumented runs are not a canonical command-history fingerprint.
+
+A private wider data-texture layout then tried to reduce full-row/tail upload
+splits without copying active bytes. Both browsers passed the default and forced
+wide ordered/mip suites. Sixteen large-mesh comparisons per browser also matched
+across 1,024-, 2,048- and 16,384-wide layouts, including multirow vertex/index data;
+wrong shader-width controls produced over 15,000 differing pixels. Both native
+probes passed. The first Chromium game oracle nevertheless failed at image 417:
+two world pixels at x=104, y=247–248 differed by one red and two blue levels. Raw
+captures are retained. An unchanged-build capture, wider-build Chromium retry
+and wider-build Firefox run each matched all 599 shared images; the original
+failure remains unresolved.
+
+Repeated wider-layout windows averaged 59.64 versus 59.67 images/s in Chromium,
+baseline versus candidate. Firefox baseline windows were 36.51 and 49.93, versus
+49.33 and 49.31 for the candidate (means 43.22 and 49.32). The unexplained slow
+baseline remains in the record; these windows do not establish a reliable
+speedup. All frame-gap/audio gates fail. The wider layout is unselected and its
+source changes were removed.
+
+The next lossless-upload investigation compares complete 32-byte vertex records
+within neighboring triangles. In a full 600-field diagnostic, the existing
+1,634,781,984 vertex bytes could be represented by 829,765,808 bytes, including
+reference tables, headers, padding and fallback for packets that do not benefit.
+That is a 49.2% payload reduction, not a measured frame-rate gain. A standalone
+native encoder passes 210 aligned/unaligned synthetic layouts, preserving every
+attribute bit and rejecting wrong/out-of-range references in verification.
+Renderer/shader integration and browser performance validation are still pending.
+The production WebGPU release remains unchanged.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,
