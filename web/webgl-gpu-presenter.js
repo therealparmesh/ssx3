@@ -41,7 +41,7 @@ Module.webglGpuPresenter = (() => {
     raf = 0;
     if (listening) {
       gl.canvas.removeEventListener("webglcontextlost", lost);
-      globalThis.removeEventListener("pagehide", dispose);
+      globalThis.removeEventListener("pagehide", pageHidden);
       if (Module.onHalt === haltHook) Module.onHalt = haltPrevious;
       listening = false;
     }
@@ -71,6 +71,10 @@ Module.webglGpuPresenter = (() => {
     if (externalWake && externalWake !== wakePending)
       queueMicrotask(externalWake);
     if (firstError) throw firstError;
+  }
+  function pageHidden(event) {
+    // A cached document keeps its Wasm runtime and must be able to resume.
+    if (!event.persisted) dispose();
   }
   function lost() {
     fail(new Error("Direct WebGL graphics connection lost"));
@@ -118,7 +122,7 @@ Module.webglGpuPresenter = (() => {
       throw new Error("Direct WebGL graphics connection lost");
     if (!listening) {
       gl.canvas.addEventListener("webglcontextlost", lost);
-      globalThis.addEventListener("pagehide", dispose);
+      globalThis.addEventListener("pagehide", pageHidden);
       haltPrevious = Module.onHalt;
       haltHook = function (...args) {
         try {

@@ -102,8 +102,8 @@ if(NOT PS2_GPU_BACKEND MATCHES "^(webgpu|webgl)$")
 endif()
 set(PS2_WEB_SYNC_FUNCTIONS "${CMAKE_CURRENT_SOURCE_DIR}/web/sync-game-functions.json")
 if(PS2_GPU_BACKEND STREQUAL "webgl")
-    if(NOT EMSCRIPTEN OR NOT PS2_WEB_ASYNC STREQUAL "asyncify")
-        message(FATAL_ERROR "Experimental WebGL backend requires Emscripten Asyncify")
+    if(NOT EMSCRIPTEN)
+        message(FATAL_ERROR "Experimental WebGL backend requires Emscripten")
     endif()
     if(PS2_WEB_WORKER)
         message(FATAL_ERROR "Experimental WebGL currently requires PS2_WEB_WORKER=OFF; worker presentation is not integrated")
@@ -178,7 +178,10 @@ if(PS2_GPU_TESTS)
     set_target_properties(gpu_copy_readback PROPERTIES SUFFIX ".html"
         LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/gpu_probe_shell.html;${CMAKE_CURRENT_SOURCE_DIR}/web/frame-presentation.js;${CMAKE_CURRENT_SOURCE_DIR}/web/staged-uploads.js")
     if(PS2_GPU_BACKEND STREQUAL "webgl")
-        target_link_options(gpu_copy_readback PRIVATE "-sASYNCIFY_REMOVE=@${PS2_WEB_SYNC_FUNCTIONS}"
+        if(PS2_WEB_ASYNC STREQUAL "asyncify")
+            target_link_options(gpu_copy_readback PRIVATE "-sASYNCIFY_REMOVE=@${PS2_WEB_SYNC_FUNCTIONS}")
+        endif()
+        target_link_options(gpu_copy_readback PRIVATE
             "SHELL:--pre-js \"${CMAKE_CURRENT_SOURCE_DIR}/tests/webgl_presenter/capture.js\"")
         set_property(TARGET gpu_copy_readback APPEND PROPERTY LINK_DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/webgl_presenter/capture.js")

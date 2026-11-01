@@ -2,6 +2,43 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Cached-page lifecycle and native stack switching
+
+The direct presenter previously disposed its GL resources on every `pagehide`,
+including cached documents whose Wasm runtime remained resumable. A controlled
+cached-page event reproduced that disposal in both browsers. The presenter now
+retains its resources when `event.persisted` is true; ordinary page disposal still
+cancels pending work and frees owned resources. Both browsers pass 35 presenter
+lifecycle scenarios, including retained queued images, resumed presentation and
+subsequent noncached disposal. These simulate lifecycle events, not browser
+back/forward-cache eligibility or actual navigation.
+
+WebGL also accepts an explicit `PS2_WEB_ASYNC=jspi` build. The installed Chromium
+156 and Firefox 158 expose the required APIs without feature overrides. Both
+compiled runtime probes pass, and both JSPI gameplay oracles match all 599 shared
+image hashes against the retained reference. Renderer work counts match exactly.
+The compatibility Asyncify configuration remains available. CI is configured to
+compile both probes; the default hosted WebGPU release remains unchanged.
+
+Before the lifecycle-only fix, repeated direct-presentation windows compared
+Asyncify/JSPI/JSPI/Asyncify over fields 3600–4200 in fresh headed desktop sessions.
+Chromium averaged 55.96 versus 58.34 images/s; Firefox averaged 42.88 versus 43.83.
+JSPI maximum intervals reached 33.45 ms and 54.30 ms respectively; all windows had
+audio underruns. These results support an experimental build option, not release
+qualification. The final lifecycle-fixed bundles passed 28 native input/resume
+checkpoints for each browser and suspension mode, using simulated standard pads.
+Physical controllers and broader gameplay remain unqualified.
+
+A separate fused-framebuffer-input trial removed 100,911 of 378,268 raster draws
+from the fixed window and matched all 599 common game images in each browser.
+Independent GL-call counters confirmed two ordered draws instead of three; the
+preceding renderer fails that count check while retaining exact fixture pixels.
+The trial passed 1,094 ordered and 1,920 mip bridge cases per browser plus runtime
+probes. Chromium averaged only 56.17 versus 56.61 images/s. Across three Firefox
+windows per variant, the average fell from 43.96 to 42.50, including an unexplained
+37.94 candidate window. A later candidate recovered to 45.20, but did not explain
+that failure. The fusion trial and its extra fixtures were rejected.
+
 ## Opt-in direct presenter follow-up
 
 The experimental branch now includes the same-context GPU presenter behind
@@ -13,7 +50,7 @@ path preserves the original exception. Fractional destination sizes now use a
 full-canvas viewport and explicit edge coverage instead of truncating the
 viewport and clipping image edges.
 
-Asset-free checks exercise 34 lifecycle scenarios per browser, foreign GL-state
+Asset-free checks exercise 35 lifecycle scenarios per browser, foreign GL-state
 and resource ownership, ten CPU images and 20 resampling cases. The compiled
 runtime extension checks 32 GPU images and 24 CPU-region images, including four
 PS2 formats, halved rows and rejection of an earlier GL fault. Browser automation
@@ -31,7 +68,7 @@ An earlier copy run also differed on one image; a later private upload trial
 captured a 12-pixel texture discrepancy. Additional diagnostic reads did not
 establish its cause. The failed observations remain open evidence.
 
-Current-source commit `de9866c` passed
+The initial direct-presenter commit `de9866c` passed
 [source CI](https://github.com/therealparmesh/ssx3/actions/runs/41272626640).
 The clean game bundle contains no test-only capture hooks. `copy/direct/direct/copy`
 comparisons used the same compiled JS/Wasm/data in fresh sessions, with two

@@ -52,6 +52,50 @@ assert(["chrome", "firefox"].includes(kind), "Choose chrome or firefox");
         empty,
       };
     });
+    await check("cached-page-preserves-resume", () => {
+      const p = Module.webglGpuPresenter;
+      p.source(16, 16);
+      const values = [];
+      for (let i = 0; i < 3; i++)
+        p.enqueue(qa.meta, (value) => values.push(value));
+      Module.paused = true;
+      const before = qa.empty();
+      globalThis.dispatchEvent(
+        new PageTransitionEvent("pagehide", { persisted: true }),
+      );
+      qa.step(1000);
+      const cached = qa.empty(),
+        retained = !p.closed;
+      globalThis.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: true }),
+      );
+      Module.paused = false;
+      for (let i = 1; i <= 10; i++) qa.step(1000 + i * 17);
+      const presented = qa.presented;
+      globalThis.dispatchEvent(
+        new PageTransitionEvent("pagehide", { persisted: false }),
+      );
+      const empty = qa.empty();
+      return {
+        passed:
+          retained &&
+          JSON.stringify(before) === JSON.stringify(cached) &&
+          JSON.stringify(values) === "[1,1,1]" &&
+          presented === 3 &&
+          p.closed &&
+          empty.resources.every((x) => !x[1]) &&
+          !empty.registered &&
+          !empty.rafs &&
+          !qa.halted &&
+          gl.getError() === gl.NO_ERROR,
+        retained,
+        before,
+        cached,
+        presented,
+        values,
+        empty,
+      };
+    });
     for (const [resource, count] of [
       ["Program", 2],
       ["Shader", 4],

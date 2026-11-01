@@ -331,6 +331,45 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
     () => Module.paused && Module._ps2web_pause_ready(),
     { timeout: 15000 },
   );
+  if (
+    backend === "webgl" &&
+    (await page.evaluate(() => Module.webglDirectSurface))
+  ) {
+    const cached = await page.evaluate(() => {
+      const snapshot = {
+        frame: Module._ps2web_frames(),
+        presented: Module.webglGpuStats.presented,
+      };
+      dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      return {
+        ...snapshot,
+        closed: Module.webglGpuPresenter.closed,
+        stopped: !!Module.stoppedForReload,
+      };
+    });
+    assert(
+      !cached.closed && !cached.stopped,
+      "Cached-page events must retain the paused runtime and presenter",
+    );
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(
+      ({ frame, presented }) =>
+        !Module.failed &&
+        !Module.paused &&
+        Module._ps2web_frames() > frame + 30 &&
+        Module.webglGpuStats.presented > presented + 10,
+      { timeout: 15000 },
+      cached,
+    );
+    v = await query("cached-page-event-resume");
+    assert.deepEqual(v.pads["0"], [0, 128, 128, 128, 128]);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(
+      () => Module.paused && Module._ps2web_pause_ready(),
+      { timeout: 15000 },
+    );
+  }
   await page.screenshot({ path: out + "/paused.png" });
   assert.deepEqual(errors, []);
   assert.deepEqual(warnings, []);

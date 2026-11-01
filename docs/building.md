@@ -66,7 +66,7 @@ Normal browser play disables GPU timestamp queries; `?debug` enables them when s
 
 ## Experimental live WebGL runtime
 
-The optional WebGL backend now implements the runtime GPU API, beyond the standalone captured-command fixtures. The default backend remains WebGPU. WebGL currently requires Asyncify, native internal resolution and the window-owned runtime (`PS2_WEB_WORKER=OFF`). Its private WebGL canvas supplies the existing copy presenter; a separate game/presentation worker is not integrated. It does not use WebGPU. GPU timing is unavailable: a zero GPU-time counter does not measure rendering cost.
+The optional WebGL backend now implements the runtime GPU API, beyond the standalone captured-command fixtures. The default backend remains WebGPU. WebGL supports Asyncify and explicit JSPI builds, at native internal resolution with the window-owned runtime (`PS2_WEB_WORKER=OFF`). Its private WebGL canvas supplies the existing copy presenter; a separate game/presentation worker is not integrated. It does not use WebGPU. GPU timing is unavailable: a zero GPU-time counter does not measure rendering cost.
 
 Build and run the asset-free integration probe with the pinned SDK active:
 
@@ -79,6 +79,13 @@ emcmake cmake -S . -B build/webgl-runtime -G Ninja \
 cmake --build build/webgl-runtime --target gpu_copy_readback --parallel 2
 python3 scripts/serve.py build/webgl-runtime /dev/null 8723
 ```
+
+For a browser that supports native Wasm stack switching, configure a separate build
+folder with `-DPS2_WEB_ASYNC=jspi`. This mode also requires the browser's Wasm
+exception-handling and tail-call support; the existing startup feature check
+reports missing capabilities. Asyncify remains available for compatibility.
+These are explicit build variants, not automatic fallback bundles. CI compiles
+both runtime probes; neither mode has passed the full gameplay release gates.
 
 In a second terminal, with Puppeteer Core available:
 
