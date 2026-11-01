@@ -88,6 +88,7 @@ jobs:
           sh scripts/build_webgl_ordered.sh
           node --check runtime/src/gs/webgl/ordered_raster.js
           node --check tests/webgl_ordered/verify.js
+          node --check tests/webgl_ordered/allocation.js
           node --check scripts/test_webgl_ordered.cjs
           node --check scripts/test_webgl_mips.cjs
           node --check tests/webgl_mips/oracle.js

@@ -138,13 +138,25 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
   texture(format, width, height) {
     const gl = this.gl;
     const texture = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0 + 12);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, format, width, height);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    this.textures.add(texture);
-    return texture;
+    if (!texture) {
+      const error = gl.getError();
+      throw Error("Unable to allocate ordered raster texture: " + error);
+    }
+    try {
+      gl.activeTexture(gl.TEXTURE0 + 12);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, format, width, height);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      const error = gl.getError();
+      if (error !== gl.NO_ERROR)
+        throw Error("Ordered raster texture allocation failed: " + error);
+      this.textures.add(texture);
+      return texture;
+    } catch (error) {
+      this.deleteTexture(texture);
+      throw error;
+    }
   }
 
   framebuffer() {
@@ -293,16 +305,21 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     if (rows > this.maxTextureSize)
       throw Error("Ordered raster batch exceeds texture capacity");
     if (!this[name] || this[name + "Rows"] < rows) {
-      this.deleteTexture(this[name]);
-      this[name + "Rows"] = Math.min(
+      const allocatedRows = Math.min(
         this.maxTextureSize,
         2 ** Math.ceil(Math.log2(rows)),
       );
-      this[name] = this.texture(
+      const replacement = this.texture(
         components === 4 ? gl.RGBA32UI : gl.R32UI,
         1024,
-        this[name + "Rows"],
+        allocatedRows,
       );
+      // Publish only a complete allocation; failed growth leaves the prior
+      // handle, dimensions and image available for a clean retry.
+      const previous = this[name];
+      this[name] = replacement;
+      this[name + "Rows"] = allocatedRows;
+      this.deleteTexture(previous);
     }
     gl.activeTexture(gl.TEXTURE0 + 12);
     gl.bindTexture(gl.TEXTURE_2D, this[name]);

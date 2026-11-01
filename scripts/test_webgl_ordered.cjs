@@ -29,7 +29,9 @@ async function main() {
     defaultViewport: { width: 800, height: 600 },
   });
   try {
-    for (const mode of ["positive", "negative-depth", "negative-order"]) {
+    const modes = ["positive", "negative-depth", "negative-order"];
+    if (bridge) modes.push("allocation");
+    for (const mode of modes) {
       const page = await browser.newPage();
       const errors = [];
       const logs = [];
@@ -46,17 +48,19 @@ async function main() {
           };
         });
       });
-      const url = new URL(origin);
+      const url = mode === "allocation"
+        ? new URL("allocation.html", origin)
+        : new URL(origin);
       if (bridge) url.searchParams.set("bridge", "1");
       if (mode === "negative-depth") url.searchParams.set("negative", "1");
       if (mode === "negative-order") url.searchParams.set("reverse", "1");
       await page.goto(url.href, { waitUntil: "load" });
       await page.waitForFunction(
-        () => window.kernelResult || window.kernelEarlyError,
+        () => window.kernelResult || window.allocationResult || window.kernelEarlyError,
         { timeout: 60000 },
       );
       const result = await page.evaluate(
-        () => window.kernelResult || window.kernelEarlyError,
+        () => window.kernelResult || window.allocationResult || window.kernelEarlyError,
       );
       const evidence = {
         url: url.href,
@@ -73,7 +77,17 @@ async function main() {
         JSON.stringify(evidence, null, 2) + "\n",
       );
       assert.equal(errors.length, 0, "No uncaught browser errors");
-      if (mode === "positive") {
+      if (mode === "allocation") {
+        assert.equal(result.passed, true, JSON.stringify(result));
+        assert.equal(result.results.length, 20);
+        assert(result.results.every(item => item.passed));
+        // Deliberately invalid storage calls can emit driver warnings; retain
+        // them in the evidence. All GL errors must be reported and consumed.
+        assert(logs.every(message =>
+          /INVALID_ENUM.*bindTexture.*invalid target|INVALID_VALUE.*texStorage.*width < 0/i.test(message)),
+          "Only deliberately injected driver warnings are expected");
+        console.log(`${engine}: 20 allocation failure/retry cases passed`);
+      } else if (mode === "positive") {
         assert(!result.error, result.error);
         assert.equal(
           result.passed,

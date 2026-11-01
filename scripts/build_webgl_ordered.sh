@@ -16,6 +16,8 @@ mkdir -p "$raster_output"
     -o "$raster_output/reference.js"
 cp "$raster_root/tests/webgl_ordered/index.html" "$raster_output/index.html"
 cp "$raster_root/tests/webgl_ordered/verify.js" "$raster_output/verify.js"
+cp "$raster_root/tests/webgl_ordered/allocation.html" "$raster_output/allocation.html"
+cp "$raster_root/tests/webgl_ordered/allocation.js" "$raster_output/allocation.js"
 cp "$raster_root/runtime/src/gs/webgl/ordered_raster.frag" "$raster_output/kernel.frag"
 printf 'Asset-free WebGL fixture: %s\n' "$raster_output"
 

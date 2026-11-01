@@ -261,3 +261,15 @@ barycentric weights and exercise the ordered path. The CPU software model now
 selects flat colors directly and preserves equal depths, with independent native
 and Wasm constant-value regressions. The browser compares full targets against
 that model; no tolerance was added. Both depth/order fault controls remain active.
+
+## Data texture allocation recovery
+
+Bridge verification also runs `allocation.html`, with twenty first-allocation
+and growth faults across R32UI and RGBA32UI data textures. Null texture handles with or without a pending GL error,
+storage/parameter exceptions and an actual invalid-storage GL call must report
+failure, preserve the previous cached handle/dimensions/pixels, release temporary
+resources, and allow an exact clean retry. Successful growth retires the previous
+texture. The preceding implementation fails these checks. Expected driver
+warnings from the deliberately invalid calls remain in the browser evidence;
+uncaught application errors still fail verification. These checks qualify helper
+allocation recovery, not recovery of an entire game from context loss.

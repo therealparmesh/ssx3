@@ -270,6 +270,47 @@ candidate binaries and their patch/hash records remain private. Reducing the
 number of upload submissions is a remaining investigation, not an implemented
 or measured improvement.
 
+
+A private combined-upload trial then staged raw vertices, packed indices and
+compact tile headers into one RGBA32UI texture for ordered batches. Opaque
+batches kept their preceding path. Both browsers pass 1,094 ordered and 3,360
+mip cases with the option forced on, plus sixteen exact large-mesh comparisons
+and six deliberately wrong layout controls. Nonzero tile origins and multirow
+vertex/index data are covered. The large ordered cases reduce actual data-upload
+calls from five to two. Both native probes and 599 shared gameplay images pass.
+Repeated gameplay windows nevertheless average 59.68 versus 59.86 images/s in
+Chromium and 49.68 versus 49.41 in Firefox, baseline versus candidate. All windows
+retain frame-gap/audio failures; no dependable cross-browser gain is established.
+
+A second private variant combines only indices and tile headers, preserving
+shared-memory vertex uploads. It passes the same synthetic, native and shared-image
+checks. Repeated windows average 59.55 versus 56.96 images/s in Chromium and
+49.63 versus 49.95 in Firefox. The individual Chromium candidate windows are
+55.23 and 58.69; both remain in the result. All frame-gap/audio gates still fail.
+Both upload variants were rejected and removed from the working runtime.
+
+The allocation investigation exposed a separate correctness bug in the retained
+bridge: failed data-texture growth could delete the old image and publish the new
+cached row count before replacement storage existed. Texture allocation now
+reports null handles and driver storage errors, frees incomplete replacements,
+and updates the cached handle/dimensions only after successful allocation.
+Twenty asset-free cases per browser cover first allocation and growth in R32UI
+and RGBA32UI, including null handles with/without a GL error, thrown storage or
+parameter calls, and a real invalid-storage driver error. They verify old pixels,
+resource ownership and exact clean retries. The preceding implementation fails
+all twenty cases in each browser. The regular ordered/mip suite also passes on
+the isolated fix. Expected injected driver warnings remain in evidence; other
+warnings and uncaught errors fail the allocation verifier. This is helper-level
+allocation recovery, not whole-game context-loss recovery or a performance fix.
+
+The private retained renderer rebuilt with the allocation fix also passes both
+native probes and matches all 599 shared game images in each browser. Fresh
+keyboard/simulated-standard-gamepad checks pass all 28 native checkpoints per
+browser with no application errors or warnings. The checks include reconnect,
+two controllers, analog inputs, API recovery and pause/resume. Physical pads are
+not tested. No new performance qualification is claimed for this correctness
+change; the hosted WebGPU release remains unchanged.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,
