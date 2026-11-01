@@ -160,7 +160,7 @@ const errors=[], warnings=[];
         title:document.title, hidden:document.hidden, isolated:crossOriginIsolated,
         nativeFrame:globalThis.Module?._ps2web_frames?.(),
         failed:!!globalThis.Module?.failed, paused:globalThis.Module?.paused,
-        audioState:typeof audio==='undefined'?null:audio.state,
+        audioState:typeof audio==='undefined'?null:(audio?.state??null),
         startText:document.getElementById('start')?.textContent,
         pauseText:document.getElementById('pause')?.textContent,
       }));
