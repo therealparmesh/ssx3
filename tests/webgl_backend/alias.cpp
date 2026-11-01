@@ -139,6 +139,20 @@ Result run(bool force) {
   check(glGetError() == GL_NO_ERROR, "Depth-alias GL error");
   return r;
 }
+void deferredErrorBoundary() {
+  Fixture gs;
+  gs.Initialize(); gs.Reset(); gs.DrainPendingCalls();
+  seed(gs, 2 << 20, 0x4000);
+  alias(gs, 2 << 20, false);
+  alias(gs, 2 << 20, false, 64, false, false);
+  check(gs.pendingRects() == 1, "Controlled error needs a pending alias batch");
+  check(glGetError() == GL_NO_ERROR, "Controlled error setup failed");
+  glEnable(0xffffffffu); // Deliberate error before a cached alias flush.
+  gs.finish();
+  check(glGetError() == GL_INVALID_ENUM, "Alias flush swallowed the frame-boundary error");
+  gs.close();
+  check(glGetError() == GL_NO_ERROR, "Controlled error cleanup failed");
+}
 int main() {
   try {
     EmscriptenWebGLContextAttributes a;
@@ -170,11 +184,12 @@ int main() {
           "Cached and forced validation pixels differ");
     check(cached.first == cached.reset, "Reset changed alias rendering");
     check(cached.blitPixels < control.blitPixels, "Mapped source bounds must reduce depth-copy area");
+    deferredErrorBoundary();
     std::printf("PASS: six depth-alias ownership cases, identical pixels, %u cached checks versus %u forced checks\n",cached.total,control.total);
     EM_ASM(
         {
           window.fixtureResult =
-              ({cases : 6, pixels : $0, cachedChecks : $1, controlChecks : $2, sameOwnerChecks : $3, cachedBlitPixels:$4,controlBlitPixels:$5, orderedBatches:$6, glError : 0});
+              ({deferredErrorCaught : true, cases : 6, pixels : $0, cachedChecks : $1, controlChecks : $2, sameOwnerChecks : $3, cachedBlitPixels:$4,controlBlitPixels:$5, orderedBatches:$6, glError : 0});
         },
         cached.first.size()+cached.switched.size()+cached.recreated.size()+cached.resized.size()+cached.reset.size()+cached.multi.size(), cached.total, control.total, cached.same,cached.blitPixels,control.blitPixels,cached.orderedBatches+control.orderedBatches);
     emscripten_webgl_destroy_context(context);

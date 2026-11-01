@@ -33,6 +33,7 @@ const puppeteer = require('puppeteer-core');
       await page.waitForFunction(() => window.fixtureResult, {timeout: 60000});
       const result = await page.evaluate(() => ({result: window.fixtureResult, log: document.getElementById('log').textContent}));
       if (route === 'alias') {
+        assert.equal(result.result.deferredErrorCaught, true);
         assert.equal(result.result.sameOwnerChecks, 2);
         assert(result.result.cachedChecks >= 8);
         assert.equal(result.result.controlChecks - result.result.cachedChecks, 128);

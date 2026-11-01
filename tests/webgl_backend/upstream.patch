@@ -1681,7 +1681,7 @@
 + for(const auto& f:m_framebuffers)if(f!=target&&f->m_basePtr==target->m_basePtr&&!f->m_gpuDirty.empty())m_memoryAliasUnresolved=true;
 + m_framebuffers.erase(std::remove_if(m_framebuffers.begin(),m_framebuffers.end(),[&](const FramebufferPtr& f){return f!=target&&f->m_basePtr==target->m_basePtr;}),m_framebuffers.end());
 + m_aliasRects.clear();m_renderState.isValid=false;m_validGlState=0;
-+ auto error=glGetError();if(error)throw std::runtime_error("Depth alias GL error "+std::to_string(error));
++ // The owner checks GL errors before display/export; avoid a synchronous query for every alias batch.
 +}
 --- /dev/null
 +++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL_Mip.inc

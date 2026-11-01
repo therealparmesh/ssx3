@@ -90,6 +90,9 @@ check attachment-validation reuse and reduced copied depth area. These work coun
 do not establish full-game speed. The runtime validates again when the source
 resource owner or immutable copy storage changes, copies mapped source bounds and
 scissors destination writes; reset clears the validation cache.
+Alias batches leave GL errors pending for the runtime display/export boundary,
+avoiding a synchronous query after each batch. An injected error before a cached
+alias flush must still be observable at that boundary.
 
 The separate runtime probe injects actual GL faults at dirty/clean export,
 snapshot, synchronous/asynchronous display and CPU-display fallback. A control
