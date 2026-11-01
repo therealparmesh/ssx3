@@ -99,6 +99,47 @@ gates failed. The specialization remains private and unselected. The retained
 bridge suite now exercises every maximum mip level from 0 through 6; both browsers
 pass its 3,360 exact comparisons with the preceding renderer.
 
+A further private binding-cache trial reserves texture units 3–14 for the
+ordered renderer. A negative control exposed an unsafe host handoff: native GS
+helpers can bind on the currently active unit. Leaving active unit zero at each
+handoff corrects the generated-mesh control in both browsers; explicit cache
+invalidation also survives deliberately poisoned bindings. The fixture reduces
+texture binds from 281 to 171 and sampler binds from 120 to 4 with identical
+pixels. Both browsers pass all ordered/mip cases, native probes and 599 shared
+game-image comparisons. Repeated Firefox windows average 45.85 versus 47.97
+images/s, previous specialization versus binding-cache candidate; Chromium
+averages 54.12 versus 55.75, with inconsistent individual windows. All performance
+windows retain frame-gap/audio failures. This trial remains private and unselected.
+
+Fresh native input checks on that prototype pass all 28 checkpoints in each
+browser, including all 16 mapped buttons, both sticks, trigger pressure, two
+controllers, disconnect/reconnect, API recovery, focus changes and cached-page
+event resume. There are no application errors or warnings. Standard gamepads are
+simulated through production polling and real native exports; physical hardware
+remains unqualified. The asset-free input/resume suite also passes 32 scenarios.
+
+The intermittent image investigation remains open. Two immediate synchronous
+reads of a failing image returned identical bytes; this does not certify the
+readback path. Four immutable-upload-copy runs matched, but a baseline failed,
+so those observations do not establish a fix. Native buffer-input fingerprints
+were added to a diagnostic run, but no failing image was captured with them.
+Separately, generated jittered meshes matched the opaque and general raster
+paths at three target sizes in both browsers, including Gouraud, linear texture
+and Q-based mip cases. None of these passing controls excludes other GPU state,
+command-order or native fallback causes.
+
+A separate Chromium CPU profile identified native VRAM transfers, register
+forwarding, browser GL calls and ordered rendering as material costs. A
+symbol-map link changes Wasm function indices, so names were resolved only
+against a separately profiled matching mapped binary. Profiled timing is excluded
+from qualification. A private vertex-reuse trial then passed 20,000 independent primitive-assembly
+comparisons, both native runtime probes and all 599 shared game images in each
+browser. Repeated gameplay windows averaged 58.51 versus 59.21 images/s in
+Chromium, baseline versus candidate, but 47.99 versus 47.68 in Firefox. All
+windows still failed frame-gap/audio gates. The trial was rejected and its
+runtime changes were removed; synthetic vertex reduction is not a demonstrated
+cross-browser gameplay improvement.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,

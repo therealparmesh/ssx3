@@ -38,7 +38,8 @@ fails before Play. Run with `SSX3_TEST_DENY_GAMEPAD=1` as a negative control;
 it must exit unsuccessfully with `Native browser Gamepad API access failed`.
 This prevents simulated inputs from hiding a browser permission failure.
 
-Each browser checks 27 checkpoints: independent keyboard stick/D-pad channels;
+Each browser checks 27 checkpoints in WebGPU mode and 28 in direct WebGL mode
+(the additional checkpoint exercises cached-page event resume): independent keyboard stick/D-pad channels;
 all sixteen standard controller buttons against fixed PS2 bit assignments;
 both sticks and analog trigger pressure; two-player input; disconnect,
 reconnect and reordered snapshots; temporary API denial and recovery; actual
