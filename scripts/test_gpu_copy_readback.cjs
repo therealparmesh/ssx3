@@ -15,14 +15,26 @@ let browser;
       headless: false, extraPrefsFirefox: { 'dom.webgpu.enabled': true } }
     : { browser: 'chrome', executablePath: process.env.CHROMIUM_EXECUTABLE || '/usr/bin/chromium',
       headless: false, args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan'] });
-  const results = [], modes = ['normal', 'staged', 'scale2'];
+  const results = [], modes = ['normal', 'staged', 'scale2', 'negative-constant'];
   if (process.env.SSX3_GPU_TEST_PROFILE === '1') modes.push('profile');
   for (const mode of modes) {
     const page = await browser.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.evaluateOnNewDocument(() => {
+    await page.evaluateOnNewDocument((constantFault) => {
       // Firefox also installs init scripts in the initial, insecure blank tab.
       if (typeof GPUAdapter === 'undefined') return;
+      window.qaConstantFaults = 0;
+      if (constantFault) {
+        const createShaderModule = GPUDevice.prototype.createShaderModule;
+        GPUDevice.prototype.createShaderModule = function(descriptor) {
+          const fixed = 'return select(value, a, (a == b) & (a == c));';
+          if (descriptor.code.includes(fixed)) {
+            descriptor = {...descriptor, code: descriptor.code.replace(fixed, 'return value;')};
+            ++qaConstantFaults;
+          }
+          return createShaderModule.call(this, descriptor);
+        };
+      }
       window.qaGpu = { encoders: 0, commandBuffers: 0, submissions: 0, computePasses: 0, copies: 0 };
       const request = GPUAdapter.prototype.requestDevice;
       GPUAdapter.prototype.requestDevice = async function () {
@@ -41,13 +53,13 @@ let browser;
         const original = prototype[key];
         prototype[key] = function () { ++qaGpu[field]; return original.apply(this, arguments); };
       }
-    });
+    }, mode === 'negative-constant');
     const url = new URL(base);
     url.search = mode === 'staged' ? '?staged' : mode === 'scale2' ? '?scale=2' : mode === 'profile' ? '?profile' : '';
     await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForFunction(() => qaProbe.result || qaProbe.errors.length, { timeout: 60000 });
     const result = await page.evaluate(async () => ({ native: qaProbe.result, errors: qaProbe.errors,
-      messages: qaProbe.messages, gpu: qaGpu, validation: await qaDevice.popErrorScope(),
+      messages: qaProbe.messages, gpu: qaGpu, constantFaults: qaConstantFaults, validation: await qaDevice.popErrorScope(),
       uploads: Module.uploadBuffers?.stats,
       profileBytes: FS.analyzePath('/profile.txt').exists ? FS.readFile('/profile.txt').length : 0,
       futures: Object.keys(WebGPU.Internals.futures).length }));
@@ -55,6 +67,16 @@ let browser;
     results.push(result);
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
     assert.equal(result.validation, null);
+    if (mode === 'negative-constant') {
+      assert.equal(result.constantFaults, 1, 'Inject the legacy interpolation into the real shader');
+      assert.equal(result.native, null);
+      assert(result.errors.some(text => text.includes('PROBE_FAIL: GS fade and modulation pixels')),
+        'Detect wrong color pixels with valid GPU operations');
+      await page.evaluate(() => { Module.onHalt = () => {}; Module.uploadBuffers?.dispose(); qaDevice.destroy(); });
+      await page.close();
+      console.log('PASS negative-constant: legacy shader rejected');
+      continue;
+    }
     assert.deepEqual(result.errors, []);
     assert.deepEqual(errors, []);
     assert.equal(result.native?.passed, true);
@@ -63,6 +85,7 @@ let browser;
     assert.equal(result.native.synchronous, true);
     assert.equal(result.native.modulationCases, 4);
     assert.equal(result.native.fadeCases, 3);
+    assert.equal(result.native.constantAlphaCases, 1);
     assert.equal(result.native.combinedFadeTint, true);
     assert(result.native.nonzeroSourceOffset >= 8192);
     if (mode === 'staged') assert(result.uploads.staged > 0, 'Exercise actual mapped staging');

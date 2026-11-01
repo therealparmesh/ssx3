@@ -934,6 +934,11 @@ fn vertex_attr(p: u32, n: u32) -> vec4<f32> {
     return vec4<f32>(f32(c & 0xFFu), f32((c >> 8u) & 0xFFu), f32((c >> 16u) & 0xFFu), f32(c >> 24u));
 }
 
+// Restore equal channels after interpolation, before integer color conversion.
+fn constant_color(a: vec4<f32>, b: vec4<f32>, c: vec4<f32>, value: vec4<f32>) -> vec4<f32> {
+    return select(value, a, (a == b) & (a == c));
+}
+
 fn vertex_tex(p: u32, n: u32) -> vec4<f32> {
     return vec4<f32>(fat(p + 15u + n * 3u), fat(p + 16u + n * 3u), fat(p + 17u + n * 3u), f32((data[p + 11u] >> (n * 8u)) & 0xFFu));
 }
@@ -971,7 +976,10 @@ fn shade_at(p: u32, s: Setup, x: i32, y: i32, k: u32, px: f32, py: f32) {
                 return;
             }
             let w2 = 1.0 - w0 - w1;
-            let c = vertex_attr(p, 0u) * w0 + vertex_attr(p, 1u) * w1 + vertex_attr(p, 2u) * w2;
+            let a = vertex_attr(p, 0u);
+            let b = vertex_attr(p, 1u);
+            let last = vertex_attr(p, 2u);
+            let c = constant_color(a, b, last, a * w0 + b * w1 + last * w2);
             let t = vertex_tex(p, 0u) * w0 + vertex_tex(p, 1u) * w1 + vertex_tex(p, 2u) * w2;
             at = Attr(c.x, c.y, c.z, c.w, t.x, t.y, t.z, t.w, z_at(p, fat(p + 25u) * w1 + fat(p + 26u) * w2));
         }
@@ -1056,7 +1064,9 @@ fn shade_at(p: u32, s: Setup, x: i32, y: i32, k: u32, px: f32, py: f32) {
             if (steps != 0) {
                 t = f32(hit) / f32(steps);
             }
-            let c = vertex_attr(p, 0u) * (1.0 - t) + vertex_attr(p, 1u) * t;
+            let a = vertex_attr(p, 0u);
+            let b = vertex_attr(p, 1u);
+            let c = constant_color(a, b, b, a * (1.0 - t) + b * t);
             let tex = vertex_tex(p, 0u) * (1.0 - t) + vertex_tex(p, 1u) * t;
             at = Attr(c.x, c.y, c.z, c.w, tex.x, tex.y, tex.z, tex.w, z_at(p, fat(p + 25u) * t));
         }

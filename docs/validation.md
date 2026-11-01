@@ -1,5 +1,21 @@
 # Validation scope
 
+## Constant color interpolation regression (2026-11-01)
+
+Equal vertex color components now retain their exact value before integer
+conversion in the software rasterizer and WebGPU shader. Previously, floating
+point barycentric weights could turn constant alpha 128 into 127 and dim pixels
+in an otherwise identity blend. Varying components retain their previous math.
+
+The standalone Wasm regression passes 40 triangle/line, winding, clipping and
+constant-component cases; its legacy-raster negative control fails. The actual
+WebGPU readback fixture passes Chromium 156 and Firefox 158 in normal, staged
+and scale-2 modes with no GPU validation errors. Restoring the old interpolation
+in the real shader makes the independent expected-color check fail in both
+browsers. These asset-free checks establish this correction, not a new gameplay
+performance qualification or a hosted deployment.
+
+
 See [current release status](release-status.md) for the latest deployed candidate, corrected-environment desktop checks and outstanding production qualification. Sections below preserve historical outcomes; a later passing window does not erase an earlier failure.
 
 ## Optional GPU completion observations

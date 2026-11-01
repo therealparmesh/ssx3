@@ -67,6 +67,27 @@ void expect_color(std::uint32_t rgb, std::uint32_t scale) {
     check(output.size() == static_cast<std::size_t>(width) * height, "Color fixture pixel count");
     for (auto value : output) check((value & 0xFFFFFFu) == rgb, "GS fade and modulation pixels");
 }
+void check_constant_alpha(std::uint32_t scale) {
+    fill_color(0x802814c8u);
+    ps2::gs::State state{};
+    state.prim = 3u | 8u | 64u;
+    state.prmodecont = state.colclamp = 1;
+    auto &context = state.ctx[0];
+    context.frame = (1ull << 16) | (0xff000000ull << 32);
+    context.zbuf = 1ull << 32;
+    context.scissor = (31ull << 16) | (15ull << 48);
+    context.alpha = 0x81; // Black at alpha 128 leaves destination RGB unchanged.
+    ps2::gs::Vertex vertices[3]{};
+    const float xy[3][2] = {{1.125f, 1.0625f}, {30.875f, 3.1875f}, {6.4375f, 15.3125f}};
+    for (unsigned i = 0; i < 3; ++i) {
+        vertices[i].x = unsigned(xy[i][0] * 16);
+        vertices[i].y = unsigned(xy[i][1] * 16);
+        vertices[i].a = 128;
+        vertices[i].q = 1;
+    }
+    ps2::gs::gpu::draw(state, vertices, 3);
+    expect_color(0x2814c8u, scale);
+}
 void check_fade_and_modulation(std::uint32_t scale) {
     // Fixed expected colors, independent of the renderer's shader helpers.
     const std::uint32_t cases[][3] = {
@@ -378,8 +399,9 @@ int main() {
 #ifdef PS2_GPU_WEBGL
     if (EM_ASM_INT({return !!Module.webglDirectSurface;})) verify_direct_surface();
 #endif
+    check_constant_alpha(scale);
     check_fade_and_modulation(scale);
     ps2::gs::gpu::wait_idle();
-    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,combinedFadeTint:true});},received,pixels,hash,scale,offset);
+    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,combinedFadeTint:true});},received,pixels,hash,scale,offset);
     return 0;
 }
