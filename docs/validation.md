@@ -1117,3 +1117,20 @@ Negative controls reject serializing the live atomic object and narrowing the
 saved field. Run it with `python3 scripts/test_frame_counter.py --cxx clang++`
 or through the native CTest suite. It does not replace full-machine saved-state
 or browser timing validation.
+
+## CPU raster flat attributes and constant depth
+
+Slanted triangles exposed rounding in the software raster model: interpolating
+identical copies of a flat color could lower a channel by one, and float
+barycentric weights promoted to double could lower an equal vertex depth.
+Flat lines and triangles now take color directly from their final vertex;
+equal vertex depths are preserved exactly. Varying Gouraud attributes and
+varying-depth interpolation retain their existing calculations.
+
+An asset-free native/Wasm regression checks 24 line/triangle cases with reversed
+ordering, clipping, distinct endpoint colors, and independent flat-color and
+masked-color constant-depth observations. The preceding implementation fails
+flat color; retaining the preceding depth expression alone fails constant depth.
+The test checks known constants rather than matching another rasterizer. This
+corrects the software model and reference checks; it does not establish a game
+performance improvement or change the hosted WebGPU release.
