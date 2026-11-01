@@ -181,6 +181,16 @@ observed when copying the image, not its source identifier: two queued images ca
 be copied at the same counter value. Window edges may therefore cover different
 prepared-image sequences; retain those bounds when comparing records.
 
+Set `SSX3_TEST_REFERENCE=/path/to/prior/result.json` in oracle mode to compare
+shared image sequences automatically. `SSX3_TEST_MIN_SHARED_IMAGES` sets the
+required overlap (default 1); use an explicit expected count for a gate, such as
+599 for the documented 600-field window. Every shared image must match both its
+dimensions and SHA-256. The tool writes coverage and mismatches to `result.json`
+and saves each differing image as `image-<sequence>-mismatch.rgba` before exiting
+with failure. Those files contain tightly packed RGBA bytes at the dimensions
+recorded in the result. Missing overlap also fails. References and raw images
+remain private inputs and outputs; do not commit them.
+
 Hashing perturbs timing; oracle runs are not performance evidence. Matching
 sampled hashes establish only those observations, not full-game determinism or
 fidelity. Keep results, snapshots and game assets outside Git.

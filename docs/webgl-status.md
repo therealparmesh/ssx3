@@ -36,6 +36,40 @@ in the fixed window. That instrumentation substantially reduced frame rate and
 is excluded from performance qualification; it directs the next investigation
 toward upload and submission costs.
 
+A focused upload probe observed 68,181 full indexed-image uploads in the same
+600-field window; 68,177 repeated bytes seen earlier. Its byte comparisons
+substantially reduced frame rate, so it supplies reuse evidence only. A private
+opaque vertex-buffer prototype passed the runtime, ordered/mip and shared-image
+checks, but gave no material performance improvement and was rejected.
+
+A bounded immutable indexed-texture cache was then tested privately. Its exact
+byte comparison prevents hash collisions from substituting image data, and
+shared handles preserve old images across updates and eviction. Both browsers
+passed 20 asset-free cases covering deswizzling, address and stride changes,
+copy-on-write, a constructed collision, small/zero-stride images, eviction and
+reset cleanup. The full-hash version matched all 599 shared game images per
+browser, but repeated windows averaged only 58.21 versus 58.82 images/s in
+Chromium and 45.19 versus 45.69 in Firefox, baseline versus candidate.
+
+A sparse-hash revision retained full byte comparisons and reached 59.21 in
+Chromium and 47.99 in Firefox in separate single diagnostic windows. Maximum
+intervals were 34.13 and 57.84 ms, and audio underruns remained. Both native
+runtime probes passed. Chromium matched all shared images, but the first Firefox
+oracle differed at image sequence 471. A subsequent candidate capture and a
+baseline control matched every shared reference image. The failure is retained;
+its cause is unresolved, and the timing is not qualification. The cache remains
+private and unselected. Both browsers also passed 28 native input/resume checkpoints on this final
+private candidate, using simulated standard pads, including disconnect, reconnect,
+multiple controllers, API recovery and cached-page resume. These observations do
+not resolve the failed image check.
+
+The fixed-state oracle now optionally compares a supplied reference, enforces a
+caller-selected minimum overlap, and preserves raw differing pixels plus the
+result before rejecting a mismatch. It does not filter isolated failures. This
+allows the next intermittent discrepancy to be inspected on its first occurrence
+instead of depending on a later reproduction. Game data and captures remain
+outside the repository.
+
 ## Cached-page lifecycle and native stack switching
 
 The direct presenter previously disposed its GL resources on every `pagehide`,
