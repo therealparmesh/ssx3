@@ -20,7 +20,7 @@ function deferred() {
 function fixture() {
   const contexts = [], outputs = [], urls = new Set(), revocations = [], mainCalls = [], warnings = [];
   const elements = new Map(), documentEvents = new Map();
-  const faults = {};
+  const faults = {}, wakeChanges = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, { hidden: id === 'pause', disabled: false, open: false,
       textContent: id === 'start' ? 'Play SSX 3' : '', listeners: new Map(),
@@ -47,7 +47,7 @@ function fixture() {
   };
   const document = { hidden: false, getElementById: element,
     addEventListener(type, fn) { documentEvents.set(type, fn); } };
-  const context = vm.createContext({ Module, document,
+  const context = vm.createContext({playerWakeLock: {setActive(value) {wakeChanges.push(value);}}, Module, document,
     AudioContext: Context, AudioWorkletNode: class {
       constructor(audio) { if (faults.node) throw Error('Worklet node unavailable'); this.audio = audio; outputs.push(this); }
       connect() { if (faults.connect) throw Error('Output unavailable'); this.connected = true; }
@@ -60,7 +60,7 @@ function fixture() {
     fitCanvas() {}, note() {}, console: { warn: (...args) => warnings.push(args) },
   });
   vm.runInContext(audioSource + stopSource + playSource, context);
-  return { Module, context, contexts, outputs, urls, revocations, mainCalls, faults, warnings, element,
+  return { Module, context, contexts, outputs, urls, revocations, mainCalls, faults, warnings, wakeChanges, element,
     begin() { return element('start').listeners.get('click')(); },
     hide(hidden = true) { document.hidden = hidden; documentEvents.get('visibilitychange')(); },
     fail() { vm.runInContext("failPlayer('Failure while starting')", context); },
@@ -80,6 +80,7 @@ function fixture() {
     const f = fixture(), task = f.begin();
     assert.equal(f.mainCalls.length, 0); await f.complete(task);
     assert.equal(f.mainCalls.length, 1); assert.equal(f.Module.running, true);
+    assert.equal(f.wakeChanges.at(-1), true);
     assert.equal(f.outputs.length, 1); assert.equal(f.outputs[0].connected, true);
     assert.equal(f.urls.size, 0); ++scenarios;
   }

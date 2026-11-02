@@ -409,8 +409,48 @@ function stopCompiler() {
   if (compilerWorker) compilerWorker.terminate();
   compilerWorker = null;
 }
+// Screen wake-lock lifecycle. Controller input may not reset OS idle timers.
+function createScreenWakeLock(scope) {
+  let active = false, held = null, pending = 0, generation = 0;
+  const release = lock => {
+    try { Promise.resolve(lock?.release()).catch(() => {}); } catch (_) {}
+  };
+  const update = () => {
+    if (!active || scope.document.visibilityState !== 'visible') {
+      ++generation; pending = 0;
+      const lock = held; held = null; if (lock) release(lock);
+      return;
+    }
+    if (held && !held.released || pending) return;
+    let token;
+    try {
+      const api = scope.navigator?.wakeLock;
+      if (typeof api?.request !== 'function') return;
+      token = ++generation; pending = token;
+      Promise.resolve(api.request('screen')).then(lock => {
+        if (pending === token) pending = 0;
+        if (token !== generation || !active || scope.document.visibilityState !== 'visible') {
+          release(lock); return;
+        }
+        if (!lock || typeof lock.release !== 'function') return;
+        held = lock;
+        lock.addEventListener?.('release', () => { if (held === lock) held = null; }, { once: true });
+      }, () => { if (pending === token) pending = 0; });
+    } catch (_) { if (pending === token) pending = 0; }
+  };
+  scope.document.addEventListener('visibilitychange', update);
+  const controller = { setActive(value) { active = !!value; update(); }, get held() { return !!held && !held.released; } };
+  scope.addEventListener('pagehide', () => controller.setActive(false));
+  return controller;
+}
+// End screen wake-lock lifecycle.
+const playerWakeLock = createScreenWakeLock(window);
+window.addEventListener('pageshow', () => {
+  playerWakeLock.setActive(!!Module?.running && !Module.paused && !Module.failed && !document.hidden);
+});
 let stopForReload = null;
 function stopPlayerForReload() {
+  playerWakeLock.setActive(false);
   cancelStartup();
   cancelResume();
   if (stopForReload) return stopForReload;
@@ -452,6 +492,7 @@ function stopPlayerForReload() {
   return stopForReload;
 }
 function failPlayer(message, error) {
+  playerWakeLock.setActive(false);
   // Deliberate terminal teardown can reject suspended Wasm work after its
   // thread state is cleared. It must not revive the old failure UI.
   if (Module.failed || Module.stoppedForReload) return;
@@ -783,6 +824,7 @@ function cancelStartup() {
   document.getElementById('start').disabled = false;
 }
 function pausePlayer() {
+  playerWakeLock.setActive(false);
   cancelStartup();
   // A hidden tab can interrupt audio recovery while the game is still paused.
   // Invalidate that request even when there is no new native pause to send.
@@ -1439,6 +1481,7 @@ document.getElementById('start').addEventListener('click', async () => {
     document.getElementById('pause').hidden = false;
     statusEl.textContent = 'SSX 3';
     canvas.focus();
+    playerWakeLock.setActive(true);
     return;
   }
   if (Module.discUnavailable) {
@@ -1472,6 +1515,7 @@ document.getElementById('start').addEventListener('click', async () => {
   statusEl.textContent = 'Preparing game…';
   Module.preparing = true;
   Module.running = true;
+  playerWakeLock.setActive(true);
   try {
     const main = Module.callMain(Module.arguments);
     if (main && main.catch) main.catch((error) => failPlayer('The player could not continue. Export your memory card, then reload.', error));
