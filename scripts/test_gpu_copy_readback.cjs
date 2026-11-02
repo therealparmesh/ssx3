@@ -15,7 +15,7 @@ let browser;
       headless: false, extraPrefsFirefox: { 'dom.webgpu.enabled': true } }
     : { browser: 'chrome', executablePath: process.env.CHROMIUM_EXECUTABLE || '/usr/bin/chromium',
       headless: false, args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan'] });
-  const results = [], modes = ['normal', 'staged', 'scale2', 'negative-constant', 'negative-varying', 'read-failure'];
+  const results = [], modes = ['normal', 'staged', 'scale2', 'negative-constant', 'negative-varying', 'negative-setup', 'read-failure'];
   if (process.env.SSX3_GPU_TEST_PROFILE === '1') modes.push('profile');
   for (const mode of modes) {
     const page = await browser.newPage(), errors = [];
@@ -37,10 +37,14 @@ let browser;
       if (fault?.startsWith('negative-')) {
         const createShaderModule = GPUDevice.prototype.createShaderModule;
         GPUDevice.prototype.createShaderModule = function(descriptor) {
-          const fixed = 'return select(value, a, (a == b) & (a == c));';
+          const fixed = fault === 'negative-setup'
+            ? 'if (si != last_setup) {'
+            : 'return select(value, a, (a == b) & (a == c));';
+          const broken = fault === 'negative-setup'
+            ? 'if (si != last_setup && data[setups + si * SETUP_WORDS + 4u] != 0x00ff00ffu) {'
+            : fault === 'negative-varying' ? 'return a;' : 'return value;';
           if (descriptor.code.includes(fixed)) {
-            descriptor = {...descriptor, code: descriptor.code.replace(fixed,
-              fault === 'negative-varying' ? 'return a;' : 'return value;')};
+            descriptor = {...descriptor, code: descriptor.code.replace(fixed, broken)};
             ++qaConstantFaults;
           }
           return createShaderModule.call(this, descriptor);
@@ -79,13 +83,13 @@ let browser;
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
     assert.equal(result.validation, null);
     if (mode.startsWith('negative-')) {
-      assert.equal(result.constantFaults, 1, 'Inject the legacy interpolation into the real shader');
+      assert.equal(result.constantFaults, 1, 'Inject the selected fault into the real shader');
       assert.equal(result.native, null);
-      assert(result.errors.some(text => text.includes(mode === 'negative-varying' ? 'PROBE_FAIL: Varying red and constant green/blue remain exact' : 'PROBE_FAIL: GS fade and modulation pixels')),
+      assert(result.errors.some(text => text.includes(mode === 'negative-setup' ? 'PROBE_FAIL: Disjoint triangle setups and untouched pixels remain exact' : mode === 'negative-varying' ? 'PROBE_FAIL: Varying red and constant green/blue remain exact' : 'PROBE_FAIL: GS fade and modulation pixels')),
         'Detect wrong color pixels with valid GPU operations');
       await page.evaluate(() => { Module.onHalt = () => {}; Module.uploadBuffers?.dispose(); qaDevice.destroy(); });
       await page.close();
-      console.log('PASS', mode, 'incorrect interpolation rejected');
+      console.log('PASS', mode, 'incorrect shader behavior rejected');
       continue;
     }
     assert.deepEqual(result.errors, []);
@@ -98,6 +102,7 @@ let browser;
     assert.equal(result.native.fadeCases, 3);
     assert.equal(result.native.constantAlphaCases, 1);
     assert.equal(result.native.varyingColorCases, 3);
+    assert.equal(result.native.disjointSetupSamples, 6);
     assert.equal(result.native.combinedFadeTint, true);
     assert.equal(result.native.failedReadbackCases, mode === 'read-failure' ? 2 : 0);
     assert.equal(result.expectedReadFailures, mode === 'read-failure' ? 2 : 0);

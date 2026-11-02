@@ -113,6 +113,39 @@ void check_varying_color(std::uint32_t scale) {
         check((output[sample[1] * scale * width + sample[0] * scale] & 0xffffffu) ==
                   (0x808000u | sample[2]), "Varying red and constant green/blue remain exact");
 }
+void check_disjoint_setups(std::uint32_t scale) {
+    fill_color(0x80123456u);
+    ps2::gs::State state{};
+    state.prim = 3u | 8u;
+    state.prmodecont = state.colclamp = 1;
+    state.ctx[0].zbuf = 1ull << 32;
+    state.ctx[0].scissor = (31ull << 16) | (15ull << 48);
+    const unsigned origins[3][2] = {{1, 1}, {9, 1}, {1, 1}};
+    const unsigned masks[3] = {0x00ffff00u, 0x00ff00ffu, 0x00ff00ffu};
+    for (unsigned n = 0; n < 3; ++n) {
+        state.ctx[0].frame = (1ull << 16) | (static_cast<std::uint64_t>(masks[n]) << 32);
+        ++ps2::gs::g_setup_generation;
+        ps2::gs::Vertex vertices[3]{};
+        for (auto &v : vertices) { v.r = v.g = v.b = 255; v.a = 128; v.q = 1; }
+        vertices[0].x = vertices[2].x = origins[n][0] * 16;
+        vertices[0].y = vertices[1].y = origins[n][1] * 16;
+        vertices[1].x = (origins[n][0] + 5) * 16;
+        vertices[2].y = (origins[n][1] + 5) * 16;
+        ps2::gs::gpu::draw(state, vertices, 3);
+    }
+    std::vector<std::uint32_t> output;
+    std::uint32_t width = 0, height = 0;
+    check(ps2::gs::gpu::display(color_source, output, width, height), "Disjoint setup readback");
+    check(width == 32 * scale && height == 16 * scale, "Disjoint setup dimensions");
+    // All triangles share a tile. The missed middle triangle introduces the
+    // green mask reused by the last triangle. Skipping it must preserve the
+    // pixel's cached setup identity until the visible triangle loads that mask.
+    const unsigned samples[][3] = {{2, 2, 0x12ffffu}, {10, 2, 0x12ff56u}, {2, 10, 0x123456u},
+                                   {5, 5, 0x123456u}, {13, 5, 0x123456u}, {5, 13, 0x123456u}};
+    for (const auto &sample : samples)
+        check((output[sample[1] * scale * width + sample[0] * scale] & 0xffffffu) == sample[2],
+              "Disjoint triangle setups and untouched pixels remain exact");
+}
 void check_fade_and_modulation(std::uint32_t scale) {
     // Fixed expected colors, independent of the renderer's shader helpers.
     const std::uint32_t cases[][3] = {
@@ -204,7 +237,8 @@ int main() {
     check_constant_alpha(scale);
     check_varying_color(scale);
     check_fade_and_modulation(scale);
+    check_disjoint_setups(scale);
     ps2::gs::gpu::wait_idle();
-    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,failedReadbackCases:$5,combinedFadeTint:true});},received,pixels,hash,scale,offset,failed_readback_cases);
+    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,failedReadbackCases:$5,disjointSetupSamples:6,combinedFadeTint:true});},received,pixels,hash,scale,offset,failed_readback_cases);
     return 0;
 }
