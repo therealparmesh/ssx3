@@ -1,14 +1,87 @@
 # Release status
 
-Current source is not yet signed off for a new production release. The latest
-60 Hz desktop race checks still include late image submissions and missing PCM,
-including on unchanged control builds. The historical version 70 qualifications
-below apply to their recorded configurations. New private experiments do not
-replace the hosted runtime or remove those current failures.
+The November 2 runtime at `ec0a2ba` passed fresh five-minute desktop WebGPU
+race/results checks in Chrome 156 and Firefox 158 at 60 Hz. The exact native
+build and scope are recorded below. Saved version 71 is live on the owner-private
+site with that exact runtime; historical failures below retain their original
+results and configurations.
 
-The `webgpu-v70` desktop release checkpoint is described in
-[the release notes](webgpu-v70.md). Subsequent WebGL work is separate; this
-checkpoint does not alter the qualified hosted WebGPU runtime.
+## November 2 split-renderer scheduling correction
+
+The owner-private deployment succeeded on November 2 at
+<https://ssx3-browser-parmesh-2026.parmesh.chatgpt.site>.
+Its Site source commit is `c09f34b0023a7254c4c0cac39bcad5cad1e3a4a8` and
+immutable desktop release is
+`b1200f73ad86d34ebc396d4e94a330d6f2b9f97d2b178691bf3c606ccdf353c9`.
+All 20 raw/gzip objects were hash verified. Post-publication checks confirm the
+selected desktop release, cross-origin isolation, disc byte ranges, readiness
+of all 33 release/disc objects, and denied anonymous access (HTTP 403). Access
+remains one owner and zero external visitors; the previous desktop build is
+retained as the readiness fallback. The primary/compatibility builds are unchanged.
+
+Separate five-minute checks of the actual published root also passed:
+
+| Browser | Fresh submissions/s | Longest successful GPU submission interval | Missing PCM | Displayed images lost/replaced | Source-clock interval |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Chrome 156 | 60.002422 | 20.960 ms | 0 | 0 | +5.55 to +10.45 ms |
+| Firefox 158 | 60.000019 | 18.480 ms | 0 | 0 | −3.79 to +1.12 ms |
+
+Both entered through ordinary menus and a QA card, continued through Snow Jam
+race/results, retained stable heaps and valid slot ownership, and produced zero
+application errors/warnings. The real browser Gamepad API was accessible on the
+private HTTPS page in both browsers. These runs used origin-scoped private-auth
+request interception and the same image/audio measurement observers, with no
+native profiling or concurrent GPU tests/builds. Firefox produced 15 known
+hosting-provider cookie-domain notices, retained separately from application
+diagnostics. The 60 Hz / 1280×800 DPR 1 / explicitly enabled WebGPU desktop scope
+below also applies here. Evidence is retained privately in
+`qa/production-recovery-2026-11-01/live-source-task-yield-qualification.json`.
+
+Staged private-HTTPS one-minute gameplay checks passed in both browsers:
+Chrome 60.002764 fps / 18.500 ms maximum submission interval, Firefox 59.999593
+fps / 18.140 ms. Both had zero missing PCM or displayed-image loss and passed
+the unchanged source-clock and ownership checks. The first Chrome startup
+window reached course loading/briefing over HTTPS and failed stable-heap
+qualification while allocating the course. It is retained as a failed startup
+window, and was not counted as gameplay. Subsequent runs visually confirm
+race entry before measurement.
+
+Native work slices previously registered and cancelled a redundant animation
+callback even when the split renderer already had an independent presenter.
+The split renderer now waits on its scheduled task without that extra refresh
+callback. Standalone and buffered-surface scheduling retain their existing
+refresh fallback, and rejected task requests retain message-channel recovery.
+The native runtime, game translation, graphics rules, and frame/audio gates are
+otherwise unchanged by this correction.
+
+The source is `ec0a2ba02bf26909cbef71e010a56a0776e2338b`. Its fresh Wasm SHA-256 is
+`92f54f9afd4cb2f4fb71b6ccadd0eda9f87f27f3794e5de6a2431d3778c02bb1`.
+Native and Wasm CI passed. Each browser matched 600 successive prepared images
+against the retained reference and passed 27 keyboard/standard-gamepad checks,
+including multiple pads, disconnection, unavailable API recovery, focus changes,
+and pause/resume. Controller snapshots were simulated through production polling
+and native exports after checking the real browser Gamepad API.
+
+Both five-minute performance runs used ordinary card/menu startup into Snow Jam
+and continued through race/results, with no machine snapshot or profiling.
+
+| Browser | Fresh submissions/s | Longest successful GPU submission interval | Missing PCM | Displayed images lost/replaced | Source-clock check |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Chrome 156 | 60.002363 | 22.145 ms | 0 | 0 | Pass |
+| Firefox 158 | 60.000063 | 18.300 ms | 0 | 0 | Pass |
+
+Both retained a stable heap, valid image-slot ownership, and zero application
+errors/warnings. The source audio/video clock interval remained entirely within
+the existing 50 ms limit. Evidence is retained privately under
+`qa/production-recovery-2026-11-01/source-worker-task-yield-qualification.json`.
+These results apply to the recorded Linux desktop at 1280×800 CSS pixels, DPR 1,
+with a 60 Hz display and WebGPU explicitly enabled. They do not certify physical
+controllers, physical audio/display delivery, other hardware, or complete game
+progression. Physical phone testing is outside the requested release scope.
+
+The preceding `webgpu-v70` desktop checkpoint is described in
+[its release notes](webgpu-v70.md). The version 71 correction above updates the
+desktop WebGPU runtime. WebGL work remains separate.
 
 The release target is now the WebGPU player with keyboard and standard browser
 gamepad support. The owner explicitly selected one graphics backend and removed
@@ -22,8 +95,8 @@ it did not replace the hosted release. WebGL remains experimental in a separate 
 production fallback. Its rendering/performance failures are not regressions of
 the WebGPU release.
 
-As of 2026-10-31, saved version 70 is running on the owner-private hosted site
-with aligned audio pacing and full three-image startup/resume priming. The
+The October 31 version 70 checkpoint used aligned audio pacing and full
+three-image startup/resume priming on the owner-private hosted site. The
 selected correction and its staged Firefox/Chromium qualification are recorded
 below. Post-publication checks verify the selected live release, exact asset
 bytes and isolation headers. New hosted five-minute Gravitude race/results
