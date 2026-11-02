@@ -388,29 +388,32 @@ void triangle(const Setup &s, const Vertex *v) {
     const float x0 = (static_cast<float>(v[0].x) - static_cast<float>(s.ofx)) / 16.0f, y0 = (static_cast<float>(v[0].y) - static_cast<float>(s.ofy)) / 16.0f;
     const float x1 = (static_cast<float>(v[1].x) - static_cast<float>(s.ofx)) / 16.0f, y1 = (static_cast<float>(v[1].y) - static_cast<float>(s.ofy)) / 16.0f;
     const float x2 = (static_cast<float>(v[2].x) - static_cast<float>(s.ofx)) / 16.0f, y2 = (static_cast<float>(v[2].y) - static_cast<float>(s.ofy)) / 16.0f;
-    const float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-    if (area == 0.0f) return;
+    const std::int64_t ax = std::int64_t(v[0].x) - s.ofx, ay = std::int64_t(v[0].y) - s.ofy;
+    const std::int64_t bx = std::int64_t(v[1].x) - s.ofx, by = std::int64_t(v[1].y) - s.ofy;
+    const std::int64_t cx = std::int64_t(v[2].x) - s.ofx, cy = std::int64_t(v[2].y) - s.ofy;
+    const std::int64_t area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+    if (area == 0) return;
     Attr a0 = attr_of(s, v[0]), a1 = attr_of(s, v[1]), a2 = attr_of(s, v[2]);
     const int minx = std::max(s.scax0, static_cast<int>(std::ceil(std::min({x0, x1, x2}))));
     const int maxx = std::min(s.scax1, static_cast<int>(std::ceil(std::max({x0, x1, x2}))) - 1);
     const int miny = std::max(s.scay0, static_cast<int>(std::ceil(std::min({y0, y1, y2}))));
     const int maxy = std::min(s.scay1, static_cast<int>(std::ceil(std::max({y0, y1, y2}))) - 1);
     if (minx > maxx || miny > maxy) return;
-    const float inv = 1.0f / area;
-    const float sg = area > 0.0f ? 1.0f : -1.0f;
-    const auto edge_in = [](float e, float gx, float gy) { return e > 0.0f || (e == 0.0f && (gx > 0.0f || (gx == 0.0f && gy > 0.0f))); };
+    const float inv = 1.0f / float(area);
+    const std::int64_t sg = area > 0 ? 1 : -1;
+    const auto edge_in = [](std::int64_t e, std::int64_t gx, std::int64_t gy) { return e > 0 || (e == 0 && (gx > 0 || (gx == 0 && gy > 0))); };
     for (int y = miny; y <= maxy; ++y) {
-        const float py = static_cast<float>(y);
+        const std::int64_t py = std::int64_t(y) * 16;
         for (int x = minx; x <= maxx; ++x) {
-            const float px = static_cast<float>(x);
-            const float e0 = (x1 - px) * (y2 - py) - (x2 - px) * (y1 - py);
-            const float e1 = (x2 - px) * (y0 - py) - (x0 - px) * (y2 - py);
-            const float e2 = (x0 - px) * (y1 - py) - (x1 - px) * (y0 - py);
-            if (!edge_in(e0 * sg, (y1 - y2) * sg, (x2 - x1) * sg) || !edge_in(e1 * sg, (y2 - y0) * sg, (x0 - x2) * sg) ||
-                !edge_in(e2 * sg, (y0 - y1) * sg, (x1 - x0) * sg))
+            const std::int64_t px = std::int64_t(x) * 16;
+            const std::int64_t e0 = (bx - px) * (cy - py) - (cx - px) * (by - py);
+            const std::int64_t e1 = (cx - px) * (ay - py) - (ax - px) * (cy - py);
+            const std::int64_t e2 = (ax - px) * (by - py) - (bx - px) * (ay - py);
+            if (!edge_in(e0 * sg, (by - cy) * sg, (cx - bx) * sg) || !edge_in(e1 * sg, (cy - ay) * sg, (ax - cx) * sg) ||
+                !edge_in(e2 * sg, (ay - by) * sg, (bx - ax) * sg))
                 continue;
-            const float w0 = e0 * inv;
-            const float w1 = e1 * inv;
+            const float w0 = float(e0) * inv;
+            const float w1 = float(e1) * inv;
             const float w2 = 1.0f - w0 - w1;
             plot(s, x, y, lerp3(a0, a1, a2, w0, w1, w2, s.iip));
         }

@@ -41,7 +41,10 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
 precision highp float;precision highp int;
 uniform highp usampler2D vertices;uniform vec2 targetSize;
 flat out uint primitiveIndex;
-void main(){uint at=uint(gl_VertexID)*2u;uvec4 v=texelFetch(vertices,ivec2(int(at%1024u),int(at/1024u)),0);vec2 p=uintBitsToFloat(v.xy);primitiveIndex=uint(gl_VertexID)/3u;gl_Position=vec4((p+vec2(0.5))/targetSize*2.0-1.0,0,1);}`;
+// Cover the clipped GS bounding rectangle; triangleWeights applies exact
+// GS edges. Hardware triangle quantization can miss covered offscreen edges.
+vec2 point(uint at){uvec4 v=texelFetch(vertices,ivec2(int(at%1024u),int(at/1024u)),0);return uintBitsToFloat(v.xy);}
+void main(){primitiveIndex=uint(gl_VertexID)/6u;uint base=primitiveIndex*6u;vec2 a=point(base),b=point(base+2u),c=point(base+4u);vec2 lo=clamp(ceil(min(a,min(b,c))),vec2(0),targetSize),hi=clamp(ceil(max(a,max(b,c))),vec2(0),targetSize);int corner=gl_VertexID%6;vec2 p=(corner==0||corner==3)?lo:(corner==1?vec2(hi.x,lo.y):corner==5?vec2(lo.x,hi.y):hi);gl_Position=vec4(p/targetSize*2.0-1.0,0,1);}`;
       this.opaque = this.program(
         opaqueVertexSource,
         fragmentSource.replace(
@@ -792,7 +795,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
     if (mipSampling) this.bindMipTextures(program, mipTextures, settings);
     gl.uniform2f(this.uniform(program, "targetSize").location, width, height);
     gl.uniform4uiv(this.uniform(program, "settings[0]").location, settings);
-    gl.drawArrays(gl.TRIANGLES, 0, vertexWords.length / 8);
+    gl.drawArrays(gl.TRIANGLES, 0, vertexWords.length / 4);
     if (mipSampling) this.releaseMipSamplers();
     gl.bindSampler(7, null);
     gl.bindSampler(8, null);

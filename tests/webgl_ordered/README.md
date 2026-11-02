@@ -80,6 +80,27 @@ captured-game comparisons with arbitrary geometry. The optional timer query
 measures one 64×64, twelve-triangle GPU batch only; it excludes setup and is not
 an FPS measurement.
 
+## Independent fixed-point coverage
+
+`node scripts/test_webgl_coverage.cjs chromium` (or `firefox`) uses the same origin
+and artifact-directory variables as the main driver. Its 2,664 cases compare
+66,600 sampled pixels with an independent integer GS12.4 coverage oracle at
+64×64, 512×448, 640×448 and 511×447. Both ordered and hardware routes are exercised
+with small triangles, reversed winding, large offscreen edges through pixel
+centers, and valid full-coordinate skinny triangles whose exact determinant is
+two. Coverage is checked with constant colors and depth disabled; these patches
+do not qualify general interpolation, full-game fidelity or performance.
+
+Two restoration controls must fail without API errors: the preceding floating
+edge calculation and hardware triangle coverage. The corrected shader uses exact
+integer determinants, with a guarded signed-32-bit path and wide products when
+needed. The hardware route covers a clipped bounding rectangle and applies GS
+edges in the fragment shader, preventing hardware edge quantization from dropping
+GS-covered pixels. This can increase vertex and fragment work; it is not a speed
+optimization. `tests/raster_coverage.cpp` separately verifies 36 valid GS-coordinate
+cases and 900 sampled pixels in the software rasterizer, including both windings,
+mirroring, offscreen geometry and three framebuffer sizes.
+
 ## Data layout and remaining work
 
 Each primitive occupies three 32-byte vertices (lines and sprites store A, B, B): `float x, y; uint32 z, rgba; float s, t,

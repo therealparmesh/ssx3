@@ -264,30 +264,43 @@ ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
   }
   return source;
 }
-bool triangleWeights(vec2 p, vec2 a, vec2 b, vec2 c, bool interpolate,
-                     out vec3 weights) {
-  if (any(lessThan(p, ceil(min(a, min(b, c))))) ||
-      any(greaterThanEqual(p, ceil(max(a, max(b, c))))))
-    return false;
-  float area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
-  if (area == 0.0)
-    return false;
-  float sg = area > 0.0 ? 1.0 : -1.0;
-  float e0 = (b.x - p.x) * (c.y - p.y) - (c.x - p.x) * (b.y - p.y),
-        e1 = (c.x - p.x) * (a.y - p.y) - (a.x - p.x) * (c.y - p.y),
-        e2 = (a.x - p.x) * (b.y - p.y) - (b.x - p.x) * (a.y - p.y);
-  if (!edgeIn(e0 * sg, (b.y - c.y) * sg, (c.x - b.x) * sg) ||
-      !edgeIn(e1 * sg, (c.y - a.y) * sg, (a.x - c.x) * sg) ||
-      !edgeIn(e2 * sg, (a.y - b.y) * sg, (b.x - a.x) * sg))
-    return false;
-  weights = vec3(0, 0, 1);
-  if (interpolate) {
-    float inverseArea = 1.0 / area;
-    weights.x = e0 * inverseArea;
-    weights.y = e1 * inverseArea;
-    weights.z = 1.0 - weights.x - weights.y;
-  }
-
+// Exact GS12.4 determinants. ES 3.0 represents wide products as low/high words.
+// Floating products can cancel a nonzero area or misclassify a pixel on an edge.
+ivec2 gsProduct(int a, int b) {
+  uint x = a < 0 ? uint(-a) : uint(a), y = b < 0 ? uint(-b) : uint(b);
+  uint low = (x & 65535u) * (y & 65535u);
+  uint middle = (x >> 16) * (y & 65535u) + (low >> 16);
+  uint next = (x & 65535u) * (y >> 16) + (middle & 65535u);
+  uvec2 value = uvec2((next << 16) | (low & 65535u),
+    (x >> 16) * (y >> 16) + (middle >> 16) + (next >> 16));
+  if ((a < 0) != (b < 0)) value = uvec2(0u - value.x, ~value.y + uint(value.x == 0u));
+  return ivec2(value);
+}
+ivec2 gsCross(ivec2 a, ivec2 b) {
+  uvec2 left = uvec2(gsProduct(a.x,b.y)), right = uvec2(gsProduct(b.x,a.y));
+  return ivec2(left.x-right.x,left.y-right.y-uint(left.x<right.x));
+}
+float gsFloat(ivec2 value) {
+  uvec2 bits=uvec2(value);bool negative=value.y<0;
+  if(negative) bits=uvec2(0u-bits.x,~bits.y+uint(bits.x==0u));
+  float magnitude=float(bits.y)*4294967296.0+float(bits.x);
+  return negative ? -magnitude : magnitude;
+}
+float gsCrossFloat(ivec2 a, ivec2 b) {
+  // Two products and their difference fit signed32 within this component bound.
+  if(all(lessThanEqual(abs(a),ivec2(32767))) && all(lessThanEqual(abs(b),ivec2(32767))))
+    return float(a.x*b.y-b.x*a.y);
+  return gsFloat(gsCross(a,b));
+}
+bool triangleWeights(vec2 p, vec2 a, vec2 b, vec2 c, bool interpolate, out vec3 weights) {
+  if(any(lessThan(p,ceil(min(a,min(b,c))))) || any(greaterThanEqual(p,ceil(max(a,max(b,c)))))) return false;
+  ivec2 ai=ivec2(a*16.0),bi=ivec2(b*16.0),ci=ivec2(c*16.0),pi=ivec2(p*16.0);
+  float area=gsCrossFloat(bi-ai,ci-ai);if(area==0.0)return false;
+  float sign=area>0.0?1.0:-1.0;
+  float e0=gsCrossFloat(bi-pi,ci-pi),e1=gsCrossFloat(ci-pi,ai-pi),e2=gsCrossFloat(ai-pi,bi-pi);
+  if(!edgeIn(e0*sign,float(bi.y-ci.y)*sign,float(ci.x-bi.x)*sign) || !edgeIn(e1*sign,float(ci.y-ai.y)*sign,float(ai.x-ci.x)*sign) || !edgeIn(e2*sign,float(ai.y-bi.y)*sign,float(bi.x-ai.x)*sign))return false;
+  weights=vec3(0,0,1);
+  if(interpolate){float inverseArea=1.0/area;weights.x=e0*inverseArea;weights.y=e1*inverseArea;weights.z=1.0-weights.x-weights.y;}
   return true;
 }
 uint triangleDepth(uint z0, uint z1, uint z2, vec3 weights) {

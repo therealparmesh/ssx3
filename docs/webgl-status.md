@@ -2,6 +2,51 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Exact triangle coverage (2026-11-02)
+
+The ordered shader now evaluates triangle determinants exactly in GS12.4 units,
+using a guarded signed-32-bit path for small components and low/high-word products
+for wider inputs. Floating products previously lost nonzero skinny-triangle areas
+and misclassified edges. The software rasterizer now uses signed 64-bit integer
+coverage as well. The hardware route covers clipped bounding rectangles and
+applies GS edges in the fragment shader: hardware triangle quantization could
+otherwise drop a GS-covered pixel before that shader ran. This increases vertex
+and possible fragment work; it is a correctness change.
+
+Both desktop browsers pass 2,664 independent coverage cases (66,600 sampled pixels)
+at four target sizes, including 511×447 and full-coordinate skinny triangles.
+Restoring the preceding float calculation or hardware triangle coverage fails the
+independent oracle without GL errors. The standalone software check passes 36
+cases/900 sampled pixels; the preceding implementation misses 18 pixels. The
+existing 88 software-attribute cases also pass. The first private CPU test omitted
+GS table initialization; its setup failure was corrected before these comparisons.
+
+Source-built Chromium/Firefox checks also pass 1,107 bridge cases, 1,139 raw cases,
+five shader-fault controls, 20 allocation/retry cases, 3,360 mip bridge cases and
+13,680 independent sampler cases. A fresh JSPI build has native Wasm SHA-256
+`24774df45172f62a53ad560920b8995c16932c2c301f9988c33d86444f2938b9`.
+Copied/direct runtime probes and all 28 keyboard/simulated-controller checkpoints
+pass in both browsers. These are functional checks, not whole-game qualification.
+
+An earlier private loader prototype of the same shader/rectangle approach matches
+all 600 shared full-game image hashes between browsers, with valid source-clock
+observations. It retains the preceding native Wasm/data/HTML. Eight separate
+unprofiled windows use fields 6000–6600 in baseline/candidate/candidate/baseline
+order per browser, with identical native renderer workloads:
+
+| Browser | Baseline mean images/s | Coverage prototype mean images/s |
+| --- | ---: | ---: |
+| Chromium | 59.505 | 58.519 |
+| Firefox | 47.600 | 47.998 |
+
+Every window has intervals over 25 ms; seven have missing PCM. Candidate Chromium
+windows deliver 59.803 and 57.235 images/s, so there is no cross-browser speed
+improvement or near-60-fps release qualification. A passive process monitor observes
+no heavy external CPU task during this comparison. An earlier interpolation-only
+timing batch coincided with another emulator consuming CPU and is retained as
+diagnostic evidence, not a clean speed comparison. Private evidence and immutable
+build identities remain under `qa/webgl-fidelity-2026-11-02`.
+
 ## Constant texture and fog correction (2026-11-02)
 
 Equal texture coordinates, Q and fog values now survive triangle interpolation
@@ -26,12 +71,14 @@ A fresh private JSPI game build uses Wasm SHA-256
 `9870e25b882cbe5839ea2d4af75cff0f0f4b2d115c289c0b82c575ab026cd6b1`.
 A corrected Chromium image reference is compared with Firefox and repeat runs
 of both browsers over fields 6000–6600. All three comparisons match all 600
-shared images, and all four source-clock checks pass. Hashing every image
+shared images, and all four source-clock checks pass. The corrected reference
+differs from the preceding one on 47 of 600 images; sequence 1320 is unchanged.
+The preceding failures remain retained. Hashing every image
 perturbs timing; these checks do not establish gameplay performance, zero
 missing PCM, hardware fidelity or the cause of earlier intermittent mismatches.
 
-A separate independent GS12.4 coverage probe still reproduces missed/extra pixels
-for large offscreen triangles in both hardware and ordered routes. A private
+Before the exact-coverage correction above, a separate GS12.4 probe reproduced
+missed/extra pixels for large offscreen triangles in both routes. A private
 floating-point separation trial also fails and is not selected. Basic upload
 snapshot probes pass 480 cases per browser, including immediate source overwrite,
 queued frames, shared memory and memory growth, but do not exclude every possible
