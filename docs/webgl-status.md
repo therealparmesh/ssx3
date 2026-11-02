@@ -2,6 +2,42 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Constant texture and fog correction (2026-11-02)
+
+Equal texture coordinates, Q and fog values now survive triangle interpolation
+exactly in the ordered shader and software reference. Previously, floating-point
+weights could move a constant ST across a nearest-texel boundary, move Q=1 across
+the minification/magnification boundary, or truncate fog=255 to 254. Independent
+controlled images reproduce 60, 69 and 210 wrong GPU pixels, respectively, in
+both desktop browsers before the correction. The CPU also misrenders 92 pixels
+in the nearest-texel case and 164 in the fog case. These are discrete independent
+invariants, rather than agreement between two implementations with a shared bug.
+
+Chromium 156 and Firefox 158 each pass 1,107 bridge cases, 1,139 raw-shader cases,
+five shader-fault controls, 20 allocation/retry cases, 3,360 mip bridge cases and
+13,680 sampler cases. The standalone software test passes 88 cases; restoring
+only the preceding texture or fog interpolation independently fails it. Fresh
+native runtime probes pass in copied and direct modes in both browsers.
+Both browsers also pass all 28 keyboard/simulated-standard-gamepad checkpoints
+on this fresh build, including API recovery, reconnect, two controllers, focus
+loss and cached-page event resume.
+
+A fresh private JSPI game build uses Wasm SHA-256
+`9870e25b882cbe5839ea2d4af75cff0f0f4b2d115c289c0b82c575ab026cd6b1`.
+A corrected Chromium image reference is compared with Firefox and repeat runs
+of both browsers over fields 6000–6600. All three comparisons match all 600
+shared images, and all four source-clock checks pass. Hashing every image
+perturbs timing; these checks do not establish gameplay performance, zero
+missing PCM, hardware fidelity or the cause of earlier intermittent mismatches.
+
+A separate independent GS12.4 coverage probe still reproduces missed/extra pixels
+for large offscreen triangles in both hardware and ordered routes. A private
+floating-point separation trial also fails and is not selected. Basic upload
+snapshot probes pass 480 cases per browser, including immediate source overwrite,
+queued frames, shared memory and memory growth, but do not exclude every possible
+lifetime defect in the game. Full WebGL rendering/media qualification remains open.
+Private evidence is retained under `qa/webgl-fidelity-2026-11-02`.
+
 ## Render-target allocation recovery (2026-11-02)
 
 Failed target creation/resizing previously published partial texture fields,

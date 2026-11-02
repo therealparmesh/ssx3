@@ -22,6 +22,16 @@
         /vec4 interpolateColor\(uint a,[\s\S]*?\n}/,
         "vec4 interpolateColor(uint a, uint b, uint c, vec3 weights) { return rgba(a)*weights.x + rgba(b)*weights.y + rgba(c)*weights.z; }");
     }
+    if (new URLSearchParams(location.search).has("constantTextureFault")) {
+      kernelSource = kernelSource.replace(
+        /vec3 interpolateTexture\(vec3 a,[\s\S]*?\n}/,
+        "vec3 interpolateTexture(vec3 a, vec3 b, vec3 c, vec3 weights) { return a*weights.x+b*weights.y+c*weights.z; }");
+    }
+    if (new URLSearchParams(location.search).has("constantFogFault")) {
+      kernelSource = kernelSource.replace(
+        /int interpolateFog\(uvec3 fog,[\s\S]*?\n}/,
+        "int interpolateFog(uvec3 fog, vec3 weights) { return int(float(fog.x)*weights.x+float(fog.y)*weights.y+float(fog.z)*weights.z); }");
+    }
     const program = gl.createProgram();
     gl.attachShader(
       program,
@@ -653,10 +663,10 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
         )
       )
         throw Error("CPU reference rejected input");
-      if (name.startsWith("constant-alpha-")) {
+      if (name.startsWith("constant-alpha-") || name.startsWith("constant-attribute-")) {
         const cpu = reference.HEAPU32.subarray(outputPtr / 4, outputPtr / 4 + 8192);
         if (cpu.some((value, i) => value !== analyticExpected[i]))
-          throw Error("CPU constant-alpha invariant failed");
+          throw Error("CPU constant attribute invariant failed: " + name);
       }
       const expected =
         analyticExpected ||
@@ -711,6 +721,50 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
       if (colorMismatches || depthMismatches)
         throw Error(JSON.stringify(result));
     }
+    // Independent constant-attribute oracles: comparing two interpolators
+    // alone previously hid their shared rounding defects.
+    for (const attribute of ["nearest", "lod", "fog"])
+      for (const depth of [false, true])
+        for (const hardware of [false, true]) {
+          const c = baseConfig();
+          c[0] = 3 | 8 | (attribute === "fog" ? 32 : 16);
+          c[1] = depth ? 0x50000 : 0;
+          c[13] = depth ? 0 : 1;
+          c[4] = hardware ? 0 : 1; // All expected/background red values are even.
+          c[14] = 5; c[25] = 1; c[21] = 0;
+          c[15] = attribute === "lod" ? 1 : 0;
+          c[30] = attribute === "lod" ? 0x80000020 : 0; c[31] = 0;
+          const coordinates = [[4.125, 5.0625], [59.875, 9.1875], [12.4375, 60.3125]];
+          const fixed = coordinates.map(p => p.map(value => value * 16));
+          const covered = (x, y) => {
+            const p = [x * 16, y * 16];
+            for (let i = 0; i < 3; i++) {
+              const a = fixed[(i + 1) % 3], b = fixed[(i + 2) % 3];
+              const edge = (a[0] - p[0]) * (b[1] - p[1]) - (b[0] - p[0]) * (a[1] - p[1]);
+              const gx = a[1] - b[1], gy = b[0] - a[0];
+              if (!(edge > 0 || (edge === 0 && (gx > 0 || (gx === 0 && gy > 0))))) return false;
+            }
+            return true;
+          };
+          const expected = new Uint32Array(8192);
+          expected.fill(c[8], 0, 4096); expected.fill(c[9], 4096);
+          // Nearest samples texel (3,17). Q=1 selects MAG linear at LOD zero,
+          // averaging four controlled texels at UV=(16,16). Fog=255 applies
+          // (255*255)>>8 to a white source and zero fog color.
+          const color = attribute === "nearest" ? 0x0048440c :
+            attribute === "lod" ? 0x403e3e3e : 0x80fefefe;
+          for (let y = 0; y < 64; y++)
+            for (let x = 0; x < 64; x++) if (covered(x, y)) {
+              expected[y * 64 + x] = color;
+              if (depth) expected[4096 + y * 64 + x] = 200;
+            }
+          const input = coordinates.map(([x, y]) => [x, y, 200,
+            attribute === "fog" ? pack(255, 255, 255, 128) : pack(128, 128, 128, 128),
+            attribute === "nearest" ? 3 / 64 : 0.25,
+            attribute === "nearest" ? 17 / 64 : 0.25, 1, 255]);
+          run("constant-attribute-" + attribute + "-" + depth + "-" + hardware,
+            c, input, expected, hardware ? true : "ordered");
+        }
     {
       const c = baseConfig(); c[0] = 3 | 8 | 64; c[1] = 0;
       c[2] = 0x81; c[4] = 0xff000000; c[13] = 1;

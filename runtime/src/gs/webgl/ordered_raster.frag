@@ -200,6 +200,20 @@ vec4 interpolateColor(uint a, uint b, uint c, vec3 weights) {
   if ((differing & 0xff000000u) == 0u) value.a = first.a;
   return value;
 }
+vec3 interpolateTexture(vec3 a, vec3 b, vec3 c, vec3 weights) {
+  vec3 value = a * weights.x + b * weights.y + c * weights.z;
+  // A tiny error in constant Q can choose MIN instead of MAG at LOD zero;
+  // constant S/T can similarly move across an integer texel boundary.
+  if (a.x == b.x && a.x == c.x) value.x = a.x;
+  if (a.y == b.y && a.y == c.y) value.y = a.y;
+  if (a.z == b.z && a.z == c.z) value.z = a.z;
+  return value;
+}
+int interpolateFog(uvec3 fog, vec3 weights) {
+  if (fog.x == fog.y && fog.x == fog.z) return int(fog.x);
+  return int(float(fog.x) * weights.x + float(fog.y) * weights.y +
+             float(fog.z) * weights.z);
+}
 ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
             uint kind, vec3 weights) {
   float w0 = weights.x, w1 = weights.y, w2 = weights.z;
@@ -209,8 +223,8 @@ ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
   ivec4 source = ivec4(src);
   uvec4 t0 = loadVertex(i + 1u), t1 = loadVertex(i + 3u),
         t2 = loadVertex(i + 5u);
-  vec3 tex = uintBitsToFloat(t0.xyz) * w0 + uintBitsToFloat(t1.xyz) * w1 +
-             uintBitsToFloat(t2.xyz) * w2;
+  vec3 tex = interpolateTexture(uintBitsToFloat(t0.xyz), uintBitsToFloat(t1.xyz),
+                                uintBitsToFloat(t2.xyz), weights);
   if (kind == 6u) {
     vec3 first = uintBitsToFloat(t0.xyz), last = uintBitsToFloat(t1.xyz);
     vec2 fraction = (p - a) / (b - a);
@@ -244,7 +258,7 @@ ivec4 shade(uint i, uvec4 v0, uvec4 v1, uvec4 v2, vec2 p, vec2 a, vec2 b,
     }
   }
   if ((cfg(0) & 32u) != 0u) {
-    int f = int(float(t0.a) * w0 + float(t1.a) * w1 + float(t2.a) * w2);
+    int f = interpolateFog(uvec3(t0.a, t1.a, t2.a), weights);
     ivec3 fog = ivec3(unpacked(cfg(21)).rgb);
     source.rgb = (f * source.rgb + (255 - f) * fog) >> 8;
   }

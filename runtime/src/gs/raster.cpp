@@ -373,10 +373,12 @@ Attr lerp3(const Attr &a, const Attr &b, const Attr &c, float wa, float wb, floa
         // copies of that value can round a constant down by one.
         r.r = c.r; r.g = c.g; r.b = c.b; r.a = c.a;
     }
-    r.s = a.s * wa + b.s * wb + c.s * wc;
-    r.t = a.t * wa + b.t * wb + c.t * wc;
-    r.q = a.q * wa + b.q * wb + c.q * wc;
-    r.f = a.f * wa + b.f * wb + c.f * wc;
+    // Constant texture/fog attributes must not cross texel, LOD or integer
+    // fog boundaries because rounded weights need not sum to exactly one.
+    r.s = (a.s == b.s && b.s == c.s) ? a.s : a.s * wa + b.s * wb + c.s * wc;
+    r.t = (a.t == b.t && b.t == c.t) ? a.t : a.t * wa + b.t * wb + c.t * wc;
+    r.q = (a.q == b.q && b.q == c.q) ? a.q : a.q * wa + b.q * wb + c.q * wc;
+    r.f = (a.f == b.f && b.f == c.f) ? a.f : a.f * wa + b.f * wb + c.f * wc;
     // Float barycentric weights need not sum to exactly one in double.
     r.z = (a.z == b.z && b.z == c.z) ? a.z : a.z * wa + b.z * wb + c.z * wc;
     return r;

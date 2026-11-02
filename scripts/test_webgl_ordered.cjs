@@ -29,7 +29,7 @@ async function main() {
     defaultViewport: { width: 800, height: 600 },
   });
   try {
-    const modes = ["positive", "negative-depth", "negative-order", "negative-constant"];
+    const modes = ["positive", "negative-depth", "negative-order", "negative-constant", "negative-texture-constant", "negative-fog-constant"];
     if (bridge) modes.push("allocation");
     for (const mode of modes) {
       const page = await browser.newPage();
@@ -53,6 +53,8 @@ async function main() {
         : new URL(origin);
       if (bridge) url.searchParams.set("bridge", "1");
       if (mode === "negative-constant") url.searchParams.set("constantColorFault", "1");
+      if (mode === "negative-texture-constant") url.searchParams.set("constantTextureFault", "1");
+      if (mode === "negative-fog-constant") url.searchParams.set("constantFogFault", "1");
       if (mode === "negative-depth") url.searchParams.set("negative", "1");
       if (mode === "negative-order") url.searchParams.set("reverse", "1");
       await page.goto(url.href, { waitUntil: "load" });
@@ -92,7 +94,7 @@ async function main() {
         assert(!result.error, result.error);
         assert.equal(
           result.passed,
-          bridge ? 1095 : 1127,
+          bridge ? 1107 : 1139,
           "Run the complete fixture matrix",
         );
         assert.equal(logs.length, 0, "No browser or graphics warnings");
