@@ -114,9 +114,45 @@ void check_varying_color(std::uint32_t scale) {
     // Independent GS sample coordinates: R=floor(128*(x-1)/28+255*(y-1)/14).
     // Every selected value is away from an integer boundary. Green/blue stay 128.
     const unsigned samples[3][3] = {{4, 4, 68}, {18, 2, 95}, {2, 10, 168}};
-    for (const auto &sample : samples)
-        check((output[sample[1] * scale * width + sample[0] * scale] & 0xffffffu) ==
-                  (0x808000u | sample[2]), "Varying red and constant green/blue remain exact");
+    for (const auto &sample : samples) {
+        const auto actual = output[sample[1] * scale * width + sample[0] * scale] & 0xffffffu;
+        const auto expected = 0x808000u | sample[2];
+        if (actual != expected) std::fprintf(stderr, "PROBE_COLOR_DETAILS x=%u y=%u scale=%u actual=%06x expected=%06x\n", sample[0], sample[1], scale, actual, expected);
+        check(actual == expected, "Varying red and constant green/blue remain exact");
+    }
+}
+// Normalizing bytes to vertex floats must not move any constant color down a step.
+void check_untextured_color_bytes(std::uint32_t scale) {
+    ps2::gs::State state{};
+    state.prim = 3u | 8u;
+    state.prmodecont = state.colclamp = 1;
+    auto &context = state.ctx[0];
+    context.frame = 1ull << 16;
+    context.zbuf = 1ull << 32;
+    context.scissor = (31ull << 16) | (15ull << 48);
+    ps2::gs::Vertex vertices[3]{};
+    const unsigned xy[3][2] = {{1, 1}, {29, 1}, {1, 15}};
+    for (unsigned i = 0; i < 3; ++i) {
+        vertices[i].x = xy[i][0] * 16; vertices[i].y = xy[i][1] * 16;
+        vertices[i].q = 1;
+    }
+    for (unsigned value = 0; value < 256; ++value) {
+        for (auto &vertex : vertices) {
+            vertex.r = value; vertex.g = 255 - value; vertex.b = value ^ 0x55;
+            vertex.a = 128;
+        }
+        ps2::gs::gpu::draw(state, vertices, 3);
+        std::vector<std::uint32_t> output;
+        std::uint32_t width = 0, height = 0;
+        check(ps2::gs::gpu::display(color_source, output, width, height), "Constant-byte readback");
+        check(width == 32 * scale && height == 16 * scale, "Constant-byte dimensions");
+        const unsigned expected = value | ((255 - value) << 8) | ((value ^ 0x55) << 16);
+        for (const auto &sample : {std::pair{4u, 4u}, std::pair{18u, 2u}, std::pair{2u, 10u}}) {
+            const auto actual = output[sample.second * scale * width + sample.first * scale] & 0xffffffu;
+            if (actual != expected) std::fprintf(stderr, "PROBE_BYTE_DETAILS byte=%u actual=%06x expected=%06x\n", value, actual, expected);
+            check(actual == expected, "All untextured vertex color bytes remain exact");
+        }
+    }
 }
 void check_fade_and_modulation(std::uint32_t scale) {
     // Fixed expected colors, independent of the renderer's shader helpers.
@@ -431,8 +467,9 @@ int main() {
 #endif
     check_constant_alpha(scale);
     check_varying_color(scale);
+    check_untextured_color_bytes(scale);
     check_fade_and_modulation(scale);
     ps2::gs::gpu::wait_idle();
-    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,combinedFadeTint:true});},received,pixels,hash,scale,offset);
+    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,constantByteCases:256,combinedFadeTint:true});},received,pixels,hash,scale,offset);
     return 0;
 }

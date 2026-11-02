@@ -1282,6 +1282,15 @@
  			if(!caps.texHasAlpha)
  			{
  				shaderBuilder << "	textureColor.a = v_color.a;" << std::endl;
+@@ -352,7 +369,7 @@
+ 	}
+ 	else
+ 	{
+-		shaderBuilder << "	textureColor = v_color;" << std::endl;
++		shaderBuilder << "	textureColor = floor(v_color * 255.0) / 255.0;" << std::endl;
+ 	}
+ 
+ 	if(useFramebufferFetch)
 @@ -393,11 +410,29 @@
  	}
  	else
