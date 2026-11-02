@@ -118,7 +118,12 @@ async function verify(page, label, frame, width = 129, height = 97) {
   await page.evaluate(() => { producer.resize(160, 90); canvas.style.width = '160px'; canvas.style.height = '90px'; });
   await publish(first); await waitShown(6); await verify(page, 'resized-viewport', first, 160, 90);
   const stats = await page.evaluate(() => new Promise(resolve => { function receive(event) { if (!event.data?.qaStats) return; fixtureWorker.removeEventListener('message', receive); resolve(event.data.qaStats); } fixtureWorker.addEventListener('message', receive); fixtureWorker.postMessage({ qa: 'stats' }); }));
-  assert(stats.bufferWrites > 0 && stats.textureWrites > 0, 'Both aligned uploads and the fallback must run');
+  if (kind === 'firefox') {
+    assert.equal(stats.bufferWrites, 0, 'Firefox retains its prepared texture-upload path');
+    assert.equal(stats.textureWrites, 6, 'Every Firefox frame must upload its pixels');
+  } else {
+    assert(stats.bufferWrites > 0 && stats.textureWrites > 0, 'Both aligned uploads and the fallback must run');
+  }
   assert.equal(stats.bufferCopies, stats.bufferWrites, 'Each staged frame must encode its texture copy');
   assert.deepEqual(await page.evaluate(() => failures), []); assert.deepEqual(errors, []);
   await page.evaluate(() => fixtureWorker.postMessage({ qa: 'destroy' }));

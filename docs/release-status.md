@@ -1172,3 +1172,45 @@ passed; the other averaged 59.801 submissions/s, with a 53.52 ms maximum gap and
 5,632 missing PCM frames. This single comparison does not isolate a cause amid the variable
 controls above. The current polling behavior remains selected, and Firefox's
 readback-progress workaround was not changed or disabled.
+
+
+## Further scheduling diagnostics and Firefox pixel-fixture repair
+
+A reverse-order, one-minute-per-case Chrome polling comparison did not confirm
+an improvement from disabling readback progress. Both enabled controls passed;
+one disabled window passed and the other recorded a 32.46 ms gap and 1,312 missing
+PCM frames. A read-only asset verification overlapped the latter window, so it
+is retained diagnostically rather than treated as isolated qualification.
+The existing polling behavior remains selected.
+
+A separate event-triggered compositor/API trace captured 33.155/36.360 ms image
+submission gaps and two refresh callbacks with an empty image queue. The
+producer had a 47.16 ms gap followed by slower delivery. Actual refresh-callback
+spacing stayed below 25 ms in that trace. This differs from the earlier event
+with three ready images and a late callback: producer starvation and late
+presentation scheduling both occur. Tracing can perturb scheduling; these
+observations do not establish one cause for all failures or physical scanout.
+
+An exact SIMD texture-upload equality prototype passed 2,156,802 checks in each
+browser, including every single-byte difference through 257 bytes, unaligned
+ranges, tails and linear-memory boundaries. A compiled tail-skipping control
+failed. All 600 game images per browser matched. Despite faster isolated buffer
+comparisons, both quiet Chrome candidates exceeded 25 ms while both controls
+passed; Firefox candidates also failed delivery/audio. The prototype and its
+source tests were removed from main after preservation outside the source
+checkout. An earlier incomplete comparison encountered substantial host memory
+pressure and a control automation timeout; its failures remain retained.
+
+Disabling Firefox upload staging also failed all four 30-second candidate/control
+windows. Preparing Chrome uploads between callbacks passed actual GPU pixels,
+resource/pause/device-loss checks and two short timing windows, but both timing
+controls passed too. Neither setting is selected; native assets and hosting
+remain unchanged.
+
+The asset-free browser pixel fixture previously required both buffer and texture
+writes in Firefox, although that browser intentionally uses texture uploads.
+Its six independent pixel comparisons had already passed before that assertion
+failed. The fixture now requires all six Firefox texture writes and zero buffer
+writes, while retaining Chrome's checks for both upload methods and the existing
+copy-count and device-loss checks. The corrected selected Firefox run passes all
+six rendered-image checks, pause/resume, resize and deliberate device loss.
