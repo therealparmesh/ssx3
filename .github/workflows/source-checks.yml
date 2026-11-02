@@ -72,6 +72,9 @@ jobs:
           node --check scripts/test_webgl_presenter_cpu.cjs
           node --check scripts/test_webgl_presenter_state.cjs
           node --check scripts/test_webgl_presenter_viewport.cjs
+          node --check scripts/test_webgl_uploads.cjs
+          node --check tests/webgl_uploads/texture.js
+          node --check tests/webgl_uploads/buffer.js
           node scripts/test_webgl_surface_policy.cjs
           python3 scripts/build_webgl_presenter_fixture.py build/webgl-presenter
 

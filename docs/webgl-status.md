@@ -264,7 +264,34 @@ substantially reduced frame rate, so it supplies reuse evidence only. A private
 opaque vertex-buffer prototype passed the runtime, ordered/mip and shared-image
 checks, but gave no material performance improvement and was rejected.
 
-A bounded immutable indexed-texture cache was then tested privately. Its exact
+`scripts/test_webgl_uploads.cjs` now verifies the native client-memory API
+overloads separately from the ordered renderer's integer texture uploads. Both
+Chromium and Firefox pass 480 normalized R8 texture cases and 576 buffer cases,
+including full-heap offset/length arguments, immediate source overwrite, large
+shared-memory offsets, queued GPU consumers and memory growth. Every byte or
+word is checked through GPU output, and wrong-data controls must be detected.
+The fixtures are asset-free and start their own isolated loopback server. They
+do not cover uniform-block interpretation, native shader math or game fidelity.
+
+A later private immutable-index cache, rebuilt against the current exact-coverage
+shader, passes 53 ownership, collision, layout, failure/retry and eviction checks
+per browser, plus the native runtime and 28 input checks. It reduces full R8
+uploads in a diagnostic 600-field window from 103,768 to 1,875. Four separate
+unmodified performance windows average 48.48 versus 51.22 images/s in Firefox,
+baseline versus candidate, a 5.66% gain. Audio and pacing still fail their gates;
+the candidate remains unselected.
+
+Its first Firefox image comparison differs at one of 600 images: four pixels
+at image sequence 1746. Later captures identify native framebuffer-copy and
+post-processing passes outside the ordered packet stream. Four targeted windows
+and two full 600-image windows subsequently match the reference, including
+captures without extra GPU queries. Those passing runs do not supply the failed
+run's complete input history or resolve the original failure. Upload lifetime
+tests passing is not evidence that native fallback shading is correct. Further
+changes need a causal reproduction or an independently verified replacement
+for the affected rendering path before the cache can be selected.
+
+An earlier bounded immutable indexed-texture cache was tested privately. Its exact
 byte comparison prevents hash collisions from substituting image data, and
 shared handles preserve old images across updates and eviction. Both browsers
 passed 20 asset-free cases covering deswizzling, address and stride changes,
