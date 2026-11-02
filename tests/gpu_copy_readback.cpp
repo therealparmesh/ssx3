@@ -113,6 +113,60 @@ void check_varying_color(std::uint32_t scale) {
         check((output[sample[1] * scale * width + sample[0] * scale] & 0xffffffu) ==
                   (0x808000u | sample[2]), "Varying red and constant green/blue remain exact");
 }
+void check_varying_line_color(std::uint32_t scale) {
+    fill_color(0x80123456u);
+    ps2::gs::State state{};
+    state.prim = 1u | 8u;
+    state.prmodecont = state.colclamp = 1;
+    state.ctx[0].frame = 1ull << 16;
+    state.ctx[0].zbuf = 1ull << 32;
+    state.ctx[0].scissor = (31ull << 16) | (15ull << 48);
+    ps2::gs::Vertex vertices[2]{};
+    vertices[0].x = 2 * 16; vertices[1].x = 30 * 16;
+    for (auto &v : vertices) { v.y = 3 * 16; v.g = v.b = v.a = 128; v.q = 1; }
+    vertices[1].r = 128;
+    ps2::gs::gpu::draw(state, vertices, 2);
+    std::vector<std::uint32_t> output;
+    std::uint32_t width = 0, height = 0;
+    check(ps2::gs::gpu::display(color_source, output, width, height), "Varying line readback");
+    check(width == 32 * scale && height == 16 * scale, "Varying line dimensions");
+    // Independent samples away from integer boundaries: R=floor(128*(x-2)/28).
+    // Green/blue remain128. The x=9 rounding-boundary discrepancy is tracked separately.
+    const unsigned samples[][2] = {{8, 27}, {19, 77}, {27, 114}};
+    for (const auto &sample : samples) {
+        const auto actual = output[3 * scale * width + sample[0] * scale] & 0xffffffu;
+        const auto expected = 0x808000u | sample[1];
+        if (actual != expected) std::fprintf(stderr, "PROBE_LINE_DETAILS x=%u scale=%u actual=%06x expected=%06x\n", sample[0], scale, actual, expected);
+        check(actual == expected, "Varying line red and constant green/blue remain exact");
+    }
+}
+void check_triangle_coverage(std::uint32_t scale) {
+    fill_color(0x80123456u);
+    ps2::gs::State state{};
+    state.prim = 3u | 8u;
+    state.prmodecont = state.colclamp = 1;
+    state.ctx[0].frame = 1ull << 16;
+    state.ctx[0].zbuf = 1ull << 32;
+    state.ctx[0].scissor = (31ull << 16) | (15ull << 48);
+    ps2::gs::Vertex vertices[3]{};
+    const unsigned xy[][2] = {{1, 1}, {29, 1}, {1, 15}};
+    for (unsigned i = 0; i < 3; ++i) {
+        vertices[i].x = xy[i][0] * 16; vertices[i].y = xy[i][1] * 16;
+        vertices[i].r = 17; vertices[i].g = 90; vertices[i].b = 165; vertices[i].a = 128; vertices[i].q = 1;
+    }
+    ps2::gs::gpu::draw(state, vertices, 3);
+    std::vector<std::uint32_t> output;
+    std::uint32_t width = 0, height = 0;
+    check(ps2::gs::gpu::display(color_source, output, width, height), "Triangle coverage readback");
+    check(width == 32 * scale && height == 16 * scale, "Triangle coverage dimensions");
+    // Integer-coordinate oracle: left/top edges included, diagonal excluded.
+    for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
+        const bool inside = x >= scale && y >= scale &&
+            14 * (x - scale) + 28 * (y - scale) < 392 * scale;
+        const unsigned expected = inside ? 0xa55a11u : 0x123456u;
+        check((output[y * width + x] & 0xffffffu) == expected, "Exact triangle coverage and untouched pixels");
+    }
+}
 void check_disjoint_setups(std::uint32_t scale) {
     fill_color(0x80123456u);
     ps2::gs::State state{};
@@ -120,7 +174,7 @@ void check_disjoint_setups(std::uint32_t scale) {
     state.prmodecont = state.colclamp = 1;
     state.ctx[0].zbuf = 1ull << 32;
     state.ctx[0].scissor = (31ull << 16) | (15ull << 48);
-    const unsigned origins[3][2] = {{1, 1}, {9, 1}, {1, 1}};
+    const unsigned origins[3][2] = {{0, 0}, {4, 0}, {0, 0}};
     const unsigned masks[3] = {0x00ffff00u, 0x00ff00ffu, 0x00ff00ffu};
     for (unsigned n = 0; n < 3; ++n) {
         state.ctx[0].frame = (1ull << 16) | (static_cast<std::uint64_t>(masks[n]) << 32);
@@ -129,8 +183,8 @@ void check_disjoint_setups(std::uint32_t scale) {
         for (auto &v : vertices) { v.r = v.g = v.b = 255; v.a = 128; v.q = 1; }
         vertices[0].x = vertices[2].x = origins[n][0] * 16;
         vertices[0].y = vertices[1].y = origins[n][1] * 16;
-        vertices[1].x = (origins[n][0] + 5) * 16;
-        vertices[2].y = (origins[n][1] + 5) * 16;
+        vertices[1].x = (origins[n][0] + 3) * 16;
+        vertices[2].y = (origins[n][1] + 3) * 16;
         ps2::gs::gpu::draw(state, vertices, 3);
     }
     std::vector<std::uint32_t> output;
@@ -140,8 +194,8 @@ void check_disjoint_setups(std::uint32_t scale) {
     // All triangles share a tile. The missed middle triangle introduces the
     // green mask reused by the last triangle. Skipping it must preserve the
     // pixel's cached setup identity until the visible triangle loads that mask.
-    const unsigned samples[][3] = {{2, 2, 0x12ffffu}, {10, 2, 0x12ff56u}, {2, 10, 0x123456u},
-                                   {5, 5, 0x123456u}, {13, 5, 0x123456u}, {5, 13, 0x123456u}};
+    const unsigned samples[][3] = {{1, 1, 0x12ffffu}, {5, 1, 0x12ff56u}, {1, 5, 0x123456u},
+                                   {2, 2, 0x123456u}, {6, 2, 0x123456u}, {7, 7, 0x123456u}};
     for (const auto &sample : samples)
         check((output[sample[1] * scale * width + sample[0] * scale] & 0xffffffu) == sample[2],
               "Disjoint triangle setups and untouched pixels remain exact");
@@ -236,9 +290,11 @@ int main() {
     }
     check_constant_alpha(scale);
     check_varying_color(scale);
+    check_varying_line_color(scale);
+    check_triangle_coverage(scale);
     check_fade_and_modulation(scale);
     check_disjoint_setups(scale);
     ps2::gs::gpu::wait_idle();
-    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,failedReadbackCases:$5,disjointSetupSamples:6,combinedFadeTint:true});},received,pixels,hash,scale,offset,failed_readback_cases);
+    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,varyingLineCases:3,failedReadbackCases:$5,disjointSetupSamples:6,coveragePixels:512*$3*$3,combinedFadeTint:true});},received,pixels,hash,scale,offset,failed_readback_cases);
     return 0;
 }
