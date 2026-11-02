@@ -48,6 +48,7 @@ jobs:
           node scripts/test_webgl_readback.cjs
           node scripts/test_canvas_size.cjs
           node scripts/test_staged_uploads.cjs
+          node scripts/test_screen_wake_lock.cjs
           node scripts/test_input_resume.cjs
           node scripts/test_startup_audio.cjs
           node scripts/test_display_capacity.cjs

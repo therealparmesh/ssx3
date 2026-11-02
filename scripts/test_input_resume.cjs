@@ -30,7 +30,7 @@ function fixture() {
   const pads = [], nativePads = {}, nativePressure = {}, connected = {}, resumes = [], notes = [];
   const elements = new Map(), windowEvents = new Map(), documentEvents = new Map(), audioEvents = new Map(), audioRequests = [];
   let blocked = false, clock = 0, pauseReady = true, nativePaused = true;
-  const calls = [];
+  const calls = [], wakeChanges = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, { hidden: false, open: false, disabled: false,
       listeners: new Map(), addEventListener(type, fn) { this.listeners.set(type, fn); } });
@@ -47,7 +47,7 @@ function fixture() {
       if (!value) resumes.push(JSON.parse(JSON.stringify({ pads: nativePads, pressure: nativePressure, connected })));
     },
   };
-  const context = vm.createContext({ Module,
+  const context = vm.createContext({ Module, playerWakeLock: {setActive(value) {wakeChanges.push(value);}},
     document: { hidden: false, getElementById: element, addEventListener(type, fn) {
       if (!documentEvents.has(type)) documentEvents.set(type, []); documentEvents.get(type).push(fn);
     } },
@@ -74,7 +74,7 @@ function fixture() {
   vm.runInContext(shell.slice(failureStart, failureEnd), context);
   vm.runInContext(shell.slice(resumeStart, resumeEnd + '\n});'.length), context);
   const poll = () => vm.runInContext('pollInput()', context);
-  return { Module, pads, nativePads, connected, resumes, notes, context, calls, poll,
+  return { Module, pads, nativePads, connected, resumes, notes, context, calls, wakeChanges, poll,
     setPauseReady(value) { pauseReady = value; },
     advanceClock(ms) { clock += ms; },
     play() { Module.paused = false; nativePaused = false; poll(); },
@@ -107,10 +107,17 @@ async function resume(f) {
   f.resolveAudio();
   await task;
   assert.equal(f.resumes.length, 1);
+  assert.equal(f.wakeChanges.at(-1), true, 'Successful resume requests screen wake protection');
   return f.resumes[0];
 }
 
 (async () => {
+  {
+    const f = fixture(); f.play(); f.pause();
+    assert.equal(f.wakeChanges.at(-1), false);
+    await resume(f); f.fail();
+    assert.equal(f.wakeChanges.at(-1), false, 'Terminal failure must release screen protection');
+  }
   {
     const f = fixture(); f.play();
     f.key('KeyA'); f.key('ArrowRight');
@@ -382,5 +389,5 @@ async function resume(f) {
       'A failed player must not dispatch later input');
     assert.equal(f.start.textContent, 'Reload player');
   }
-  console.log('Input channels and pause/resume: 32 regression scenarios passed');
+  console.log('Input channels and pause/resume: 33 regression scenarios passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
