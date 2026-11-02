@@ -46,14 +46,14 @@ used by this harness. WebGL2 is required.
 
 ## What the checks prove
 
-Each browser runs **1,107 bridge cases**, comparing all 4,096 color pixels and
-all 4,096 integer depth values. The matrix includes 1,093 software-reference
+Each browser runs **1,504 bridge cases**, comparing all 4,096 color pixels and
+all 4,096 integer depth values. The matrix includes 1,490 software-reference
 cases and independent expected images for a constant-color/depth horizontal line,
 constant-alpha identity blending, constant STQ nearest sampling, the Q=1
 minification/magnification filter boundary and constant fog. The constant-attribute
 oracles also check CPU output; the software adapter models the filter-boundary
 case with matching base-level linear filtering, rather than implementing mip LOD.
-The raw shader route runs 1,139 cases, retaining 32 additional full-depth-domain cases. The matrix covers:
+The raw shader route runs 1,536 cases, retaining 32 additional full-depth-domain cases. The matrix covers:
 
 - Line coverage: endpoint exclusion, reversal, clipping, fractional/zero-length
   lines, fixed-point rounding, and interpolated color/depth/texture/fog.
@@ -68,6 +68,15 @@ The raw shader route runs 1,139 cases, retaining 32 additional full-depth-domain
 - Nearest/bilinear sampling, four coordinate clamp modes, four texture functions,
   texture alpha, fog and controlled texture coordinate interpolation.
 - A filtered, overlapping cutout case using `TEST=0x515cd`, plus seeded overlapping scenes.
+- All 16 complete-channel framebuffer masks with depth writes on/off, FBA on/off,
+  flat/Gouraud colors and untextured/nearest/bilinear inputs (384 cases). Four
+  partial-bit and nine packed-format cases require the ordered route instead.
+
+Nonzero complete-channel masks retain the ordered route. A private hardware-mask
+prototype passed this matrix and independent retry checks, but its final-source
+timing did not show a meaningful Firefox gain; it remains unselected. Zero-mask
+cases exercise the existing hardware route. The routing assertions prevent an
+accidental all-fallback pass for eligible unmasked triangles.
 
 Five negative controls must fail the pixel comparison: suppressed depth writes,
 reversed primitive order and restoring weighted interpolation of equal color,

@@ -570,6 +570,8 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
         });
         if (gpuConfig.some((word, i) => word !== packetBefore[i]))
           throw Error("Bridge mutated the host GS packet");
+        if (!Array.from(gl.getParameter(gl.COLOR_WRITEMASK)).every(Boolean))
+          throw Error("Bridge leaked a channel write mask");
         // The hardware path needs no integer targets. Allocate verification
         // snapshot resources explicitly, outside the production render call.
         bridge.targets(64, 64);
@@ -1501,6 +1503,37 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=uvec4(floor(texelFetch(co
       if (bridge.targetSets.size > 4)
         throw Error("Unbounded bridge target cache");
     }
+    // Complete-channel masks must match the software model for overlapping
+    // flat/Gouraud triangles, texture filtering, depth and alpha force bits.
+    for (let channels = 0; channels < 16; channels++)
+      for (const depth of [false, true])
+        for (const fba of [0, 1])
+          for (const gouraud of [false, true])
+            for (const texture of [0, 1, 2]) {
+              const c = baseConfig();
+              c[0] = 3 | (gouraud ? 8 : 0) | (texture ? 16 : 0);
+              c[1] = depth ? 0x50000 : 0;
+              c[13] = depth ? 0 : 1; c[6] = fba;
+              c[14] = 4; c[25] = 1; c[15] = texture === 2 ? 1 : 0;
+              for (let channel = 0; channel < 4; channel++)
+                if (channels & (1 << channel)) c[4] |= 255 << (channel * 8);
+              const input = geometry(17);
+              if (texture) for (const p of input) {
+                p[4] = p[0] / 64; p[5] = p[1] / 64; p[6] = 1;
+              }
+              run('complete-channel-mask-' + [channels, depth, fba, gouraud, texture].join('-'),
+                  c, input, null, channels === 0 ? true : 'ordered');
+            }
+    for (const mask of [1, 0x7f000000, 0x80000000, 0xf0f00f0f]) {
+      const c = baseConfig(); c[0] = 3; c[4] = mask;
+      run('partial-channel-mask-' + mask, c, geometry(17), null, 'ordered');
+    }
+    for (const format of [1, 2, 10])
+      for (const mask of [0xff000000, 0x00ffffff, 0xffffffff]) {
+        const c = baseConfig(); c[0] = 3; c[26] = format; c[4] = mask;
+        run('non-rgba-channel-mask-' + format + '-' + mask,
+            c, geometry(17), null, 'ordered');
+      }
     reference._free(configPtr);
     reference._free(verticesPtr);
     reference._free(outputPtr);

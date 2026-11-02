@@ -2,6 +2,59 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Channel-mask coverage and performance decisions (2026-11-02)
+
+The source fixture now runs 1,504 bridge cases and 1,536 raw-shader cases per
+browser. Its additional 397 cases cover all 16 complete-channel masks with depth
+writes and FBA on/off, flat/Gouraud color and untextured/nearest/bilinear inputs,
+plus four partial-bit and nine packed-format routing guards. Nonzero masks retain
+the ordered route; eligible zero-mask triangles must still exercise hardware.
+The configuration buffer remains allocated until the entire expanded matrix
+finishes. These checks compare every color/depth pixel at 64×64; they do not
+qualify game performance or arbitrary hardware fidelity.
+
+A private hardware-mask prototype restricts nonzero masks to complete PSMCT32
+channels and preserves the other depth, alpha, blend and feedback restrictions.
+A separate masked-draw wrapper restores color writes even if setup, drawing or
+cleanup throws. Chromium 156 and Firefox 158 pass its expanded matrix, all 16
+independent injected failure/retry cases, and the existing allocation, mip,
+sampler and exact-coverage checks. A no-cleanup control fails the mask-restoration
+assertion. The prototype's canonical source build also passes copied/direct
+runtime checks and all 28 keyboard/simulated-gamepad checkpoints in each browser.
+All 600 captured images match the reference in each browser at both saved-state
+windows (fields 6000–6600 and 3600–4200). Hashing perturbs timing and is excluded
+from performance qualification.
+
+An earlier private prototype's eight quiet, balanced windows averaged 48.458
+versus 48.941 images/s in Firefox and 59.701 versus 59.755 in Chromium, weighted
+by elapsed time. That small observation did not survive source-build checks.
+An initial source version with cleanup around every hardware draw measured
+48.661 versus 48.160 in Firefox and 59.604 versus 59.852 in Chromium. Isolating
+cleanup around masked draws then measured 48.070 versus 48.095 in Firefox:
+no meaningful Firefox gain. Chromium measured 59.804 versus 59.700 images/s.
+All comparisons retain intervals over 25 ms and
+Firefox PCM shortages. Attempts overlapping independently detected external CPU
+load are retained and excluded under a preregistered policy. No quiet low-FPS
+sample is discarded. The hardware-mask path remains private and unselected;
+there is no new game runtime, hosted release or performance qualification.
+
+Renderer counters include previously uncounted fully clipped packets after a
+route switch, so they are not native-input fingerprints. A stricter diagnostic
+observed 13 additional packets/330 triangles out of about 18 million primitives;
+its count-equality failure is retained and its cause remains unresolved.
+
+A fresh Firefox profile of a separately symbol-mapped, image-checked build
+records 10.104 seconds of content-main CPU in an 11.655-second interior window;
+3.291 seconds are inclusive WebGL texture-upload time. CanvasRenderer CPU overlaps
+this work on another core and must not be added to main-thread time. Profiled
+FPS is diagnostic only. A private vertex pixel-unpack-buffer trial passes image
+and upload-lifetime checks but its timing was externally contended and does not
+show a stable benefit; it is also unselected. Upload ownership and redundant
+native texture updates remain the next investigation. Private identities,
+profiles, all attempts and decisions remain under
+`qa/webgl-runtime-performance-2026-11-02`. Native Wasm remains
+`24774df45172f62a53ad560920b8995c16932c2c301f9988c33d86444f2938b9`.
+
 ## Exact triangle coverage (2026-11-02)
 
 The ordered shader now evaluates triangle determinants exactly in GS12.4 units,
