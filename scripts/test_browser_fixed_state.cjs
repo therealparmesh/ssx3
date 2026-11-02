@@ -111,7 +111,6 @@ const errors=[], warnings=[];
   metric.sourceClock=sourceClock.compare(metric.av.start.sourceClock,metric.av.end.sourceClock);
   assert.equal(metric.nativeFrames,last-first);
   assert.equal(metric.av.start.frame,first);assert.equal(metric.av.end.frame,last);
-  assert(metric.sourceClock.passed,'Source audio/video clock observation must be valid');
   assert(metric.images>0&&metric.av.frames>0,'Observe actual images and audio worklet output');
   await page.evaluate(()=>document.getElementById('pause').click());
   await page.waitForFunction(()=>Module._ps2web_pause_ready(),{timeout:30000});
@@ -135,6 +134,8 @@ const errors=[], warnings=[];
     origin:url.origin,playerPath:url.pathname,viewport:{width:1280,height:800,dpr:1},metric,observation,errors,warnings,
     limits:'Measurement only. Oracle hashing perturbs timing; compare performance runs separately. Game/state data remain private. Not a complete-race, display scanout, physical audio or release qualification.'};
   fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');
+  // Preserve complete images and clock bounds before rejecting a media failure.
+  assert(metric.sourceClock.passed,'Source audio/video clock observation must be valid');
   // Preserve the complete result and raw pixels before rejecting the run.
   if(stateGuard) {
     assert(observation.glStateGuard?.installed, 'GL state guard did not install');

@@ -46,9 +46,11 @@ used by this harness. WebGL2 is required.
 
 ## What the checks prove
 
-Each browser runs **1,094 controlled cases**, comparing all 4,096 color pixels and
-all 4,096 integer depth values. Of these, 1,093 use the software renderer and one
-uses an independent expected image for a constant-color/depth horizontal line. The matrix covers:
+Each browser runs **1,095 bridge cases**, comparing all 4,096 color pixels and
+all 4,096 integer depth values. The matrix includes 1,093 software-reference
+cases and independent expected images for a constant-color/depth horizontal line
+and constant-alpha identity blending. The latter also checks the CPU output.
+The raw shader route retains 32 additional full-depth-domain cases. The matrix covers:
 
 - Line coverage: endpoint exclusion, reversal, clipping, fractional/zero-length
   lines, fixed-point rounding, and interpolated color/depth/texture/fog.
@@ -297,3 +299,23 @@ Chromium and Firefox. The Chromium difference affected twelve RGB pixels with
 a maximum component difference of 132; its matching reference image was
 independently retained. This change does not resolve those failures or qualify
 WebGL performance/audio, and does not change the selected WebGPU release.
+
+## Render-target allocation recovery
+
+After building and serving this fixture, run:
+
+```sh
+node scripts/test_webgl_target_allocation.cjs chromium
+node scripts/test_webgl_target_allocation.cjs firefox
+```
+
+Use the same `PUPPETEER_MODULE`, `SSX3_WEBGL_ORIGIN` and
+`SSX3_WEBGL_ARTIFACT_DIR` overrides as the other drivers. The fixture tests 39
+failures across first allocation, resizing, and a full four-entry cache. It
+injects null texture/framebuffer handles at every allocation point, attachment
+exceptions, and an incomplete framebuffer. Every failed replacement must leave
+all prior target fields, cache order, complete color images and resource ownership
+intact. A retry at the old size must use its original resources; a clean retry at
+the new size must complete and evict only the oldest entry when necessary.
+These are controlled helper-level failures, not whole-game out-of-memory or
+context-loss recovery certification.

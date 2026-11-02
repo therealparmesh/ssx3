@@ -161,6 +161,8 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
 
   framebuffer() {
     const framebuffer = this.gl.createFramebuffer();
+    if (!framebuffer)
+      throw Error("Unable to allocate ordered raster framebuffer: " + this.gl.getError());
     this.framebuffers.add(framebuffer);
     return framebuffer;
   }
@@ -212,83 +214,75 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       this.targetSets.set(key, cached);
       return;
     }
-    if (this.targetSets.size >= 4) {
-      const oldKey = this.targetSets.keys().next().value,
-        old = this.targetSets.get(oldKey);
-      for (const field of [
-        "inputColor",
-        "inputDepth",
-        "outputColor",
-        "outputDepth",
-        "depthCopy",
-        "headersTexture",
-      ])
-        this.deleteTexture(old[field]);
-      for (const field of [
-        "inputFramebuffer",
-        "outputFramebuffer",
-        "depthReadFramebuffer",
-        "depthCopyFramebuffer",
+    // Keep the active set and LRU intact until a replacement is complete.
+    // Failed texture/FBO allocation must not poison a retry at the old size.
+    const textures = [], framebuffers = [];
+    const makeTexture = (format, w, h) => {
+      const texture = this.texture(format, w, h);
+      textures.push(texture);
+      return texture;
+    };
+    const makeFramebuffer = () => {
+      const framebuffer = this.framebuffer();
+      framebuffers.push(framebuffer);
+      return framebuffer;
+    };
+    let next;
+    try {
+      const tilesX = Math.ceil(width / 8), tilesY = Math.ceil(height / 8);
+      next = {
+        width, height, tilesX, tilesY,
+        inputColor: makeTexture(gl.RGBA8UI, width, height),
+        inputDepth: makeTexture(gl.R32UI, width, height),
+        outputColor: makeTexture(gl.RGBA8UI, width, height),
+        outputDepth: makeTexture(gl.R32UI, width, height),
+        depthCopy: makeTexture(gl.DEPTH_COMPONENT32F, width, height),
+        headersTexture: makeTexture(gl.RG32UI, tilesX, tilesY),
+        headerScratch: new Uint32Array(0),
+        tileCounts: new Uint32Array(tilesX * tilesY),
+        sourceDepthRenderbuffer: null,
+        inputFramebuffer: makeFramebuffer(),
+        outputFramebuffer: makeFramebuffer(),
+        depthReadFramebuffer: makeFramebuffer(),
+        depthCopyFramebuffer: makeFramebuffer(),
+      };
+      for (const [framebuffer, color, depth] of [
+        [next.inputFramebuffer, next.inputColor, next.inputDepth],
+        [next.outputFramebuffer, next.outputColor, next.outputDepth],
       ]) {
-        gl.deleteFramebuffer(old[field]);
-        this.framebuffers.delete(old[field]);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, depth, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+        this.complete();
       }
-      this.targetSets.delete(oldKey);
-    }
-    this.inputColor = this.texture(gl.RGBA8UI, width, height);
-    this.inputDepth = this.texture(gl.R32UI, width, height);
-    this.outputColor = this.texture(gl.RGBA8UI, width, height);
-    this.outputDepth = this.texture(gl.R32UI, width, height);
-    this.depthCopy = this.texture(gl.DEPTH_COMPONENT32F, width, height);
-    this.tilesX = Math.ceil(width / 8);
-    this.tilesY = Math.ceil(height / 8);
-    this.headerScratch = new Uint32Array(0);
-    this.tileCounts = new Uint32Array(this.tilesX * this.tilesY);
-    this.sourceDepthRenderbuffer = null;
-    this.headersTexture = this.texture(gl.RG32UI, this.tilesX, this.tilesY);
-    this.inputFramebuffer = this.framebuffer();
-    this.outputFramebuffer = this.framebuffer();
-    this.depthReadFramebuffer = this.framebuffer();
-    this.depthCopyFramebuffer = this.framebuffer();
-    for (const [framebuffer, color, depth] of [
-      [this.inputFramebuffer, this.inputColor, this.inputDepth],
-      [this.outputFramebuffer, this.outputColor, this.outputDepth],
-    ]) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        gl.TEXTURE_2D,
-        color,
-        0,
-      );
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT1,
-        gl.TEXTURE_2D,
-        depth,
-        0,
-      );
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, next.depthCopyFramebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, next.depthCopy, 0);
+      gl.drawBuffers([gl.NONE]);
+      gl.readBuffer(gl.NONE);
       this.complete();
+    } catch (error) {
+      for (const texture of textures) this.deleteTexture(texture);
+      for (const framebuffer of framebuffers) {
+        gl.deleteFramebuffer(framebuffer);
+        this.framebuffers.delete(framebuffer);
+      }
+      throw error;
     }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.depthCopyFramebuffer);
-    gl.framebufferTexture2D(
-      gl.FRAMEBUFFER,
-      gl.DEPTH_ATTACHMENT,
-      gl.TEXTURE_2D,
-      this.depthCopy,
-      0,
-    );
-    gl.drawBuffers([gl.NONE]);
-    gl.readBuffer(gl.NONE);
-    this.complete();
-    this.width = width;
-    this.height = height;
-    this.activeTargetSet = Object.fromEntries(
-      fields.map((field) => [field, this[field]]),
-    );
-    this.targetSets.set(key, this.activeTargetSet);
+    Object.assign(this, next);
+    this.activeTargetSet = next;
+    this.targetSets.set(key, next);
+    if (this.targetSets.size > 4) {
+      const oldestKey = this.targetSets.keys().next().value;
+      const oldest = this.targetSets.get(oldestKey);
+      for (const field of ["inputColor", "inputDepth", "outputColor", "outputDepth", "depthCopy", "headersTexture"])
+        this.deleteTexture(oldest[field]);
+      for (const field of ["inputFramebuffer", "outputFramebuffer", "depthReadFramebuffer", "depthCopyFramebuffer"]) {
+        gl.deleteFramebuffer(oldest[field]);
+        this.framebuffers.delete(oldest[field]);
+      }
+      this.targetSets.delete(oldestKey);
+    }
   }
 
   complete() {

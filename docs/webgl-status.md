@@ -2,6 +2,79 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Render-target allocation recovery (2026-11-02)
+
+Failed target creation/resizing previously published partial texture fields,
+leaked resources and, at capacity, evicted an existing target before the
+replacement existed. A framebuffer allocation returning null was also silently
+registered. The renderer now completes a replacement before publishing it or
+evicting the oldest cached set, releases partial allocations on failure, and
+reports null framebuffer handles. The four-set steady-state limit is unchanged.
+
+Thirty-nine real-WebGL fault cases pass per desktop browser, covering initial
+allocation, resize and a full cache; each texture/framebuffer allocation point;
+attachment exceptions; and incomplete framebuffers. They check complete retained
+images, handle ownership, unchanged cache order, old-size reuse, exact clean
+retries and successful eviction. The preceding implementation fails 37 of the
+39 cases in each browser. Both browsers also pass 1,095 exact color/depth cases,
+all three shader-fault controls, 20 data-texture allocation/retry cases, 3,360 mip
+bridge cases and 13,680 independent sampler cases. The unchanged native runtime
+probe with the corrected renderer helper passes in copied and direct modes,
+including snapshots, partial transfers, register ordering, mip replay and six
+injected GL faults. These are helper/runtime recovery checks; they do not certify
+whole-game context-loss recovery or gameplay performance.
+
+The corrected helper also passes all 28 native keyboard/simulated-gamepad
+checkpoints per browser, including API recovery, reconnect, multiple controllers,
+focus loss and cached-page event resume. Firefox matches all 600 shared game-image
+hashes against a fresh unchanged-build reference. Chromium matches 599 of 600;
+sequence 1320 differs and its raw pixels remain retained. An unchanged-build
+capture matches the original reference at that sequence and localizes the
+candidate difference to nine world pixels at x=76–79, y=77–79. RGB differences
+reach 82 levels; alpha is unchanged. This localizes the discrepancy without
+establishing its cause. Another instrumented Chromium image run fails the
+source-clock check. These remain failed observations
+and prevent a full WebGL fidelity/media qualification.
+
+The fixed-state driver now writes its complete result and differing images before
+enforcing the source-clock assertion, preserving evidence from media failures.
+The frame boundaries, image comparisons and 50 ms source-clock gate are unchanged.
+
+The separate WebGPU version 71 release and main branch are unchanged.
+
+## Fresh performance comparisons (2026-11-02)
+
+A fresh, unmodified JSPI baseline from `61cb976` uses Wasm SHA-256
+`ad0cff7fa4e5b094ccc786fbd75ab41fe317543193152868e310091ee88846b4`.
+New comparisons use the retained private state beginning at field 4700 and
+measure fields 6000–6600, rather than the earlier state's 3600–4200 range. Each
+trial uses fresh headed desktop browsers, 1280×800/DPR 1, direct presentation,
+WebGPU withheld, and no GPU feature flags/preferences or concurrent GPU tests.
+Native renderer work counts match across all eight windows of each comparison.
+Each mean below includes two windows in baseline/candidate/candidate/baseline
+order. Candidates retain byte-identical native Wasm, data and HTML.
+
+| Trial | Chrome baseline / candidate images/s | Firefox baseline / candidate images/s |
+| --- | ---: | ---: |
+| Cache identical per-program settings uniforms | 59.703 / 59.359 | 48.148 / 47.609 |
+| Plain vertex uniforms for batches of at most 32 primitives | 59.713 / 59.852 | 48.369 / 47.727 |
+
+Both trials pass the existing 1,095 pixel/depth cases, shader negative controls
+and allocation checks per browser. Neither establishes a cross-browser speed
+improvement, and both remain private and unselected. Every performance window
+retains intervals above 25 ms. All but one have missing PCM; the one clean-audio
+Chrome vertex-uniform window still has a 28.20 ms maximum image interval. No
+performance check was relaxed, and the allocation correction is not presented
+as a speed improvement.
+
+A separate instrumented diagnostic observes 187,323 settings calls, with 113,703
+repeating the program's preceding values. The inputs were already ordinary
+memory, so this is redundant-call evidence, not shared-memory transport evidence.
+Another diagnostic attributes about 519 ms of a 12.46-second Firefox window to
+JavaScript binning and 65 ms to opaque position validation. Diagnostic
+instrumentation changes timing and is excluded from the performance means.
+Private evidence remains under `qa/webgl-production-2026-11-02`.
+
 ## Constant color correction (2026-11-01)
 
 The ordered WebGL shader and software reference now preserve equal vertex color
