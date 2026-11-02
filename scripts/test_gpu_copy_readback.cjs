@@ -15,7 +15,7 @@ let browser;
       headless: false, extraPrefsFirefox: { 'dom.webgpu.enabled': true } }
     : { browser: 'chrome', executablePath: process.env.CHROMIUM_EXECUTABLE || '/usr/bin/chromium',
       headless: false, args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan'] });
-  const results = [], modes = ['normal', 'staged', 'scale2', 'negative-constant', 'negative-varying'];
+  const results = [], modes = ['normal', 'staged', 'scale2', 'negative-constant', 'negative-varying', 'read-failure'];
   if (process.env.SSX3_GPU_TEST_PROFILE === '1') modes.push('profile');
   for (const mode of modes) {
     const page = await browser.newPage(), errors = [];
@@ -24,7 +24,17 @@ let browser;
       // Firefox also installs init scripts in the initial, insecure blank tab.
       if (typeof GPUAdapter === 'undefined') return;
       window.qaConstantFaults = 0;
-      if (fault) {
+      window.qaTestReadFailures = fault === 'read-failure';
+      const getRange = GPUBuffer.prototype.getMappedRange;
+      window.qaExpectedReadFailures = 0;
+      GPUBuffer.prototype.getMappedRange = function(...args) {
+        if (window.qaProbe?.failNextRead) {
+          qaProbe.failNextRead = false; ++qaExpectedReadFailures;
+          throw new Error('Controlled mapped read failure');
+        }
+        return getRange.apply(this, args);
+      };
+      if (fault?.startsWith('negative-')) {
         const createShaderModule = GPUDevice.prototype.createShaderModule;
         GPUDevice.prototype.createShaderModule = function(descriptor) {
           const fixed = 'return select(value, a, (a == b) & (a == c));';
@@ -54,13 +64,13 @@ let browser;
         const original = prototype[key];
         prototype[key] = function () { ++qaGpu[field]; return original.apply(this, arguments); };
       }
-    }, mode.startsWith('negative-') ? mode : null);
+    }, mode);
     const url = new URL(base);
     url.search = mode === 'staged' ? '?staged' : mode === 'scale2' ? '?scale=2' : mode === 'profile' ? '?profile' : '';
     await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForFunction(() => qaProbe.result || qaProbe.errors.length, { timeout: 60000 });
     const result = await page.evaluate(async () => ({ native: qaProbe.result, errors: qaProbe.errors,
-      messages: qaProbe.messages, gpu: qaGpu, constantFaults: qaConstantFaults, validation: await qaDevice.popErrorScope(),
+      messages: qaProbe.messages, gpu: qaGpu, constantFaults: qaConstantFaults, expectedReadFailures: qaExpectedReadFailures, validation: await qaDevice.popErrorScope(),
       uploads: Module.uploadBuffers?.stats,
       profileBytes: FS.analyzePath('/profile.txt').exists ? FS.readFile('/profile.txt').length : 0,
       futures: Object.keys(WebGPU.Internals.futures).length }));
@@ -89,6 +99,8 @@ let browser;
     assert.equal(result.native.constantAlphaCases, 1);
     assert.equal(result.native.varyingColorCases, 3);
     assert.equal(result.native.combinedFadeTint, true);
+    assert.equal(result.native.failedReadbackCases, mode === 'read-failure' ? 2 : 0);
+    assert.equal(result.expectedReadFailures, mode === 'read-failure' ? 2 : 0);
     assert(result.native.nonzeroSourceOffset >= 8192);
     if (mode === 'staged') assert(result.uploads.staged > 0, 'Exercise actual mapped staging');
     if (mode === 'profile') assert(result.profileBytes > 0, 'Profiling test requires GPU timestamp-query support');

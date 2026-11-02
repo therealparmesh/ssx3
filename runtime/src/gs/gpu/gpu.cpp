@@ -1131,6 +1131,19 @@ void submit(WGPUTextureView present_view = nullptr, WGPUBuffer copy_target = nul
     g_clut_loads = 0;
 }
 
+bool copy_mapped(WGPUBuffer buffer, std::uint64_t bytes, void *out) {
+#ifdef __EMSCRIPTEN__
+    // Emdawn's pointer-returning API allocates and copies into temporary Wasm
+    // memory. Read directly into the caller's storage to avoid that allocation
+    // and a second full-frame copy on every browser readback.
+    return wgpuBufferReadMappedRange(buffer, 0, out, bytes) == WGPUStatus_Success;
+#else
+    const void *mapped = wgpuBufferGetConstMappedRange(buffer, 0, bytes);
+    if (mapped) std::memcpy(out, mapped, bytes);
+    return mapped != nullptr;
+#endif
+}
+
 bool read_back(WGPUBuffer source, std::uint64_t bytes, void *out, std::uint64_t offset = 0) {
     submit_copy(source, g_readback, bytes, offset);
     bool done = false;
@@ -1143,10 +1156,9 @@ bool read_back(WGPUBuffer source, std::uint64_t bytes, void *out, std::uint64_t 
     cb.userdata1 = &done;
     const WGPUFuture future = wgpuBufferMapAsync(g_readback, WGPUMapMode_Read, 0, bytes, cb);
     wait_until(done, future);
-    const void *mapped = wgpuBufferGetConstMappedRange(g_readback, 0, bytes);
-    if (mapped) std::memcpy(out, mapped, bytes);
+    const bool copied = copy_mapped(g_readback, bytes, out);
     wgpuBufferUnmap(g_readback);
-    return mapped != nullptr;
+    return copied;
 }
 
 std::uint32_t make_setup(const State &st, std::uint64_t attr, std::uint32_t *w) {
@@ -1993,10 +2005,9 @@ bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, s
     }
     if (newest) {
         const std::uint64_t bytes = static_cast<std::uint64_t>(newest->width) * newest->height * 4;
-        const void *mapped = wgpuBufferGetConstMappedRange(newest->buffer, 0, bytes);
-        if (mapped) {
-            rgba.resize(static_cast<std::size_t>(newest->width) * newest->height);
-            std::memcpy(rgba.data(), mapped, bytes);
+        rgba.resize(static_cast<std::size_t>(newest->width) * newest->height);
+        const bool copied = copy_mapped(newest->buffer, bytes, rgba.data());
+        if (copied) {
             width = newest->width;
             height = newest->height;
         }
@@ -2005,7 +2016,7 @@ bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, s
                 wgpuBufferUnmap(c.buffer);
                 c.ready = c.busy = false;
             }
-        if (!mapped) newest = nullptr;
+        if (!copied) newest = nullptr;
     }
     Copy *slot = nullptr;
     for (Copy &c : g_copies)
@@ -2048,8 +2059,7 @@ bool display(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::ui
     width = src.width * g_scale;
     height = src.height * g_scale;
     rgba.resize(static_cast<std::size_t>(width) * height);
-    read_back(g_scratch, rgba.size() * 4, rgba.data());
-    return true;
+    return read_back(g_scratch, rgba.size() * 4, rgba.data());
 }
 
 }

@@ -187,10 +187,24 @@ int main() {
         std::memcpy(&value,memory.data()+ps2::gs::address32(0,2,x,40),4);
         check(value==pixel(63,40*128+x),"Nonzero-offset synchronous VRAM readback");
     }
+    unsigned failed_readback_cases = 0;
+    if (EM_ASM_INT({ return !!window.qaTestReadFailures; })) {
+        EM_ASM({ qaProbe.failNextRead = true; });
+        check(!ps2::gs::gpu::display(syncsrc, output, width, height), "Failed synchronous readback is rejected");
+        check(ps2::gs::gpu::display(syncsrc, output, width, height), "Synchronous readback recovers");
+        ++failed_readback_cases;
+        EM_ASM({ qaProbe.failNextRead = true; });
+        check(!ps2::gs::gpu::display_async(syncsrc, output, width, height), "Failed asynchronous readback is rejected");
+        check(ps2::gs::gpu::display_async(syncsrc, output, width, height), "Asynchronous readback recovers");
+        ++failed_readback_cases;
+        check(width == syncsrc.width * scale && height == syncsrc.height * scale, "Recovered readback dimensions");
+        for (std::uint32_t y = 0; y < height; ++y) for (std::uint32_t x = 0; x < width; ++x)
+            check(output[y * width + x] == pixel(64, (y / scale) * syncsrc.width + x / scale), "Recovered readback pixels");
+    }
     check_constant_alpha(scale);
     check_varying_color(scale);
     check_fade_and_modulation(scale);
     ps2::gs::gpu::wait_idle();
-    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,combinedFadeTint:true});},received,pixels,hash,scale,offset);
+    EM_ASM({window.qaProbe.result=({passed:true,frames:$0,pixels:$1,hash:$2>>>0,scale:$3,synchronous:true,nonzeroSourceOffset:$4,modulationCases:4,fadeCases:3,constantAlphaCases:1,varyingColorCases:3,failedReadbackCases:$5,combinedFadeTint:true});},received,pixels,hash,scale,offset,failed_readback_cases);
     return 0;
 }
