@@ -79,6 +79,30 @@ function setup(mode) {
 }
 
 (async () => {
+  for (const mode of ['native', 'missing', 'throw']) {
+    const worker = setup(mode);
+    worker.Module.pixelProducer = {};
+    for (let i = 0; i < 32; ++i) {
+      const pending = worker.yield();
+      assert.equal(worker.refreshes.size, 0, 'A split worker must not register a refresh fallback for its native slices');
+      if (mode === 'native') worker.tasks.shift().resolve();
+      else worker.deliver();
+      await pending;
+      assert.equal(worker.completed(), i + 1);
+    }
+    assert.equal(worker.Module.yieldResumesLeft, 0, 'Worker task completion must not enable synchronous refresh bursts');
+  }
+  const rejectedWorker = setup('native');
+  rejectedWorker.Module.pixelProducer = {};
+  const workerWait = rejectedWorker.yield();
+  rejectedWorker.tasks.shift().reject(new Error('Controlled worker task rejection'));
+  await flush();
+  assert.equal(rejectedWorker.refreshes.size, 0);
+  assert.equal(rejectedWorker.messages.length, 1, 'A rejected worker scheduling request must fall back to its message channel');
+  rejectedWorker.deliver();
+  await workerWait;
+  assert.equal(rejectedWorker.completed(), 1);
+
   const task = setup('native');
   const first = task.yield();
   assert.equal(task.tasks.length, 1);

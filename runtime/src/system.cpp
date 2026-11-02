@@ -652,7 +652,7 @@ EM_JS(void, ps2_browser_yield, (), {
                 Module.yieldResumesLeft = 8;
                 if (!recovered) Module.yieldTaskRetryUntil = performance.now() + 250;
             }
-            cancelAnimationFrame(refresh);
+            if (refresh !== null) cancelAnimationFrame(refresh);
             if (retry !== undefined) clearTimeout(retry);
             // Retire the waking callback before native work resumes. In
             // particular, the message handler must finish updating its FIFO.
@@ -662,7 +662,10 @@ EM_JS(void, ps2_browser_yield, (), {
         // paint. Resume at that refresh instead if it wins the race. Leave
         // its guarded callback queued so the later message cannot consume
         // a different yield's waiter or resume this one twice.
-        const refresh = requestAnimationFrame(finish);
+        // The split renderer does not share the page's input queue, and its
+        // presenter has a separate refresh loop. Avoid registering and then
+        // cancelling a refresh callback for every native work slice there.
+        const refresh = Module.pixelProducer ? null : requestAnimationFrame(finish);
         const post = () => {
             if (finished) return;
             if (!Module.yieldPort) {
