@@ -1,5 +1,11 @@
 # Release status
 
+Current source is not yet signed off for a new production release. The latest
+60 Hz desktop race checks still include late image submissions and missing PCM,
+including on unchanged control builds. The historical version 70 qualifications
+below apply to their recorded configurations. New private experiments do not
+replace the hosted runtime or remove those current failures.
+
 The `webgpu-v70` desktop release checkpoint is described in
 [the release notes](webgpu-v70.md). Subsequent WebGL work is separate; this
 checkpoint does not alter the qualified hosted WebGPU runtime.
@@ -1121,3 +1127,48 @@ The independent GPU fixture now checks every pixel of an integer-coordinate tria
 The line test initially used a boundary sample whose ideal rational red value is32; both the unchanged renderer and the color-mask prototype returned31. This is recorded as an unresolved precision question, not corrected by changing its expected value. The [GS manual](https://github.com/ninjadynamics/PS2Docs/blob/main/GS_Users_Manual.pdf) describes gradient-based DDA but does not establish the precise rounding of that sample. The non-boundary samples isolate constant-channel preservation without asserting unverified hardware precision.
 
 Three further runtime changes were rejected: CPU-computed constant-color flags showed no convincing repeated GPU gain; 8×8 raster tiles preserved600 images in each browser but failed both Chrome timing comparisons while the16×16 controls passed; and a private40/64ms audio-reserve comparison did not establish a release-safe improvement. Both64ms Chrome windows passed, but Firefox included a53.084fps window with a124.52ms gap and158,208 missing PCM frames. The test override was removed. Native GPU ordering,16×16 tiles and the existing reserve policy remain unchanged; hosted assets are unchanged.
+
+
+## Presentation load and rejected early waits
+
+An event-triggered diagnostic on the unchanged direct-readback runtime captured
+a 26.45 ms actual presentation-submission gap with three images already queued.
+The last upload took 0.435 ms. The page and presenter CPU samples were mostly
+idle during that interval. This event is evidence that an empty image queue is
+not sufficient to explain every late presentation; it does not identify the
+browser, driver or system cause of all longer stalls.
+
+Two private host experiments waited after publishing an image, before preparing
+more GS work. The first reused the existing wait function, which can also wait
+with two images queued. It passed all 600 successive reference image hashes in
+both browsers, but both 30-second Chrome candidate windows failed: one averaged
+58.802 submissions/s with a 49.29 ms maximum interval and 27,360 missing PCM frames;
+the other averaged 60.002 with a 26.00 ms maximum and no missing PCM. Both Firefox
+candidate windows passed. The balanced controls also varied, so no repeatable
+cross-browser improvement was established.
+
+The second experiment entered that early wait only when the existing safe
+capacity predicate confirmed a full three-image copy queue. It again matched
+all 600 successive images per browser. Both Chrome candidate windows failed:
+59.364/59.834 submissions/s, maximum intervals 50.11/33.67 ms, and 15,520/4,640
+missing PCM frames. One Firefox candidate window passed. Its repeat failed at
+startup with disc-read errors. The private server had exited with status 143
+and its port refused connections when inspected; there was no measured window,
+and the final control was not run. The failure and incomplete comparison are
+retained rather than classified as rendering or performance results.
+
+Neither experiment is selected. Their private startup overrides were removed,
+and the host source was restored exactly. Existing capacity-selection,
+reserve, FIFO, refresh-rate, priming and pause/recovery unit checks pass. The
+submission-limit 8 trial also showed no reliable improvement over 32; the
+existing submission limit and audio reserve remain unchanged. No hosted assets
+changed as a result of these experiments.
+
+
+A separate Chrome-only trial disabled the readback-progress helper without
+changing native bytes. An independent 600-image check matched the reference,
+and both 30-second candidate windows passed image/audio delivery. One control
+passed; the other averaged 59.801 submissions/s, with a 53.52 ms maximum gap and
+5,632 missing PCM frames. This single comparison does not isolate a cause amid the variable
+controls above. The current polling behavior remains selected, and Firefox's
+readback-progress workaround was not changed or disabled.
