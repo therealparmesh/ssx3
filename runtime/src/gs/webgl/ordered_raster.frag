@@ -26,6 +26,8 @@ uniform highp sampler2D mipTexture6;
 #endif
 
 uniform uvec4 settings[8];
+// Only guarded identity sprites use the preceding value of this pixel.
+uvec4 feedbackPixel = uvec4(0);
 #ifdef ORDERED_OPAQUE_HARDWARE
 flat in uint primitiveIndex;
 layout(location = 0) out vec4 outputColor;
@@ -109,7 +111,8 @@ vec4 sampleTexel(ivec2 at, int level) {
   at = ivec2(wrapCoord(at.x, 0, level), wrapCoord(at.y, 1, level));
   if (cfg(25) == 0u)
     return vec4(texelFetch(sourceTexture, at, 0));
-  vec4 value = normalizedMipTexel(at, level);
+  vec4 value = (cfg(29) & 4u) != 0u ? vec4(feedbackPixel) / 255.0
+                                        : normalizedMipTexel(at, level);
   if (cfg(25) >= 2u)
     value = texelFetch(
         paletteTexture,
@@ -430,6 +433,7 @@ void main() {
       if (zte && (ztst == 0u || (ztst == 2u && z < depth) ||
                   (ztst == 3u && z <= depth)))
         continue;
+      feedbackPixel = dst;
       ivec4 source = shade(i, v0, v1, v2, p, a, b, kind, vec3(w0, w1, w2));
       bool writeColor = true, writeAlpha = true, writeDepth = cfg(13) == 0u;
       if ((test & 1u) != 0u && !alphaPass(source.a, test)) {

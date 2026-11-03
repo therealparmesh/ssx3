@@ -763,7 +763,7 @@
 +            // Each blended primitive samples the preceding destination.
 +            auto currentTest=m_nReg[GS_REG_TEST_1+m_PrimitiveMode.nContext];
 +            bool ordered=(m_renderState.isValid && (m_renderState.shaderCaps.hasAlphaBlend || m_renderState.shaderCaps.hasPixelMask)) || (currentTest&(1ull<<14)) || ((currentTest&1) && (((currentTest>>1)&7)!=ALPHA_TEST_ALWAYS) && ((currentTest>>12)&3));
-+            if((m_renderState.isValid&&m_renderState.textureFeedback) || (ordered&&!IsOrderedTileEligible()&&PrimitiveOverlapsPending())) FlushVertexBuffer();
++            if((m_renderState.isValid&&m_renderState.textureFeedback && !(IsOrderedTileEligible() && IsPixelFeedbackBatch() && IsCurrentPixelFeedbackSprite())) || (ordered&&!IsOrderedTileEligible()&&PrimitiveOverlapsPending())) FlushVertexBuffer();
 +#endif
 +            // Fast skip if nothing relevant changed since last draw
  			bool needCtx = true;
@@ -1382,12 +1382,13 @@
  #include <unordered_map>
  #include "../GSHandler.h"
  #include "../GsDebuggerInterface.h"
-@@ -22,8 +25,28 @@
+@@ -22,8 +25,29 @@
  
  class CGSH_OpenGL : public CGSHandler, public CGsDebuggerInterface
  {
 + // Asset-free fixture exercises private attachment ownership transitions.
 + friend class WebglAliasFixture;
++ friend class WebglFramebufferSpriteFixture;
 +
 +protected:
 + // The caller owns rendering and has drained queued control operations.
@@ -1411,7 +1412,7 @@
  	virtual ~CGSH_OpenGL();
  
  	static void RegisterPreferences();
-@@ -60,13 +79,26 @@
+@@ -60,13 +84,28 @@
  	void InitializeImpl() override;
  	void ReleaseImpl() override;
  	void ResetImpl() override;
@@ -1428,6 +1429,8 @@
  
  private:
 + bool IsOrderedTileEligible()const;
++ bool IsCurrentPixelFeedbackSprite()const;
++ bool IsPixelFeedbackBatch()const;
 + bool RenderOrderedTileBatch();
 + void PrepareOrderedMipChain(uint64,uint64,uint64);
 + bool m_orderedRasterEnabled=false;
@@ -1438,7 +1441,7 @@
  	typedef CGsTextureCache<Framework::OpenGl::CTexture> TextureCache;
  	typedef uint64 ShaderCapsInt;
  
-@@ -98,6 +130,11 @@
+@@ -98,6 +137,11 @@
  		unsigned int alphaFailMethod : 2;
  		unsigned int alphaTestDepthTest_DepthFetch : 1;
  		unsigned int alphaTestDepthTestEqual_DepthFetch : 1;
@@ -1450,7 +1453,7 @@
  
  		bool isIndexedTextureSource() const
  		{
-@@ -111,6 +148,10 @@
+@@ -111,6 +155,10 @@
  		bool isValid;
  		bool isTextureStateValid;
  		bool isFramebufferStateValid;
@@ -1461,7 +1464,7 @@
  
  		//Register State
  		uint64 primReg;
-@@ -172,9 +213,12 @@
+@@ -172,9 +220,12 @@
  		uint32 alphaRef;
  		float alphaFix;
  		float fogColor[3];
@@ -1477,7 +1480,7 @@
  
  	enum
  	{
-@@ -228,6 +272,11 @@
+@@ -228,6 +279,11 @@
  	typedef std::shared_ptr<CPalette> PalettePtr;
  	typedef std::list<PalettePtr> PaletteList;
  
@@ -1489,7 +1492,7 @@
  	class CFramebuffer
  	{
  	public:
-@@ -247,6 +296,7 @@
+@@ -247,6 +303,7 @@
  		Framework::OpenGl::CRenderbuffer m_colorBufferMs;
  
  		CGsCachedArea m_cachedArea;
@@ -1497,7 +1500,7 @@
  	};
  	typedef std::shared_ptr<CFramebuffer> FramebufferPtr;
  	typedef std::vector<FramebufferPtr> FramebufferList;
-@@ -262,8 +312,25 @@
+@@ -262,8 +319,25 @@
  		uint32 m_height;
  		uint32 m_psm;
  		Framework::OpenGl::CRenderbuffer m_depthBuffer;
@@ -1523,7 +1526,7 @@
  	typedef std::vector<DepthbufferPtr> DepthbufferList;
  
  	struct TEXTURE_INFO
-@@ -345,10 +412,15 @@
+@@ -345,10 +419,15 @@
  	void Prim_Triangle();
  	void Prim_Sprite();
  
@@ -1540,7 +1543,7 @@
  	void DrawToDepth(unsigned int, uint64);
  
  	void SetRenderingContext(uint64);
-@@ -427,6 +499,7 @@
+@@ -427,6 +506,7 @@
  	Framework::OpenGl::CVertexArray m_copyToFbVertexArray;
  	GLint m_copyToFbSrcPositionUniform = -1;
  	GLint m_copyToFbSrcSizeUniform = -1;
@@ -1548,7 +1551,7 @@
  
  	TextureCache m_textureCache;
  	PaletteList m_paletteCache;
-@@ -470,7 +543,7 @@
+@@ -470,7 +550,7 @@
  	RENDERSTATE m_renderState;
  	uint32 m_validGlState = 0;
  	VERTEXPARAMS m_vertexParams;
@@ -1559,7 +1562,7 @@
  	VertexBuffer m_vertexBuffer;
 --- /dev/null
 +++ b/play/Source/gs/GSH_OpenGL/GSH_OpenGL_OrderedTile.inc
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,148 @@
 +bool CGSH_OpenGL::IsOrderedTileEligible()const
 +{
 + if(!m_orderedRasterEnabled||!m_renderState.isValid||m_fbScale!=1||m_multisampleEnabled)return false;
@@ -1578,8 +1581,19 @@
 + if(tex.nPsm!=PSMCT32&&tex.nPsm!=PSMCT24&&tex.nPsm!=PSMCT16&&tex.nPsm!=PSMT8&&tex.nPsm!=PSMT4&&tex.nPsm!=PSMT8H)return false;
 + if((tex.nPsm==PSMT8||tex.nPsm==PSMT4||tex.nPsm==PSMT8H)&&tex.nCPSM!=PSMCT32)return false;
 + for(const auto& framebuffer:m_framebuffers)if(framebuffer->m_texture==m_renderState.texture0Handle){
-+  if(framebuffer->m_framebuffer==m_renderState.framebufferHandle)return false;
-+  if(tex.nPsm!=PSMCT16||framebuffer->m_psm!=tex.nPsm||framebuffer->m_basePtr!=tex.GetBufPtr()||framebuffer->m_width!=tex.GetBufWidth()||tex.GetWidth()>framebuffer->m_width||tex.GetHeight()>framebuffer->m_height)return false;
++  // Self sampling is limited to a proved per-pixel identity mapping below.
++  const bool old16=tex.nPsm==PSMCT16 && framebuffer->m_psm==tex.nPsm && framebuffer->m_basePtr==tex.GetBufPtr() && framebuffer->m_width==tex.GetBufWidth() && tex.GetWidth()<=framebuffer->m_width && tex.GetHeight()<=framebuffer->m_height;
++  // Only UV sprites with nearest filtering and a direct32-bit source mapping.
++  // The batch guard below proves every covered sample is a texel-center1:1
++  // mapping inside both physical storage and the logical texture rectangle.
++  const bool nearestSprite=m_primitiveType==PRIM_SPRITE && prim.nUseUV &&
++    clamp.nWMS<=1 && clamp.nWMT<=1 &&
++    (tex.nPsm==PSMCT32 || tex.nPsm==PSMT8H) &&
++    (framebuffer->m_psm==PSMCT32 || framebuffer->m_psm==PSMCT24) &&
++    framebuffer->m_basePtr==tex.GetBufPtr() && framebuffer->m_width==tex.GetBufWidth() &&
++    !tex1.nMaxMip && m_renderState.texture0MinFilter==GL_NEAREST &&
++    m_renderState.texture0MagFilter==GL_NEAREST && !m_renderState.shaderCaps.texBilinearFilter;
++  if(!old16 && !nearestSprite)return false;
 + }
 + if(clamp.nWMS==2&&clamp.GetMaxU()>=tex.GetWidth())return false;
 + if(clamp.nWMT==2&&clamp.GetMaxV()>=tex.GetHeight())return false;
@@ -1594,6 +1608,32 @@
 + auto target=FindFramebuffer(frame);auto depth=FindDepthbuffer(zbuf,frame);
 + if(!target||!depth||target->m_framebuffer!=m_renderState.framebufferHandle)return false;
 + auto prim=make_convertible<PRMODE>(m_renderState.primReg);auto tex=make_convertible<TEX0>(m_renderState.tex0Reg);auto clamp=make_convertible<CLAMP>(m_renderState.clampReg);auto scissor=make_convertible<SCISSOR>(m_renderState.scissorReg);auto texa=make_convertible<TEXA>(m_renderState.texAReg);auto tex1=make_convertible<TEX1>(m_renderState.tex1Reg);
++ bool framebufferSprite=false,pixelFeedback=false;
++ if(prim.nTexture && tex.nPsm!=PSMCT16)
++  for(const auto& source:m_framebuffers)if(source->m_texture==m_renderState.texture0Handle){
++   framebufferSprite=true;
++   pixelFeedback=source->m_framebuffer==m_renderState.framebufferHandle;
++   if(pixelFeedback && !IsPixelFeedbackBatch())return false;
++   if(m_vertexBuffer.size()%6)return false;
++   auto axis=[](float pa,float pb,float ua,float ub,int clipLo,int clipHi,unsigned limit){
++    const double delta=double(pb)-pa,uvDelta=double(ub)-ua;
++    if(delta==0)return true; // Empty rectangle: no samples.
++    if(uvDelta!=delta && uvDelta!=-delta)return false;
++    const double step=uvDelta/delta,phase=double(ua)-step*pa;
++    if(phase-std::floor(phase)!=0.5)return false;
++    const int lo=std::max(clipLo,int(std::ceil(std::min(pa,pb))));
++    const int hi=std::min(clipHi,int(std::ceil(std::max(pa,pb)))-1);
++    if(lo>hi)return true;
++    const double a=phase+step*lo,b=phase+step*hi;
++    return std::min(a,b)>=0 && std::max(a,b)<limit;
++   };
++   for(size_t i=0;i<m_vertexBuffer.size();i+=6){
++    const auto& a=m_vertexBuffer[i];const auto& b=m_vertexBuffer[i+5];
++    if(!axis(a.x,b.x,a.s*tex.GetWidth(),b.s*tex.GetWidth(),std::max(0,int(scissor.scax0)),std::min(int(target->m_width)-1,int(scissor.scax1)),std::min(source->m_width,tex.GetWidth())) ||
++       !axis(a.y,b.y,a.t*tex.GetHeight(),b.t*tex.GetHeight(),std::max(0,int(scissor.scay0)),std::min(int(target->m_height)-1,int(scissor.scay1)),std::min(source->m_height,tex.GetHeight())))return false;
++   }
++  }
++
 + uint32 config[32]{};config[0]=uint64(prim);config[1]=m_renderState.testReg;config[2]=m_renderState.alphaReg;config[3]=m_renderState.alphaReg>>32;config[4]=frame.nMask;
 + config[5]=m_nReg[GS_REG_PABE]&1;config[6]=m_nReg[GS_REG_FBA_1+prim.nContext]&1;config[7]=m_nReg[GS_REG_COLCLAMP]&1;config[10]=m_nReg[GS_REG_SCANMSK]&3;
 + config[11]=scissor.scax0|(scissor.scax1<<16);config[12]=scissor.scay0|(scissor.scay1<<16);config[13]=zbuf.nMask;
@@ -1604,6 +1644,7 @@
 + if(m_renderState.mipReady){config[30]=uint32(m_renderState.tex1Reg)|0x80000000u;config[31]=uint32(m_renderState.tex1Reg>>32);}
 + config[26]=frame.nPsm;config[27]=1;config[28]=texa.nTA0|(texa.nTA1<<8)|(texa.nAEM<<16);config[29]=tex.nPsm==PSMCT16?1:tex.nPsm==PSMCT24?2:0;
 + if(prim.nTexture&&tex.nPsm==PSMCT16)for(const auto& source:m_framebuffers)if(source->m_texture==m_renderState.texture0Handle)config[29]=3;
++ if(pixelFeedback)config[29]|=4;
 + std::vector<PRIM_VERTEX> packed;
 + if(m_primitiveType==PRIM_LINE||m_primitiveType==PRIM_LINESTRIP){
 +  if(m_vertexBuffer.size()%2)return false;
@@ -1621,12 +1662,53 @@
 +   Module.ps2OrderedRaster.render(({targetFramebuffer:GL.framebuffers[$0],colorTexture:GL.textures[$1],depthRenderbuffer:GL.renderbuffers[$2],width:$3,height:$4,settings:HEAPU32.slice($5>>2,($5>>2)+32),vertexWords:HEAPU32.subarray($6>>2,($6+$7)>>2),texture:GL.textures[$8],palette:GL.textures[$9],mipTextures:Array.from(HEAPU32.subarray($11>>>2,($11>>>2)+6),id=>GL.textures[id])}));
 +   if($10)Module.ps2OrderedRaster.stats.levelZeroLodBatches=(Module.ps2OrderedRaster.stats.levelZeroLodBatches||0)+1;
 +   if($12)Module.ps2OrderedRaster.stats.mipBatches=(Module.ps2OrderedRaster.stats.mipBatches||0)+1;
++   if($13)Module.ps2OrderedRaster.stats.framebufferSpriteBatches=(Module.ps2OrderedRaster.stats.framebufferSpriteBatches||0)+1;
++   if($14)Module.ps2OrderedRaster.stats.pixelFeedbackBatches=(Module.ps2OrderedRaster.stats.pixelFeedbackBatches||0)+1;
 +   return 1;
 +  }catch(error){Module.orderedRasterError=error.message;console.error(error);return 0;}
-+ },GLuint(target->m_framebuffer),GLuint(target->m_texture),GLuint(depth->m_depthBuffer),target->m_width,target->m_height,config,packed.data(),packed.size()*sizeof(PRIM_VERTEX),m_renderState.texture0Handle,m_renderState.texture1Handle,prim.nTexture && tex1.nMaxMip!=0 && tex1.nMinFilter>=2 && !m_renderState.mipReady,m_renderState.mipTextures.data(),m_renderState.mipReady);
++ },GLuint(target->m_framebuffer),GLuint(target->m_texture),GLuint(depth->m_depthBuffer),target->m_width,target->m_height,config,packed.data(),packed.size()*sizeof(PRIM_VERTEX),m_renderState.texture0Handle,m_renderState.texture1Handle,prim.nTexture && tex1.nMaxMip!=0 && tex1.nMinFilter>=2 && !m_renderState.mipReady,m_renderState.mipTextures.data(),m_renderState.mipReady,framebufferSprite,pixelFeedback);
 + if(!ok)throw std::runtime_error("Ordered GPU bridge failed");
 + const GLenum depthFunctions[]={GL_NEVER,GL_ALWAYS,GL_GEQUAL,GL_GREATER};glDepthFunc(depthFunctions[(m_renderState.testReg>>17)&3]);
 + m_validGlState=0;
++ return true;
++}
++
++// Every queued sprite must read exactly its own destination pixel. This is
++// checked again at submission, independently of incoming-primitive batching.
++bool CGSH_OpenGL::IsPixelFeedbackBatch()const
++{
++ if(m_primitiveType!=PRIM_SPRITE || m_vertexBuffer.size()%6)return false;
++ auto tex=make_convertible<TEX0>(m_renderState.tex0Reg);
++ auto clamp=make_convertible<CLAMP>(m_renderState.clampReg);
++ if(clamp.nWMS>1 || clamp.nWMT>1)return false;
++ for(size_t i=0;i<m_vertexBuffer.size();i+=6)for(size_t j:{size_t(0),size_t(5)}){
++  const auto& v=m_vertexBuffer[i+j];
++  if(v.s*tex.GetWidth()-v.x!=0.5f || v.t*tex.GetHeight()-v.y!=0.5f)return false;
++ }
++ return true;
++}
++// Inspect guest latches before suppressing the native per-primitive feedback
++// flush. An unsafe incoming sprite or a queued unsafe sprite still flushes.
++bool CGSH_OpenGL::IsCurrentPixelFeedbackSprite()const
++{
++ auto prim=m_PrimitiveMode;const unsigned ctx=prim.nContext;
++ if((uint64(prim)&7)!=PRIM_SPRITE || !prim.nTexture || !prim.nUseUV)return false;
++ auto tex=make_convertible<TEX0>(m_nReg[GS_REG_TEX0_1+ctx]);
++ auto frame=make_convertible<FRAME>(m_nReg[GS_REG_FRAME_1+ctx]);
++ auto tex1=make_convertible<TEX1>(m_nReg[GS_REG_TEX1_1+ctx]);
++ auto offset=make_convertible<XYOFFSET>(m_nReg[GS_REG_XYOFFSET_1+ctx]);
++ auto clamp=make_convertible<CLAMP>(m_nReg[GS_REG_CLAMP_1+ctx]);
++ if(clamp.nWMS>1 || clamp.nWMT>1)return false;
++ if((tex.nPsm!=PSMCT32 && tex.nPsm!=PSMT8H) ||
++    tex.GetBufPtr()!=frame.GetBasePtr() || tex.GetBufWidth()!=frame.GetWidth() ||
++    tex1.nMaxMip || tex1.nMinFilter!=MIN_FILTER_NEAREST || tex1.nMagFilter!=MAG_FILTER_NEAREST)return false;
++ for(unsigned i=0;i<2;i++){
++  const auto pos=make_convertible<XYZ>(m_VtxBuffer[i].position);
++  const auto uv=make_convertible<UV>(m_VtxBuffer[i].uv);
++  const float x=pos.GetX()-float(offset.nOffsetX)/16,y=pos.GetY()-float(offset.nOffsetY)/16;
++  if(uv.GetU()-x!=0.5f || uv.GetV()-y!=0.5f || x<0 || y<0 ||
++     x>std::min(tex.GetWidth(),frame.GetWidth()) || y>std::min(tex.GetHeight(),unsigned(m_renderState.viewportHeight)))return false;
++ }
 + return true;
 +}
 --- /dev/null

@@ -131,8 +131,9 @@ The uniform block contains eight `uvec4` values. Its word layout is:
 | 22–24 | Texture width, height, maximum depth value |
 | 25 | Source adapter: integer RGBA, normalized RGBA, indexed8, indexed4, alpha-indexed8 |
 | 26–27 | Framebuffer PSM, depth PSM low format bits |
-| 28–29 | Packed TEXA (TA0, TA1, AEM), source/palette expansion format |
-| 30–31 | Reserved |
+| 28 | Packed TEXA (TA0, TA1, AEM) |
+| 29 | Source/palette expansion format in bits 0–1; bit 2 selects proved pixel-local feedback |
+| 30–31 | Opt-in TEX1 low flags and high/K word; see the mip fixture |
 
 Integration still needs real GS command batching, texture and palette lifetimes,
 physical VRAM alias coherence, presentation and context-loss recovery. The
@@ -142,6 +143,25 @@ dithering, mip LOD or general framebuffer feedback. Region coordinates
 in these tests stay within the supplied texture storage. Full-game fidelity,
 sustained performance, audio, saves, controls and physical phone testing remain
 separate release requirements.
+
+The native bridge additionally supports a guarded framebuffer-source subset:
+nearest-filtered UV sprites mapping one destination pixel to one source texel
+center. Both logical and physical source bounds are checked after clipping.
+Region clamp/repeat, scaling, STQ and other unsupported mappings retain the
+native fallback. For self-feedback, every source coordinate must identify the
+same destination pixel. The host proves both incoming and queued sprites before
+suppressing native feedback flushes, and proves the complete batch again before
+submission. Word 29 bit 2 tells the kernel to decode its current local pixel;
+the bridge binds a dummy source texture to avoid a graphics API feedback loop.
+Overlapping sprites observe preceding color and alpha changes in submission
+order. General cross-pixel framebuffer feedback still requires native snapshots.
+
+`framebuffer.cpp` in the native backend fixture checks 46 complete 64×64 images,
+14 unsafe-route rejections and incoming/queued identity guards. It includes
+GPU-owned source pixels that differ from GS RAM, palette-alpha decoding,
+flips/clipping, sequential overlapping feedback, blending and preserved alpha.
+Controls using stale initial pixels or the wrong index channel must fail the
+pixel comparison without API errors. Run it through `test_webgl_backend.cjs`.
 
 ## Runtime state adapter
 
@@ -196,12 +216,12 @@ NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.c
 NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_webgl_ordered.cjs firefox bridge
 ```
 
-This mode exercises **1,062 cases per browser**, comparing the actual resolved
+This mode exercises **1,504 cases per browser**, comparing the actual resolved
 color and depth with the CPU renderer and the independent constant-line image.
-It also checks both negative controls.
+It also checks five shader negative controls and 20 allocation/retry cases.
 The bridge accepts the supported 32/24/16-bit color views and a 24-bit-or-smaller
 depth domain; D32F cannot reconstruct all 32-bit integer depth values. The raw integer kernel
-matrix retains its 1,094-case coverage. Unsupported bridge cases are explicitly
+matrix retains its 1,536-case coverage. Unsupported bridge cases are explicitly
 listed as skipped, rather than counted as passes. No tests are removed from the
 raw kernel matrix.
 

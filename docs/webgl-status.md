@@ -2,6 +2,48 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Pixel-local framebuffer feedback (2026-11-02)
+
+Nearest-filtered UV sprites can now batch supported framebuffer-source reads.
+For self-feedback, incoming and queued geometry must prove a one-to-one mapping
+to the same destination pixel at texel centers. Logical/physical bounds and the
+complete batch are checked again before submission. Region clamp/repeat and
+unsupported mappings retain the native snapshot path. The integer kernel reads
+its current local color/alpha, so overlapping sprites observe earlier writes
+without binding the target as a source sampler. This replaces the two groups of
+16 native feedback draws with two ordered batches per field in the fixed race
+window; the separate filtered display copy remains native.
+
+Both browsers pass 46 independent full-image cases and 14 unsafe-route
+rejections, including palette indices, clipping, flips, overlapping updates,
+blend equations and alpha masks. Stale-source and wrong-channel controls fail
+through pixels without API errors. Fresh pinned backend builds pass the complete
+native/hybrid fixture suite. The existing 1,504 bridge, 1,536 raw shader, 3,360 mip
+bridge, 13,680 sampler and 2,664 coverage matrices also pass with their controls.
+Both browsers pass 28 keyboard/simulated-standard-gamepad checks, the copied and
+direct runtime probes, and 600 reference images at each of two saved-state
+boundaries. Source compilation/relinking with the unchanged game/runtime objects
+reproduces all tested player and runtime-probe assets byte for byte. The game
+native Wasm SHA-256 is
+`1dd324f07c67531dd764eddf77c527350d88b68e015f028c4dca37b8d7224b0d`.
+
+Eight accepted unmodified-driver performance windows use two runs per variant
+and browser, with reversed order between browsers. Three other attempts are
+retained but excluded by the preregistered external-CPU-load rule.
+
+| Browser | Preceding source, images/s | Feedback batching, images/s |
+| --- | ---: | ---: |
+| Firefox 158 | 47.37 | 48.99 |
+| Chromium 156 | 59.60 | 59.80 |
+
+Firefox throughput improves 3.42%; Chromium stays near its refresh limit.
+Maximum candidate intervals remain 51.54 ms and 31.90 ms respectively. Firefox
+still underruns audio, and one Chromium candidate window misses 256 PCM frames.
+These measurements fail the release pacing/audio requirements. The separate
+immutable texture cache and its retained rendering failure remain unselected;
+this change does not combine or qualify that cache. Main and the hosted WebGPU
+release are unchanged.
+
 ## Channel-mask coverage and performance decisions (2026-11-02)
 
 The source fixture now runs 1,504 bridge cases and 1,536 raw-shader cases per

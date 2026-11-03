@@ -415,6 +415,16 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
       throw Error("Invalid ordered raster packet");
     if (!targetFramebuffer || !colorTexture || !depthRenderbuffer)
       throw Error("Missing ordered raster target");
+    const pixelFeedback = (settings[29] & 4) !== 0;
+    if (pixelFeedback) {
+      if ((settings[0] & 7) !== 6 || !(settings[0] & 256) ||
+          settings[15] || ![1,4].includes(settings[25]) ||
+          (settings[30] & 0x80000000))
+        throw Error("Unsupported pixel feedback packet");
+      // Never bind the destination attachment as a source sampler. The host
+      // proves identity UVs; the ordered kernel reads its current local pixel.
+      texture = this.dummyNormalized;
+    }
     if (settings[0] & 16) {
       if (settings[25] === 0 && !integerTexture)
         throw Error("Missing integer source texture");
