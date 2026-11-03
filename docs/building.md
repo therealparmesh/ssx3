@@ -191,6 +191,21 @@ with failure. Those files contain tightly packed RGBA bytes at the dimensions
 recorded in the result. Missing overlap also fails. References and raw images
 remain private inputs and outputs; do not commit them.
 
+Mismatch images are streamed individually to `image-N-mismatch.rgba` in the
+output directory. `result.json` contains metadata and verified file hashes,
+so hundreds of full-resolution mismatches do not exceed the browser JSON
+string limit. A write or hash validation failure rejects the run. The
+asset-free transport regression can be run independently:
+
+```sh
+NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_browser_oracle_capture.cjs chrome
+NODE_PATH=/tmp/ssx3-browser-tools/node_modules node scripts/test_browser_oracle_capture.cjs firefox
+```
+
+This transfers over 512 MiB of generated pixels per browser, verifies every
+file and deletes the generated pixels after success. Failed runs retain their
+captures and error report. It needs no game, save or WebGL context.
+
 If a run fails before writing `result.json`, the driver retains `failure.json`
 with the current native frame, pause/visibility/audio state and collected browser
 errors. It also attempts `failure.png` before closing the browser; probe or

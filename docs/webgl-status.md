@@ -2,6 +2,25 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Preserve large replay failures (2026-11-03)
+
+The fixed-state browser driver now sends each mismatching native image to disk
+individually and retains only its hash, dimensions and file name in the replay
+result. The previous driver aggregated all base64 images into one browser JSON
+string; a full-window mismatch reached the string-size limit and lost the image
+export. Capture errors now fail explicitly. File byte counts and SHA-256 hashes
+are checked before acknowledging the capture and again before saving the final
+result. The existing reference comparison, image-count and source-clock gates
+remain unchanged. Performance runs do not install this transport.
+
+The asset-free transport regression sends 600 independently acknowledged
+512×448 RGBA captures per browser, exceeding 512 MiB of raw pixels and 700 MiB
+of aggregate base64. It verifies all saved files and the small final metadata
+result, rejects truncated bytes, wrong hashes and duplicate sequences, and
+checks disk-write failure followed by a successful retry. These checks test
+failure evidence preservation, not game fidelity or performance. Renderer,
+input, audio and game assets are unchanged.
+
 ## Startup allocation recovery (2026-11-03)
 
 The bridge now rejects null vertex-array, sampler, program and shader allocations

@@ -3,6 +3,8 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const assert = require('node:assert/strict');
 const p = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
 const sourceClock = require('./browser_source_clock.js');
+const {installOracleCapture} = require('./browser_oracle_capture.cjs');
+const {createHash} = require('node:crypto');
 const kind = process.argv[2] || 'firefox', mode = process.argv[3] || 'performance';
 assert(['firefox', 'chrome'].includes(kind));
 assert(['performance', 'oracle'].includes(mode));
@@ -33,13 +35,14 @@ url.searchParams.set('state', process.env.SSX3_TEST_STATE_URL);
 url.searchParams.set('nocard', '');
 const out = process.env.SSX3_TEST_OUTPUT || fs.mkdtempSync(path.join(os.tmpdir(), 'ssx3-fixed-state-'));
 fs.mkdirSync(out, {recursive:true});
-let browser, page;
+let browser, page, oracleCapture;
 const errors=[], warnings=[];
 (async()=>{
   browser=await p.launch({...(kind==='firefox'?{browser:'firefox'}:{}),
     executablePath:kind==='firefox' ? process.env.SSX3_FIREFOX_BIN || '/usr/bin/firefox' : process.env.SSX3_CHROMIUM_BIN || '/usr/bin/chromium',
     headless:false, defaultViewport:{width:1280,height:800,deviceScaleFactor:1}});
   page=await browser.newPage();
+  if(mode==='oracle')oracleCapture=await installOracleCapture(page,out);
   if(stateGuard)await page.evaluateOnNewDocument(fs.readFileSync(path.join(__dirname,'../tests/webgl_backend/state_guard.js'),'utf8'));
   page.on('pageerror',error=>errors.push(error.message));
   page.on('console',message=>{if(message.type()==='error')errors.push(message.text());if(['warn','warning'].includes(message.type()))warnings.push(message.text())});
@@ -88,15 +91,16 @@ const errors=[], warnings=[];
         if(nativeFrame>=first&&nativeFrame<last&&imageSequence%oracleEvery===0){
           const image=direct?ssx3ReadWebglFrame(Module.ps2WebglCanvas.getContext('webgl2'),frame):frame.image;
           const record={imageSequence,nativeFrame,width:image.width,height:image.height};Module.qaImages.push(record);
-          Module.qaHashJobs.push(crypto.subtle.digest('SHA-256',image.data).then(bytes=>{
-            record.sha256=Array.from(new Uint8Array(bytes),n=>n.toString(16).padStart(2,'0')).join('');
+          Module.qaHashJobs.push(crypto.subtle.digest('SHA-256',image.data).then(async bytes=>{
+            const sha256=Array.from(new Uint8Array(bytes),n=>n.toString(16).padStart(2,'0')).join('');
             const expected=qaExpectedImages[imageSequence];
-            if(expected && (expected.sha256!==record.sha256 || expected.width!==record.width || expected.height!==record.height)) {
-              let binary='';
-              for(let offset=0;offset<image.data.length;offset+=16384)
-                binary+=String.fromCharCode(...image.data.subarray(offset,offset+16384));
-              Module.qaOracleDifferences.push({...record,expectedSha256:expected.sha256,base64:btoa(binary)});
+            if(expected && (expected.sha256!==sha256 || expected.width!==record.width || expected.height!==record.height)) {
+              const saved=await ssx3SaveOracleMismatch({...record,sha256},expected.sha256,image.data);
+              Module.qaOracleDifferences.push(saved);
             }
+            // A completed hash also acknowledges any mismatch file write.
+            record.sha256=sha256;
+          }).catch(error=>{Module.qaOracleCaptureError=error.message;
           }));
         }
         return push.call(this,frame);
@@ -114,24 +118,26 @@ const errors=[], warnings=[];
   assert(metric.images>0&&metric.av.frames>0,'Observe actual images and audio worklet output');
   await page.evaluate(()=>document.getElementById('pause').click());
   await page.waitForFunction(()=>Module._ps2web_pause_ready(),{timeout:30000});
-  await page.waitForFunction(()=>Module.qaImages.every(image=>image.sha256),{timeout:30000});
+  await page.waitForFunction(()=>Module.qaOracleCaptureError||Module.qaImages.every(image=>image.sha256),{timeout:30000});
+  assert.equal(await page.evaluate(()=>Module.qaOracleCaptureError||null),null,'Oracle capture failed');
   const observation=JSON.parse(await page.evaluate(()=>JSON.stringify({pixelHashes:Module.qaImages,oracleDifferences:Module.qaOracleDifferences,failed:!!Module.failed,backend:Module.ps2GpuBackend,glStateGuard:globalThis.ssx3GlStateGuard?.snapshot()||null})));
   assert(!observation.failed);assert.deepEqual(errors,[]);assert.deepEqual(warnings,[]);
   if(mode==='oracle')assert(observation.pixelHashes.length>0,'Pixel oracle must observe native images');
   await page.screenshot({path:path.join(out,'window-end.png')});
   for(const difference of observation.oracleDifferences) {
-    const file='image-'+difference.imageSequence+'-mismatch.rgba';
-    const bytes=Buffer.from(difference.base64,'base64');
-    assert.equal(bytes.length,difference.width*difference.height*4, 'Incomplete mismatch capture');
-    fs.writeFileSync(path.join(out,file),bytes);
-    delete difference.base64;
-    difference.file=file;
+    assert.equal(difference.file,'image-'+difference.imageSequence+'-mismatch.rgba');
+    const bytes=fs.readFileSync(path.join(out,difference.file));
+    assert.equal(bytes.length,difference.width*difference.height*4,'Incomplete mismatch capture');
+    assert.equal(createHash('sha256').update(bytes).digest('hex'),difference.sha256,
+      'Saved mismatch differs from observed image');
   }
+  if(oracleCapture)assert.equal(oracleCapture.stats().images,observation.oracleDifferences.length,
+    'Every mismatch must have a saved image');
   const actual=new Map(observation.pixelHashes.map(frame=>[frame.imageSequence,frame]));
   const shared=reference ? reference.filter(frame=>actual.has(frame.imageSequence)).length : 0;
   const comparison=reference ? {referenceImages:reference.length,sharedImages:shared,mismatches:observation.oracleDifferences.length} : null;
   const result={mode,oracleEvery,comparison,presentation:direct?'direct':'copy',browser:await browser.version(),explicitGpuOverrides:false,webgpuWithheld:true,
-    origin:url.origin,playerPath:url.pathname,viewport:{width:1280,height:800,dpr:1},metric,observation,errors,warnings,
+    origin:url.origin,playerPath:url.pathname,viewport:{width:1280,height:800,dpr:1},metric,observation,oracleCapture:oracleCapture?.stats()??null,errors,warnings,
     limits:'Measurement only. Oracle hashing perturbs timing; compare performance runs separately. Game/state data remain private. Not a complete-race, display scanout, physical audio or release qualification.'};
   fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');
   // Preserve complete images and clock bounds before rejecting a media failure.
@@ -162,6 +168,7 @@ const errors=[], warnings=[];
         nativeFrame:globalThis.Module?._ps2web_frames?.(),
         failed:!!globalThis.Module?.failed, paused:globalThis.Module?.paused,
         audioState:typeof audio==='undefined'?null:(audio?.state??null),
+        oracleCaptureError:globalThis.Module?.qaOracleCaptureError??null,
         startText:document.getElementById('start')?.textContent,
         pauseText:document.getElementById('pause')?.textContent,
       }));
@@ -173,4 +180,4 @@ const errors=[], warnings=[];
       error:error.message, state, probeError, screenshotError, errors, warnings,
     },null,2)+'\n');
   }
-}).finally(async()=>{if(browser)await browser.close()});
+}).finally(async()=>{if(oracleCapture)await oracleCapture.drain();if(browser)await browser.close()});

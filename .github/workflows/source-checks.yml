@@ -63,6 +63,8 @@ jobs:
           node scripts/test_readback_progress.cjs
           node --check scripts/browser_fixed_frame_metrics.js
           node --check scripts/test_browser_fixed_state.cjs
+          node --check scripts/browser_oracle_capture.cjs
+          node --check scripts/test_browser_oracle_capture.cjs
           node --check scripts/test_webgl_state_guard.cjs
           node --check tests/webgl_backend/state_guard.js
           node --check tests/webgl_backend/state_guard_fixture.js
