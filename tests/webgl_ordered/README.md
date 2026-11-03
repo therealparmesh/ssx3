@@ -373,3 +373,16 @@ intact. A retry at the old size must use its original resources; a clean retry a
 the new size must complete and evict only the oldest entry when necessary.
 These are controlled helper-level failures, not whole-game out-of-memory or
 context-loss recovery certification.
+
+## Startup allocation recovery
+
+Run `node scripts/test_webgl_startup_allocation.cjs chromium` (or `firefox`)
+against the built fixture using `SSX3_WEBGL_ORIGIN`. The eight cases inject null
+program, vertex/fragment shader, vertex-array and sampler allocations, failed
+vertex/fragment compilation and failed program linking. Every case requires
+constructor failure, cleanup of owned resources, unchanged host state/resources
+and pixels, no GL errors, and a successful fresh constructor followed by an
+independent 256-pixel local-feedback image. Rendering must create no programs.
+The shader/program faults target the final startup program to exercise cleanup
+of the seven preceding programs. These tests cover bounded constructor recovery,
+not whole-game WebGL context restoration or actual device memory exhaustion.

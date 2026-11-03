@@ -29,7 +29,11 @@ class Ps2OrderedRaster {
     };
     try {
       this.vao = gl.createVertexArray();
+      if (!this.vao)
+        throw Error("Unable to allocate ordered raster vertex array");
       this.sampler = gl.createSampler();
+      if (!this.sampler)
+        throw Error("Unable to allocate ordered raster sampler");
       gl.samplerParameteri(this.sampler, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.samplerParameteri(this.sampler, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.samplerParameteri(this.sampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -111,6 +115,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
   program(vertexSource, fragmentSource) {
     const gl = this.gl;
     const program = gl.createProgram();
+    if (!program) throw Error("Unable to allocate ordered raster program");
     const shaders = [];
     try {
       for (const [type, source] of [
@@ -118,6 +123,7 @@ void main(){ivec2 p=ivec2(gl_FragCoord.xy);colorOutput=vec4(texelFetch(colorSour
         [gl.FRAGMENT_SHADER, fragmentSource],
       ]) {
         const shader = gl.createShader(type);
+        if (!shader) throw Error("Unable to allocate ordered raster shader");
         shaders.push(shader);
         gl.shaderSource(shader, source);
         gl.compileShader(shader);

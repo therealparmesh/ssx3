@@ -2,6 +2,40 @@
 
 This branch is separate from the tagged WebGPU desktop release. It is not a production fallback. The retained results below fail the gameplay performance gate.
 
+## Startup allocation recovery (2026-11-03)
+
+The bridge now rejects null vertex-array, sampler, program and shader allocations
+before using those handles. Previously, a null vertex-array could publish a
+renderer with incomplete startup resources. Other null handles reached GL calls and failed through WebIDL type
+validation instead of an explicit allocation error. Constructor failure cleans
+up previously allocated resources and leaves host-owned objects untouched.
+Shader/program failures retain their existing cleanup and now report explicit
+allocation errors. Successful startup follows the same draw paths.
+
+Chromium 156 and Firefox 158 pass eight injected constructor failure/retry cases
+each, including failure of the fragment shader after allocation of the vertex
+shader. Each checks all resource counts, borrowed state, unchanged target pixels,
+a fresh constructor, and 256 independently expected local-feedback pixels. The
+preceding selected source fails the vertex-array publication control; its isolated
+sampler control already recovered through a type error. These bounded checks do
+not qualify real memory exhaustion or whole-game context recovery.
+
+The source-built player/probe retain the selected native Wasm. Both browsers
+pass copied/direct runtime probes and all 28 keyboard/simulated-standard-gamepad
+checks. All 600 game images per browser match the reference with valid source
+clocks and no browser errors or warnings. This startup fix changes no draw paths
+and makes no new gameplay performance claim.
+
+Three further private performance trials remain unselected. Separating feedback
+shaders regresses Firefox throughput slightly; exact scoped hardware scissoring
+has no meaningful gain. Three-vertex conservative triangle envelopes pass all
+renderer matrices, 2,048 independent full-target coverage cases (15,614,976 pixels)
+and 600 game reference images per browser, but their eight accepted quiet timing
+windows show only a 0.55% Firefox gain. Its maximum interval increases to 59 ms,
+and Chromium has an audio underrun. All attempted timing windows and negative
+controls are retained privately. None of these changes reaches the production
+pacing/audio gate; the selected renderer geometry and shaders remain unchanged.
+
 ## Pixel-local framebuffer feedback (2026-11-02)
 
 Nearest-filtered UV sprites can now batch supported framebuffer-source reads.
